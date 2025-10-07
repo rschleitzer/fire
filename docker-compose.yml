@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: fire-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fhir
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fire-network
+
+  # Fire FHIR Server
+  fire:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fire-fhir-server
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/fhir
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 3000
+      DB_MAX_CONNECTIONS: 10
+      DB_MIN_CONNECTIONS: 2
+      DB_CONNECTION_TIMEOUT_SECS: 30
+      DB_IDLE_TIMEOUT_SECS: 600
+      RUST_LOG: fire=info,tower_http=info,sqlx=warn
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - fire-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  fire-network:
+    driver: bridge
