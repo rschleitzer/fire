@@ -276,9 +276,38 @@ cargo build
 ```
 
 ### Run tests
+
+Tests require a test database. Create one first:
+```bash
+createdb fhir_test
+```
+
+Set the test database URL (optional, defaults to fhir_test):
+```bash
+export DATABASE_URL=postgres://postgres:postgres@localhost/fhir_test
+```
+
+Run all tests:
 ```bash
 cargo test
 ```
+
+Run specific test suite:
+```bash
+cargo test patient_tests
+cargo test observation_tests
+```
+
+Run tests with output:
+```bash
+cargo test -- --nocapture
+```
+
+The test suite includes:
+- **Unit tests**: Validation, search parameter extraction
+- **Integration tests**: CRUD operations for Patient and Observation
+- **Repository tests**: Database operations, versioning, history
+- **Search tests**: Parameter filtering, sorting, pagination
 
 ### Check code
 ```bash
@@ -364,7 +393,7 @@ fire/
 - `_revinclude` parameter for reverse reference inclusion
 - Observation:patient and Observation:subject reverse includes
 
-✅ **Phase 6 Complete** - Production Readiness
+✅ **Phase 6 Complete** - Production Readiness & Testing
 - Comprehensive structured logging with tracing
 - Request ID tracking (X-Request-ID header)
 - Request/response timing and status logging
@@ -375,6 +404,11 @@ fire/
 - FHIR capability statement endpoint (metadata)
 - Configurable database connection pooling
 - Production-grade configuration management
+- Comprehensive test suite:
+  - Unit tests for validation and search parameters
+  - Integration tests for CRUD operations
+  - Repository tests for database operations
+  - Search and history tests
 
 ## Production Features
 
