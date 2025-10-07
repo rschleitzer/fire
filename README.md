@@ -69,10 +69,15 @@ The server will start on `http://127.0.0.1:3000`
 
 - `POST /fhir/Observation` - Create observation
 - `GET /fhir/Observation/:id` - Read observation
+- `PUT /fhir/Observation/:id` - Update observation
 - `DELETE /fhir/Observation/:id` - Delete observation (soft delete)
+- `GET /fhir/Observation?status=final&patient=123` - Search observations
+- `GET /fhir/Observation/:id/_history` - Get observation history
+- `GET /fhir/Observation/:id/_history/:version_id` - Get specific version
 
 ### Search Parameters
 
+#### Patient Search
 - `name` - Search by family or given name (partial match)
 - `family` - Search by family name
 - `given` - Search by given name
@@ -80,10 +85,21 @@ The server will start on `http://127.0.0.1:3000`
 - `birthdate` - Search by birthdate (supports prefixes: eq, ne, gt, lt, ge, le)
 - `gender` - Search by gender
 - `active` - Search by active status (true/false)
+
+#### Observation Search
+- `status` - Search by status (e.g., final, preliminary)
+- `code` - Search by observation code
+- `category` - Search by category code
+- `patient` - Search by patient ID (e.g., patient=123 for Patient/123)
+- `subject` - Search by subject reference (e.g., subject=Patient/123)
+- `date` - Search by effective date (supports prefixes: eq, ne, gt, lt, ge, le)
+
+#### Common Parameters
 - `_count` - Page size (default: 50, max: 1000)
 - `_offset` - Pagination offset
 - `_sort` - Sort results (comma-separated, prefix with `-` for descending)
 - `_total` - Include total count (`accurate`)
+- `_include` - Include referenced resources (e.g., `Observation:patient`, `Observation:subject`)
 
 ### Search Modifiers
 
@@ -123,6 +139,28 @@ curl "http://localhost:3000/fhir/Patient?family:exact=Smith&_sort=-birthdate,giv
 Check for missing family name:
 ```bash
 curl "http://localhost:3000/fhir/Patient?family:missing=true"
+```
+
+### Search Observations
+
+Basic search:
+```bash
+curl "http://localhost:3000/fhir/Observation?status=final&patient=123"
+```
+
+Search by date range:
+```bash
+curl "http://localhost:3000/fhir/Observation?date=gt2024-01-01&date=lt2024-12-31&_sort=-date"
+```
+
+Search by code:
+```bash
+curl "http://localhost:3000/fhir/Observation?code=8867-4&_total=accurate"
+```
+
+Search with included Patient resources:
+```bash
+curl "http://localhost:3000/fhir/Observation?patient=123&_include=Observation:patient"
 ```
 
 ### Create Observation
