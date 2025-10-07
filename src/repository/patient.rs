@@ -21,12 +21,16 @@ impl PatientRepository {
 
     /// Create a new patient resource (version 1)
     pub async fn create(&self, content: Value) -> Result<Patient> {
+        tracing::debug!("Creating new patient resource");
+
         // Validate resource
         validate_patient(&content)?;
 
         let id = Uuid::new_v4();
         let version_id = 1;
         let last_updated = Utc::now();
+
+        tracing::info!(patient_id = %id, "Creating patient");
 
         // Extract search parameters
         let params = extract_patient_search_params(&content);

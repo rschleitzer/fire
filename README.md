@@ -344,10 +344,57 @@ fire/
 - `_revinclude` parameter for reverse reference inclusion
 - Observation:patient and Observation:subject reverse includes
 
+✅ **Phase 6 Complete** - Production Readiness
+- Comprehensive structured logging with tracing
+- Request ID tracking (X-Request-ID header)
+- Request/response timing and status logging
+- Enhanced error handling with detailed logging
+- FHIR OperationOutcome responses for all errors
+- Configurable log levels via environment variables
+
+## Production Features
+
+### Logging
+
+The server uses structured logging with the `tracing` framework:
+
+- **Request tracking**: Each request gets a unique ID (X-Request-ID header)
+- **Structured logs**: JSON-formatted logs with context
+- **Log levels**: Configurable via `RUST_LOG` environment variable
+- **Performance tracking**: Request duration logging
+- **Error tracking**: Detailed error logging with stack traces
+
+Configure logging:
+```bash
+export RUST_LOG=fire=info,tower_http=info,sqlx=warn
+```
+
+Log levels:
+- `error` - Critical errors only
+- `warn` - Warnings and errors
+- `info` - General information (default)
+- `debug` - Detailed debugging
+- `trace` - Very verbose tracing
+
+### Error Handling
+
+All errors return FHIR-compliant OperationOutcome resources:
+```json
+{
+  "resourceType": "OperationOutcome",
+  "issue": [{
+    "severity": "error",
+    "code": "not-found",
+    "diagnostics": "Resource not found"
+  }]
+}
+```
+
 ## Next Steps
 
-- Phase 6: Production readiness (authentication, authorization, comprehensive logging, testing)
-- Phase 7: Additional FHIR resources and advanced features
+- Phase 7: Authentication & Authorization (OAuth2, SMART on FHIR)
+- Phase 8: Additional FHIR resources and advanced features
+- Phase 9: Performance optimization and caching
 
 ## License
 
