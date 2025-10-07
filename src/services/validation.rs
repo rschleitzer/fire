@@ -324,5 +324,43 @@ pub fn validate_observation(content: &Value) -> Result<()> {
         }
     }
 
+    // R5: Validate triggeredBy structure if present
+    if let Some(triggered_by) = content.get("triggeredBy") {
+        if !triggered_by.is_array() {
+            return Err(FhirError::ValidationError(
+                "triggeredBy must be an array".to_string(),
+            ));
+        }
+
+        for (i, trigger) in triggered_by.as_array().unwrap().iter().enumerate() {
+            // observation reference is required
+            if trigger.get("observation").is_none() {
+                return Err(FhirError::ValidationError(format!(
+                    "triggeredBy[{}].observation is required",
+                    i
+                )));
+            }
+
+            // type is required and must be valid
+            let trigger_type = trigger
+                .get("type")
+                .and_then(|t| t.as_str())
+                .ok_or_else(|| FhirError::ValidationError(format!(
+                    "triggeredBy[{}].type is required",
+                    i
+                )))?;
+
+            let valid_types = ["reflex", "repeat", "re-run"];
+            if !valid_types.contains(&trigger_type) {
+                return Err(FhirError::ValidationError(format!(
+                    "Invalid triggeredBy[{}].type '{}'. Must be one of: {}",
+                    i,
+                    trigger_type,
+                    valid_types.join(", ")
+                )));
+            }
+        }
+    }
+
     Ok(())
 }

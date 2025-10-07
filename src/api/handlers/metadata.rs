@@ -8,19 +8,28 @@ pub async fn capability_statement() -> (StatusCode, Json<Value>) {
 
     let capability = json!({
         "resourceType": "CapabilityStatement",
+        "id": "fire-capability-statement",
+        "url": "http://fire.example.org/fhir/CapabilityStatement/fire",
+        "version": env!("CARGO_PKG_VERSION"),
+        "name": "FireFHIRServerCapabilityStatement",
+        "title": "Fire FHIR Server Capability Statement",
         "status": "active",
+        "experimental": false,
         "date": "2024-01-01",
+        "publisher": "Fire FHIR Server Team",
+        "description": "Capability statement for Fire FHIR Server - FHIR R5 compliant",
         "kind": "instance",
         "software": {
             "name": "Fire FHIR Server",
             "version": env!("CARGO_PKG_VERSION")
         },
         "implementation": {
-            "description": "Fire - A high-performance FHIR server in Rust",
+            "description": "Fire - A high-performance FHIR R5 server in Rust",
             "url": "http://localhost:3000/fhir"
         },
-        "fhirVersion": "4.0.1",
-        "format": ["json"],
+        "fhirVersion": "5.0.0",
+        "format": ["application/fhir+json", "json"],
+        "patchFormat": ["application/json-patch+json"],
         "rest": [{
             "mode": "server",
             "resource": [

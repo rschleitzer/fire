@@ -1,6 +1,8 @@
-# Fire FHIR Server - Quick Start Guide
+# Fire FHIR R5 Server - Quick Start Guide
 
-Get up and running with Fire FHIR Server in 5 minutes!
+Get up and running with Fire FHIR R5 Server in 5 minutes!
+
+**FHIR Version**: R5 (5.0.0) - Latest normative release
 
 ## Option 1: Docker (Recommended)
 

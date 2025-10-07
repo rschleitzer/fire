@@ -33,6 +33,12 @@ pub struct Observation {
     pub value_codeable_concept_code: Option<Vec<String>>,
     pub value_string: Option<String>,
     pub performer_reference: Option<Vec<String>>,
+
+    // R5 specific fields
+    pub triggered_by_observation: Option<Vec<String>>,
+    pub triggered_by_type: Option<Vec<String>>,
+    pub focus_reference: Option<Vec<String>>,
+    pub body_structure_reference: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -62,6 +68,12 @@ pub struct ObservationHistory {
     pub value_codeable_concept_code: Option<Vec<String>>,
     pub value_string: Option<String>,
     pub performer_reference: Option<Vec<String>>,
+
+    // R5 specific fields
+    pub triggered_by_observation: Option<Vec<String>>,
+    pub triggered_by_type: Option<Vec<String>>,
+    pub focus_reference: Option<Vec<String>>,
+    pub body_structure_reference: Option<String>,
 
     // History metadata
     pub history_operation: String,
@@ -214,6 +226,32 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
+    // R5: Extract triggeredBy
+    if let Some(triggered_by) = content.get("triggeredBy").and_then(|t| t.as_array()) {
+        for trigger in triggered_by {
+            if let Some(obs_ref) = trigger.get("observation").and_then(|o| o.get("reference")).and_then(|r| r.as_str()) {
+                params.triggered_by_observation.push(obs_ref.to_string());
+            }
+            if let Some(trigger_type) = trigger.get("type").and_then(|t| t.as_str()) {
+                params.triggered_by_type.push(trigger_type.to_string());
+            }
+        }
+    }
+
+    // R5: Extract focus
+    if let Some(focus) = content.get("focus").and_then(|f| f.as_array()) {
+        for focus_item in focus {
+            if let Some(reference) = focus_item.get("reference").and_then(|r| r.as_str()) {
+                params.focus_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // R5: Extract bodyStructure
+    if let Some(body_structure) = content.get("bodyStructure").and_then(|b| b.get("reference")).and_then(|r| r.as_str()) {
+        params.body_structure_reference = Some(body_structure.to_string());
+    }
+
     params
 }
 
@@ -237,4 +275,10 @@ pub struct ObservationSearchParams {
     pub value_codeable_concept_code: Vec<String>,
     pub value_string: Option<String>,
     pub performer_reference: Vec<String>,
+
+    // R5 specific fields
+    pub triggered_by_observation: Vec<String>,
+    pub triggered_by_type: Vec<String>,
+    pub focus_reference: Vec<String>,
+    pub body_structure_reference: Option<String>,
 }

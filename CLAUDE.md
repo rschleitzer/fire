@@ -1,8 +1,9 @@
-# CLAUDE.md - FHIR Server in Rust
+# CLAUDE.md - FHIR R5 Server in Rust
 
 ## Project Overview
 
-Building a production-grade FHIR (Fast Healthcare Interoperability Resources) server in Rust with a focus on:
+Building a production-grade **FHIR R5** (Fast Healthcare Interoperability Resources) server in Rust with a focus on:
+- **FHIR R5 (5.0.0)** compliance - Latest normative version
 - Performance and type safety
 - Superior architecture compared to existing solutions (HAPI FHIR)
 - Table-per-resource database design
@@ -477,6 +478,34 @@ impl IntoResponse for FhirError {
 - FHIR search is complex - don't try to simplify it, embrace the complexity
 - Performance matters - this is healthcare data at scale
 - Type safety is critical - leverage Rust's type system
+
+## FHIR R5 Compliance
+
+Fire FHIR Server implements **FHIR R5 (5.0.0)**, the latest normative release. Key R5 features:
+
+### R5-Specific Implementation
+
+**Observation Resource R5 Fields:**
+- `triggeredBy` - Identifies observations that triggered this observation (reflex testing)
+- `focus` - What the observation is about when not about the subject
+- `bodyStructure` - Specific body structure observed
+
+**Database Support:**
+- Migration `003_add_r5_observation_fields.sql` adds R5 columns
+- Indexed for efficient querying
+- Backward compatible with R4 data
+
+**Validation:**
+- R5-specific field validation in `src/services/validation.rs`
+- `triggeredBy.type` must be: `reflex`, `repeat`, or `re-run`
+- Observation reference required for triggered observations
+
+**Capability Statement:**
+- Advertises FHIR R5 (5.0.0) compliance
+- Lists supported R5 features
+- Updated metadata endpoint
+
+See [FHIR_R5_UPGRADE.md](FHIR_R5_UPGRADE.md) for complete R5 migration guide.
 
 ## Questions to Resolve Later
 

@@ -46,9 +46,10 @@ impl ObservationRepository {
                 subject_reference, patient_reference, encounter_reference,
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference
+                value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
             "#,
             id,
             version_id,
@@ -73,6 +74,10 @@ impl ObservationRepository {
             params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code.clone())),
             params.value_string,
             params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation.clone())),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type.clone())),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference.clone())),
+            params.body_structure_reference,
         )
         .execute(&mut *tx)
         .await?;
@@ -88,9 +93,10 @@ impl ObservationRepository {
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
             "#,
             id,
             version_id,
@@ -115,6 +121,10 @@ impl ObservationRepository {
             params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code)),
             params.value_string,
             params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation)),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type)),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference)),
+            params.body_structure_reference,
             "CREATE",
             Utc::now(),
         )
@@ -304,7 +314,11 @@ impl ObservationRepository {
                 value_quantity_system = $19,
                 value_codeable_concept_code = $20,
                 value_string = $21,
-                performer_reference = $22
+                performer_reference = $22,
+                triggered_by_observation = $23,
+                triggered_by_type = $24,
+                focus_reference = $25,
+                body_structure_reference = $26
             WHERE id = $1
             "#,
             id,
@@ -329,6 +343,10 @@ impl ObservationRepository {
             params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code.clone())),
             params.value_string,
             params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference.clone())),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation.clone())),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type.clone())),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference.clone())),
+            params.body_structure_reference,
         )
         .execute(&mut *tx)
         .await?;
@@ -344,9 +362,10 @@ impl ObservationRepository {
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
             "#,
             id,
             new_version_id,
@@ -371,6 +390,10 @@ impl ObservationRepository {
             params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code)),
             params.value_string,
             params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation)),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type)),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference)),
+            params.body_structure_reference,
             "UPDATE",
             Utc::now(),
         )

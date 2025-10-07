@@ -1,8 +1,11 @@
-# Fire FHIR Server - Project Summary
+# Fire FHIR R5 Server - Project Summary
 
 ## Overview
 
-Fire is a high-performance FHIR (Fast Healthcare Interoperability Resources) server implementation in Rust, designed for production use with comprehensive features, testing, and deployment support.
+Fire is a high-performance **FHIR R5** (Fast Healthcare Interoperability Resources) server implementation in Rust, designed for production use with comprehensive features, testing, and deployment support.
+
+**FHIR Version**: R5 (5.0.0) - Latest normative release
+**Standards Compliance**: HL7 FHIR Release 5
 
 ## Technology Stack
 
@@ -291,7 +294,7 @@ cargo test
 - **Files**: 30+
 - **Test Coverage**: Comprehensive integration tests
 - **Dependencies**: Production-grade crates
-- **FHIR Compliance**: FHIR R4 (4.0.1)
+- **FHIR Compliance**: FHIR R5 (5.0.0)
 
 ## Documentation
 
@@ -313,7 +316,7 @@ Fire FHIR Server is a production-ready, fully-featured FHIR server implementatio
 ✅ Production-grade architecture
 ✅ Comprehensive testing
 ✅ DevOps best practices
-✅ FHIR R4 compliance
+✅ FHIR R5 compliance
 ✅ Enterprise deployment readiness
 
 The server is ready for:
