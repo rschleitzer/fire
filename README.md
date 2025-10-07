@@ -76,6 +76,14 @@ The server will start on `http://127.0.0.1:3000`
 - `active` - Search by active status (true/false)
 - `_count` - Page size (default: 50, max: 1000)
 - `_offset` - Pagination offset
+- `_sort` - Sort results (comma-separated, prefix with `-` for descending)
+- `_total` - Include total count (`accurate`)
+
+### Search Modifiers
+
+- `:exact` - Exact string match (e.g., `family:exact=Smith`)
+- `:contains` - Partial match (default, e.g., `family:contains=Smi`)
+- `:missing` - Check if field is missing (e.g., `family:missing=true`)
 
 ## Example Requests
 
@@ -95,8 +103,20 @@ curl -X POST http://localhost:3000/fhir/Patient \
 ```
 
 ### Search Patients
+
+Basic search:
 ```bash
 curl "http://localhost:3000/fhir/Patient?name=Smith&birthdate=gt1980-01-01"
+```
+
+With modifiers and sorting:
+```bash
+curl "http://localhost:3000/fhir/Patient?family:exact=Smith&_sort=-birthdate,given&_total=accurate"
+```
+
+Check for missing family name:
+```bash
+curl "http://localhost:3000/fhir/Patient?family:missing=true"
 ```
 
 ## Development
@@ -152,12 +172,17 @@ fire/
 - CRUD operations for Patient
 - Basic search (name, birthdate, identifier, gender, active)
 
+✅ **Phase 2 Complete** - Advanced Search
+- Search modifiers: `:exact`, `:contains`, `:missing`
+- `_sort` parameter with multiple fields and directions
+- `_total` parameter for accurate counts
+- Optimized query building with proper SQL injection protection
+
 ## Next Steps
 
-- Phase 2: Advanced search with modifiers
 - Phase 3: Additional resources (Observation, MedicationRequest)
-- Phase 4: Transaction bundles
-- Phase 5: Production readiness (auth, logging, testing)
+- Phase 4: Transaction bundles, validation
+- Phase 5: Production readiness (auth, logging, comprehensive testing)
 
 ## License
 

@@ -55,7 +55,10 @@ pub async fn search_patients(
     State(repo): State<SharedPatientRepo>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>> {
-    let patients = repo.search(&params).await?;
+    // Check if _total parameter is requested
+    let include_total = params.get("_total").map(|t| t == "accurate").unwrap_or(false);
+
+    let (patients, total) = repo.search(&params, include_total).await?;
 
     // Build FHIR Bundle response
     let entries: Vec<Value> = patients
@@ -70,12 +73,16 @@ pub async fn search_patients(
         })
         .collect();
 
-    let bundle = serde_json::json!({
+    let mut bundle = serde_json::json!({
         "resourceType": "Bundle",
         "type": "searchset",
-        "total": entries.len(),
         "entry": entries
     });
+
+    // Add total if requested or if we have it
+    if let Some(total_count) = total {
+        bundle["total"] = serde_json::json!(total_count);
+    }
 
     Ok(Json(bundle))
 }

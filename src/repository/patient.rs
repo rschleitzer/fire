@@ -369,7 +369,7 @@ impl PatientRepository {
     }
 
     /// Search for patients based on parameters
-    pub async fn search(&self, params: &HashMap<String, String>) -> Result<Vec<Patient>> {
+    pub async fn search(&self, params: &HashMap<String, String>, include_total: bool) -> Result<(Vec<Patient>, Option<i64>)> {
         let query = SearchQuery::from_params(params)?;
 
         let mut sql = String::from(
@@ -384,15 +384,39 @@ impl PatientRepository {
 
         for condition in &query.conditions {
             match condition {
-                SearchCondition::FamilyName(name) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
-                    bind_values.push(format!("%{}%", name));
+                SearchCondition::FamilyName(search) => {
+                    match search.modifier {
+                        crate::search::StringModifier::Contains => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                            bind_values.push(format!("%{}%", search.value));
+                        }
+                        crate::search::StringModifier::Exact => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})", bind_count));
+                            bind_values.push(search.value.clone());
+                        }
+                        crate::search::StringModifier::Missing => {
+                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                        }
+                    }
                 }
-                SearchCondition::GivenName(name) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
-                    bind_values.push(format!("%{}%", name));
+                SearchCondition::GivenName(search) => {
+                    match search.modifier {
+                        crate::search::StringModifier::Contains => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                            bind_values.push(format!("%{}%", search.value));
+                        }
+                        crate::search::StringModifier::Exact => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
+                            bind_values.push(search.value.clone());
+                        }
+                        crate::search::StringModifier::Missing => {
+                            sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                        }
+                    }
                 }
                 SearchCondition::Identifier(value) => {
                     bind_count += 1;
@@ -425,7 +449,21 @@ impl PatientRepository {
             }
         }
 
-        sql.push_str(" ORDER BY last_updated DESC");
+        // Build ORDER BY clause
+        if !query.sort.is_empty() {
+            sql.push_str(" ORDER BY ");
+            for (i, sort) in query.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&sort.field);
+                match sort.direction {
+                    crate::search::SortDirection::Ascending => sql.push_str(" ASC"),
+                    crate::search::SortDirection::Descending => sql.push_str(" DESC"),
+                }
+            }
+        }
+
         bind_count += 1;
         sql.push_str(&format!(" LIMIT ${}", bind_count));
         bind_values.push(query.limit.to_string());
@@ -459,6 +497,86 @@ impl PatientRepository {
             })
             .collect();
 
-        Ok(patients)
+        // Get total count if requested
+        let total = if include_total {
+            let count_sql = build_count_sql(&query);
+            let mut count_query_builder = sqlx::query(&count_sql);
+            for value in &bind_values {
+                count_query_builder = count_query_builder.bind(value);
+            }
+            let count_row = count_query_builder.fetch_one(&self.pool).await?;
+            Some(count_row.get::<i64, _>(0))
+        } else {
+            None
+        };
+
+        Ok((patients, total))
     }
+}
+
+fn build_count_sql(query: &SearchQuery) -> String {
+    let mut sql = String::from("SELECT COUNT(*) FROM patient WHERE deleted = FALSE");
+    let mut bind_count = 0;
+
+    for condition in &query.conditions {
+        match condition {
+            SearchCondition::FamilyName(search) => {
+                bind_count += 1;
+                match search.modifier {
+                    crate::search::StringModifier::Contains => {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                    }
+                    crate::search::StringModifier::Exact => {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})", bind_count));
+                    }
+                    crate::search::StringModifier::Missing => {
+                        sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                        bind_count -= 1;
+                    }
+                }
+            }
+            SearchCondition::GivenName(search) => {
+                bind_count += 1;
+                match search.modifier {
+                    crate::search::StringModifier::Contains => {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                    }
+                    crate::search::StringModifier::Exact => {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
+                    }
+                    crate::search::StringModifier::Missing => {
+                        sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                        bind_count -= 1;
+                    }
+                }
+            }
+            SearchCondition::Identifier(value) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})", bind_count));
+                let _ = value; // Silence unused warning
+            }
+            SearchCondition::Birthdate(comparison) => {
+                bind_count += 1;
+                let op = match comparison.prefix {
+                    crate::search::DatePrefix::Eq => "=",
+                    crate::search::DatePrefix::Ne => "!=",
+                    crate::search::DatePrefix::Gt => ">",
+                    crate::search::DatePrefix::Lt => "<",
+                    crate::search::DatePrefix::Ge => ">=",
+                    crate::search::DatePrefix::Le => "<=",
+                };
+                sql.push_str(&format!(" AND birthdate {} ${}", op, bind_count));
+            }
+            SearchCondition::Gender(_gender) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND gender = ${}", bind_count));
+            }
+            SearchCondition::Active(_active) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND active = ${}", bind_count));
+            }
+        }
+    }
+
+    sql
 }

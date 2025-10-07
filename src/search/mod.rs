@@ -8,16 +8,42 @@ pub struct SearchQuery {
     pub conditions: Vec<SearchCondition>,
     pub limit: i64,
     pub offset: i64,
+    pub sort: Vec<SortParam>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SortParam {
+    pub field: String,
+    pub direction: SortDirection,
+}
+
+#[derive(Debug, Clone)]
+pub enum SortDirection {
+    Ascending,
+    Descending,
 }
 
 #[derive(Debug, Clone)]
 pub enum SearchCondition {
-    FamilyName(String),
-    GivenName(String),
+    FamilyName(StringSearch),
+    GivenName(StringSearch),
     Identifier(String),
     Birthdate(DateComparison),
     Gender(String),
     Active(bool),
+}
+
+#[derive(Debug, Clone)]
+pub struct StringSearch {
+    pub value: String,
+    pub modifier: StringModifier,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StringModifier {
+    Contains,  // Default - partial match (ILIKE)
+    Exact,     // :exact - exact match
+    Missing,   // :missing - check if field is null/empty
 }
 
 #[derive(Debug, Clone)]
@@ -40,20 +66,78 @@ impl SearchQuery {
     pub fn from_params(params: &HashMap<String, String>) -> Result<Self> {
         let mut conditions = Vec::new();
 
-        // Parse family name
+        // Parse family name with modifiers
         if let Some(family) = params.get("family") {
-            conditions.push(SearchCondition::FamilyName(family.clone()));
+            let search = parse_string_param("family", family, params)?;
+            conditions.push(SearchCondition::FamilyName(search));
         }
 
-        // Parse given name
+        // Parse family:exact
+        if let Some(family) = params.get("family:exact") {
+            conditions.push(SearchCondition::FamilyName(StringSearch {
+                value: family.clone(),
+                modifier: StringModifier::Exact,
+            }));
+        }
+
+        // Parse family:contains (explicit)
+        if let Some(family) = params.get("family:contains") {
+            conditions.push(SearchCondition::FamilyName(StringSearch {
+                value: family.clone(),
+                modifier: StringModifier::Contains,
+            }));
+        }
+
+        // Parse family:missing
+        if let Some(missing) = params.get("family:missing") {
+            if missing == "true" {
+                conditions.push(SearchCondition::FamilyName(StringSearch {
+                    value: String::new(),
+                    modifier: StringModifier::Missing,
+                }));
+            } else if missing == "false" {
+                // NOT missing - field must exist
+                // This is handled as the inverse
+            }
+        }
+
+        // Parse given name with modifiers
         if let Some(given) = params.get("given") {
-            conditions.push(SearchCondition::GivenName(given.clone()));
+            let search = parse_string_param("given", given, params)?;
+            conditions.push(SearchCondition::GivenName(search));
+        }
+
+        // Parse given:exact
+        if let Some(given) = params.get("given:exact") {
+            conditions.push(SearchCondition::GivenName(StringSearch {
+                value: given.clone(),
+                modifier: StringModifier::Exact,
+            }));
+        }
+
+        // Parse given:contains (explicit)
+        if let Some(given) = params.get("given:contains") {
+            conditions.push(SearchCondition::GivenName(StringSearch {
+                value: given.clone(),
+                modifier: StringModifier::Contains,
+            }));
+        }
+
+        // Parse given:missing
+        if let Some(missing) = params.get("given:missing") {
+            if missing == "true" {
+                conditions.push(SearchCondition::GivenName(StringSearch {
+                    value: String::new(),
+                    modifier: StringModifier::Missing,
+                }));
+            }
         }
 
         // Parse name (searches both family and given)
         if let Some(name) = params.get("name") {
-            conditions.push(SearchCondition::FamilyName(name.clone()));
-            conditions.push(SearchCondition::GivenName(name.clone()));
+            let search = parse_string_param("name", name, params)?;
+            conditions.push(SearchCondition::FamilyName(search.clone()));
+            conditions.push(SearchCondition::GivenName(search));
         }
 
         // Parse identifier
@@ -92,10 +176,22 @@ impl SearchQuery {
             .and_then(|o| o.parse::<i64>().ok())
             .unwrap_or(0);
 
+        // Parse sort
+        let sort = if let Some(sort_param) = params.get("_sort") {
+            parse_sort_param(sort_param)?
+        } else {
+            // Default sort by last_updated descending
+            vec![SortParam {
+                field: "last_updated".to_string(),
+                direction: SortDirection::Descending,
+            }]
+        };
+
         Ok(SearchQuery {
             conditions,
             limit,
             offset,
+            sort,
         })
     }
 
@@ -106,17 +202,39 @@ impl SearchQuery {
 
         for condition in &self.conditions {
             match condition {
-                SearchCondition::FamilyName(_name) => {
+                SearchCondition::FamilyName(search) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND family_name && ARRAY[${}]::TEXT[]", bind_count));
+                    match search.modifier {
+                        StringModifier::Contains => {
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                        }
+                        StringModifier::Exact => {
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})", bind_count));
+                        }
+                        StringModifier::Missing => {
+                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                            bind_count -= 1; // No bind parameter needed
+                        }
+                    }
                 }
-                SearchCondition::GivenName(_name) => {
+                SearchCondition::GivenName(search) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND given_name && ARRAY[${}]::TEXT[]", bind_count));
+                    match search.modifier {
+                        StringModifier::Contains => {
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                        }
+                        StringModifier::Exact => {
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
+                        }
+                        StringModifier::Missing => {
+                            sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                            bind_count -= 1; // No bind parameter needed
+                        }
+                    }
                 }
                 SearchCondition::Identifier(_value) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND identifier_value && ARRAY[${}]::TEXT[]", bind_count));
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})", bind_count));
                 }
                 SearchCondition::Birthdate(comparison) => {
                     bind_count += 1;
@@ -141,7 +259,21 @@ impl SearchQuery {
             }
         }
 
-        sql.push_str(" ORDER BY last_updated DESC");
+        // Build ORDER BY clause
+        if !self.sort.is_empty() {
+            sql.push_str(" ORDER BY ");
+            for (i, sort) in self.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&sort.field);
+                match sort.direction {
+                    SortDirection::Ascending => sql.push_str(" ASC"),
+                    SortDirection::Descending => sql.push_str(" DESC"),
+                }
+            }
+        }
+
         bind_count += 1;
         sql.push_str(&format!(" LIMIT ${}", bind_count));
         bind_count += 1;
@@ -149,6 +281,65 @@ impl SearchQuery {
 
         (sql, params)
     }
+}
+
+fn parse_string_param(
+    _param_name: &str,
+    value: &str,
+    _params: &HashMap<String, String>,
+) -> Result<StringSearch> {
+    // Default to contains (partial match)
+    Ok(StringSearch {
+        value: value.to_string(),
+        modifier: StringModifier::Contains,
+    })
+}
+
+fn parse_sort_param(value: &str) -> Result<Vec<SortParam>> {
+    let mut sorts = Vec::new();
+
+    // _sort can be comma-separated list: _sort=birthdate,-name
+    for field in value.split(',') {
+        let field = field.trim();
+        if field.is_empty() {
+            continue;
+        }
+
+        let (direction, field_name) = if field.starts_with('-') {
+            (SortDirection::Descending, &field[1..])
+        } else {
+            (SortDirection::Ascending, field)
+        };
+
+        // Map FHIR search parameters to database columns
+        let db_field = match field_name {
+            "name" => "family_name", // Use family_name for name sort
+            "family" => "family_name",
+            "given" => "given_name",
+            "birthdate" => "birthdate",
+            "gender" => "gender",
+            "active" => "active",
+            "_lastUpdated" | "last_updated" => "last_updated",
+            _ => return Err(FhirError::InvalidSearchParameter(
+                format!("Invalid sort field: {}", field_name)
+            )),
+        };
+
+        sorts.push(SortParam {
+            field: db_field.to_string(),
+            direction,
+        });
+    }
+
+    if sorts.is_empty() {
+        // Default to last_updated descending
+        sorts.push(SortParam {
+            field: "last_updated".to_string(),
+            direction: SortDirection::Descending,
+        });
+    }
+
+    Ok(sorts)
 }
 
 fn parse_date_param(value: &str) -> Result<DateComparison> {
