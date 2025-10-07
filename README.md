@@ -38,6 +38,19 @@ cp .env .env.local
 Default configuration:
 - Database: `postgres://postgres:postgres@localhost/fhir`
 - Server: `127.0.0.1:3000`
+- Database pool: 10 max connections, 2 min connections
+- Connection timeout: 30 seconds
+- Idle timeout: 600 seconds (10 minutes)
+
+Environment variables:
+- `DATABASE_URL` - PostgreSQL connection string
+- `SERVER_HOST` - Server bind address (default: 127.0.0.1)
+- `SERVER_PORT` - Server port (default: 3000)
+- `DB_MAX_CONNECTIONS` - Max database connections (default: 10)
+- `DB_MIN_CONNECTIONS` - Min database connections (default: 2)
+- `DB_CONNECTION_TIMEOUT_SECS` - Connection timeout in seconds (default: 30)
+- `DB_IDLE_TIMEOUT_SECS` - Idle connection timeout in seconds (default: 600)
+- `RUST_LOG` - Log level configuration (default: fire=info,tower_http=info,sqlx=warn)
 
 4. **Run migrations**:
 Migrations are automatically run on server startup, or manually with:
@@ -78,6 +91,13 @@ The server will start on `http://127.0.0.1:3000`
 ### Transaction Bundles
 
 - `POST /fhir` - Process transaction or batch bundle
+
+### System Endpoints
+
+- `GET /fhir/metadata` - FHIR capability statement
+- `GET /health` - Health check endpoint
+- `GET /health/ready` - Readiness check
+- `GET /health/live` - Liveness check
 
 ### Search Parameters
 
@@ -351,6 +371,10 @@ fire/
 - Enhanced error handling with detailed logging
 - FHIR OperationOutcome responses for all errors
 - Configurable log levels via environment variables
+- Health check endpoints (health, readiness, liveness)
+- FHIR capability statement endpoint (metadata)
+- Configurable database connection pooling
+- Production-grade configuration management
 
 ## Production Features
 
@@ -388,6 +412,47 @@ All errors return FHIR-compliant OperationOutcome resources:
     "diagnostics": "Resource not found"
   }]
 }
+```
+
+### Health Checks
+
+The server provides multiple health check endpoints for monitoring:
+
+```bash
+# Overall health (includes database connectivity)
+curl http://localhost:3000/health
+
+# Kubernetes readiness probe
+curl http://localhost:3000/health/ready
+
+# Kubernetes liveness probe
+curl http://localhost:3000/health/live
+```
+
+### Capability Statement
+
+The server exposes its capabilities via the FHIR metadata endpoint:
+
+```bash
+curl http://localhost:3000/fhir/metadata
+```
+
+Returns a CapabilityStatement describing:
+- Supported resources (Patient, Observation)
+- Supported interactions (read, create, update, delete, search)
+- Available search parameters
+- Transaction/batch bundle support
+
+### Database Configuration
+
+Connection pooling is fully configurable for production deployments:
+
+```bash
+# Example production configuration
+export DB_MAX_CONNECTIONS=50
+export DB_MIN_CONNECTIONS=10
+export DB_CONNECTION_TIMEOUT_SECS=30
+export DB_IDLE_TIMEOUT_SECS=600
 ```
 
 ## Next Steps

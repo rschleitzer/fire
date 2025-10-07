@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use fire::api::{bundle_routes, observation_routes, patient_routes};
+use fire::api::{bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes};
 use fire::config::Config;
 use fire::middleware::request_id::add_request_id;
 use fire::repository::{ObservationRepository, PatientRepository};
@@ -31,13 +31,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = Config::from_env()?;
     tracing::info!("Starting FHIR server on {}", config.server_addr());
 
-    // Create database connection pool
+    // Create database connection pool with configured settings
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .acquire_timeout(std::time::Duration::from_secs(config.db_connection_timeout_secs))
+        .idle_timeout(std::time::Duration::from_secs(config.db_idle_timeout_secs))
         .connect(&config.database_url)
         .await?;
 
-    tracing::info!("Connected to database");
+    tracing::info!(
+        max_connections = config.db_max_connections,
+        min_connections = config.db_min_connections,
+        connection_timeout_secs = config.db_connection_timeout_secs,
+        idle_timeout_secs = config.db_idle_timeout_secs,
+        "Connected to database with connection pool"
+    );
 
     // Run migrations
     tracing::info!("Running database migrations...");
@@ -55,6 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build application routes
     let app = Router::new()
+        .merge(health_routes(Arc::new(pool.clone())))
+        .merge(metadata_routes())
         .merge(patient_routes(patient_repo.clone()))
         .merge(observation_routes(observation_repo.clone()))
         .merge(bundle_routes(patient_repo, observation_repo))

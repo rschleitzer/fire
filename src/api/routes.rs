@@ -5,6 +5,8 @@ use axum::{
 use std::sync::Arc;
 
 use super::handlers::bundle::{process_bundle, BundleState};
+use super::handlers::health::{health_check, liveness_check, readiness_check, SharedPool};
+use super::handlers::metadata::capability_statement;
 use super::handlers::observation::{
     create_observation, delete_observation, get_observation_history, read_observation,
     read_observation_version, search_observations, update_observation, SharedObservationRepo,
@@ -41,4 +43,17 @@ pub fn bundle_routes(patient_repo: SharedPatientRepo, observation_repo: SharedOb
     Router::new()
         .route("/fhir", post(process_bundle))
         .with_state(state)
+}
+
+pub fn health_routes(pool: SharedPool) -> Router {
+    Router::new()
+        .route("/health", get(health_check))
+        .route("/health/ready", get(readiness_check))
+        .route("/health/live", get(liveness_check))
+        .with_state(pool)
+}
+
+pub fn metadata_routes() -> Router {
+    Router::new()
+        .route("/fhir/metadata", get(capability_statement))
 }
