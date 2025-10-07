@@ -1,0 +1,273 @@
+{
+  "patients": [
+    {
+      "resourceType": "Patient",
+      "name": [{
+        "use": "official",
+        "family": "Smith",
+        "given": ["John", "Jacob"]
+      }],
+      "gender": "male",
+      "birthDate": "1980-05-15",
+      "active": true,
+      "identifier": [{
+        "system": "http://hospital.example.org/patients",
+        "value": "PAT-001"
+      }],
+      "telecom": [{
+        "system": "phone",
+        "value": "(555) 123-4567",
+        "use": "home"
+      }, {
+        "system": "email",
+        "value": "john.smith@example.com"
+      }],
+      "address": [{
+        "use": "home",
+        "line": ["123 Main St"],
+        "city": "Springfield",
+        "state": "IL",
+        "postalCode": "62701",
+        "country": "USA"
+      }]
+    },
+    {
+      "resourceType": "Patient",
+      "name": [{
+        "use": "official",
+        "family": "Johnson",
+        "given": ["Emily", "Rose"]
+      }],
+      "gender": "female",
+      "birthDate": "1985-03-20",
+      "active": true,
+      "identifier": [{
+        "system": "http://hospital.example.org/patients",
+        "value": "PAT-002"
+      }],
+      "telecom": [{
+        "system": "phone",
+        "value": "(555) 234-5678",
+        "use": "mobile"
+      }, {
+        "system": "email",
+        "value": "emily.johnson@example.com"
+      }]
+    },
+    {
+      "resourceType": "Patient",
+      "name": [{
+        "use": "official",
+        "family": "Williams",
+        "given": ["Michael", "David"]
+      }],
+      "gender": "male",
+      "birthDate": "1975-11-10",
+      "active": true,
+      "identifier": [{
+        "system": "http://hospital.example.org/patients",
+        "value": "PAT-003"
+      }]
+    },
+    {
+      "resourceType": "Patient",
+      "name": [{
+        "use": "official",
+        "family": "Brown",
+        "given": ["Sarah", "Marie"]
+      }],
+      "gender": "female",
+      "birthDate": "1990-07-25",
+      "active": true,
+      "identifier": [{
+        "system": "http://hospital.example.org/patients",
+        "value": "PAT-004"
+      }]
+    },
+    {
+      "resourceType": "Patient",
+      "name": [{
+        "use": "official",
+        "family": "Davis",
+        "given": ["Robert", "James"]
+      }],
+      "gender": "male",
+      "birthDate": "1965-09-08",
+      "active": true,
+      "identifier": [{
+        "system": "http://hospital.example.org/patients",
+        "value": "PAT-005"
+      }]
+    }
+  ],
+  "observations": [
+    {
+      "resourceType": "Observation",
+      "status": "final",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "vital-signs",
+          "display": "Vital Signs"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "8867-4",
+          "display": "Heart rate"
+        }],
+        "text": "Heart rate"
+      },
+      "subject": {
+        "reference": "Patient/PAT-001"
+      },
+      "effectiveDateTime": "2024-01-15T10:30:00Z",
+      "valueQuantity": {
+        "value": 72,
+        "unit": "beats/minute",
+        "system": "http://unitsofmeasure.org",
+        "code": "/min"
+      }
+    },
+    {
+      "resourceType": "Observation",
+      "status": "final",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "vital-signs"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "8480-6",
+          "display": "Systolic blood pressure"
+        }]
+      },
+      "subject": {
+        "reference": "Patient/PAT-001"
+      },
+      "effectiveDateTime": "2024-01-15T10:30:00Z",
+      "valueQuantity": {
+        "value": 120,
+        "unit": "mmHg",
+        "system": "http://unitsofmeasure.org",
+        "code": "mm[Hg]"
+      }
+    },
+    {
+      "resourceType": "Observation",
+      "status": "final",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "laboratory"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "2339-0",
+          "display": "Glucose [Mass/volume] in Blood"
+        }]
+      },
+      "subject": {
+        "reference": "Patient/PAT-002"
+      },
+      "effectiveDateTime": "2024-01-14T08:00:00Z",
+      "valueQuantity": {
+        "value": 95,
+        "unit": "mg/dL",
+        "system": "http://unitsofmeasure.org",
+        "code": "mg/dL"
+      },
+      "referenceRange": [{
+        "low": {"value": 70, "unit": "mg/dL"},
+        "high": {"value": 100, "unit": "mg/dL"}
+      }]
+    },
+    {
+      "resourceType": "Observation",
+      "status": "final",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "vital-signs"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "29463-7",
+          "display": "Body weight"
+        }]
+      },
+      "subject": {
+        "reference": "Patient/PAT-003"
+      },
+      "effectiveDateTime": "2024-01-13T09:00:00Z",
+      "valueQuantity": {
+        "value": 85.5,
+        "unit": "kg",
+        "system": "http://unitsofmeasure.org",
+        "code": "kg"
+      }
+    },
+    {
+      "resourceType": "Observation",
+      "status": "final",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "vital-signs"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "8310-5",
+          "display": "Body temperature"
+        }]
+      },
+      "subject": {
+        "reference": "Patient/PAT-004"
+      },
+      "effectiveDateTime": "2024-01-16T11:15:00Z",
+      "valueQuantity": {
+        "value": 37.0,
+        "unit": "Cel",
+        "system": "http://unitsofmeasure.org",
+        "code": "Cel"
+      }
+    },
+    {
+      "resourceType": "Observation",
+      "status": "preliminary",
+      "category": [{
+        "coding": [{
+          "system": "http://terminology.hl7.org/CodeSystem/observation-category",
+          "code": "laboratory"
+        }]
+      }],
+      "code": {
+        "coding": [{
+          "system": "http://loinc.org",
+          "code": "718-7",
+          "display": "Hemoglobin [Mass/volume] in Blood"
+        }]
+      },
+      "subject": {
+        "reference": "Patient/PAT-005"
+      },
+      "effectiveDateTime": "2024-01-16T14:30:00Z",
+      "valueQuantity": {
+        "value": 14.5,
+        "unit": "g/dL",
+        "system": "http://unitsofmeasure.org",
+        "code": "g/dL"
+      }
+    }
+  ]
+}
