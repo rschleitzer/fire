@@ -155,8 +155,10 @@ fire/
 │   │   └── patient.rs
 │   ├── repository/          # Database operations
 │   │   └── patient.rs
-│   └── search/              # Search query builder
-│       └── mod.rs
+│   ├── search/              # Search query builder
+│   │   └── mod.rs
+│   └── services/            # Business logic
+│       └── validation.rs    # FHIR validation
 ├── migrations/              # SQL migrations
 │   └── 001_create_patient_tables.sql
 ├── Cargo.toml
@@ -172,16 +174,22 @@ fire/
 - CRUD operations for Patient
 - Basic search (name, birthdate, identifier, gender, active)
 
-✅ **Phase 2 Complete** - Advanced Search
+✅ **Phase 2 Complete** - Advanced Search & Validation
 - Search modifiers: `:exact`, `:contains`, `:missing`
 - `_sort` parameter with multiple fields and directions
 - `_total` parameter for accurate counts
 - Optimized query building with proper SQL injection protection
+- FHIR resource validation:
+  - Resource type validation
+  - Required field validation
+  - Data type validation (gender, dates, etc.)
+  - Structure validation (names, identifiers)
+  - Comprehensive test coverage
 
 ## Next Steps
 
 - Phase 3: Additional resources (Observation, MedicationRequest)
-- Phase 4: Transaction bundles, validation
+- Phase 4: Transaction bundles, _include/_revinclude
 - Phase 5: Production readiness (auth, logging, comprehensive testing)
 
 ## License

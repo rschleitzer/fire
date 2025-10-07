@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::error::{FhirError, Result};
 use crate::models::patient::{extract_patient_search_params, Patient, PatientHistory};
 use crate::search::{SearchCondition, SearchQuery};
+use crate::services::validate_patient;
 
 pub struct PatientRepository {
     pool: PgPool,
@@ -19,12 +20,8 @@ impl PatientRepository {
 
     /// Create a new patient resource (version 1)
     pub async fn create(&self, content: Value) -> Result<Patient> {
-        // Validate resourceType
-        if content.get("resourceType").and_then(|r| r.as_str()) != Some("Patient") {
-            return Err(FhirError::InvalidResource(
-                "resourceType must be Patient".to_string(),
-            ));
-        }
+        // Validate resource
+        validate_patient(&content)?;
 
         let id = Uuid::new_v4();
         let version_id = 1;
@@ -131,12 +128,8 @@ impl PatientRepository {
 
     /// Update a patient resource (increment version)
     pub async fn update(&self, id: &Uuid, content: Value) -> Result<Patient> {
-        // Validate resourceType
-        if content.get("resourceType").and_then(|r| r.as_str()) != Some("Patient") {
-            return Err(FhirError::InvalidResource(
-                "resourceType must be Patient".to_string(),
-            ));
-        }
+        // Validate resource
+        validate_patient(&content)?;
 
         let mut tx = self.pool.begin().await?;
 
