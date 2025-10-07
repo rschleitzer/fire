@@ -61,8 +61,8 @@ pub async fn search_patients(
     let (patients, total) = repo.search(&params, include_total).await?;
 
     // Build FHIR Bundle response
-    let entries: Vec<Value> = patients
-        .into_iter()
+    let mut entries: Vec<Value> = patients
+        .iter()
         .map(|p| {
             serde_json::json!({
                 "resource": p.content,
@@ -72,6 +72,24 @@ pub async fn search_patients(
             })
         })
         .collect();
+
+    // Handle _revinclude parameter for Observation references
+    if let Some(revinclude_param) = params.get("_revinclude") {
+        if revinclude_param == "Observation:patient" || revinclude_param == "Observation:subject" {
+            // For each patient, find observations that reference it
+            for patient in &patients {
+                let observations = repo.find_observations_by_patient(&patient.id).await?;
+                for obs in observations {
+                    entries.push(serde_json::json!({
+                        "resource": obs.content,
+                        "search": {
+                            "mode": "include"
+                        }
+                    }));
+                }
+            }
+        }
+    }
 
     let mut bundle = serde_json::json!({
         "resourceType": "Bundle",

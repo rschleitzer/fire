@@ -1,8 +1,10 @@
 use axum::{
-    routing::get,
+    routing::{get, post},
     Router,
 };
+use std::sync::Arc;
 
+use super::handlers::bundle::{process_bundle, BundleState};
 use super::handlers::observation::{
     create_observation, delete_observation, get_observation_history, read_observation,
     read_observation_version, search_observations, update_observation, SharedObservationRepo,
@@ -28,4 +30,15 @@ pub fn observation_routes(repo: SharedObservationRepo) -> Router {
         .route("/fhir/Observation/:id/_history", get(get_observation_history))
         .route("/fhir/Observation/:id/_history/:version_id", get(read_observation_version))
         .with_state(repo)
+}
+
+pub fn bundle_routes(patient_repo: SharedPatientRepo, observation_repo: SharedObservationRepo) -> Router {
+    let state = Arc::new(BundleState {
+        patient_repo,
+        observation_repo,
+    });
+
+    Router::new()
+        .route("/fhir", post(process_bundle))
+        .with_state(state)
 }

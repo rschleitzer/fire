@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use fire::api::{observation_routes, patient_routes};
+use fire::api::{bundle_routes, observation_routes, patient_routes};
 use fire::config::Config;
 use fire::repository::{ObservationRepository, PatientRepository};
 
@@ -42,8 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build application routes
     let app = Router::new()
-        .merge(patient_routes(patient_repo))
-        .merge(observation_routes(observation_repo))
+        .merge(patient_routes(patient_repo.clone()))
+        .merge(observation_routes(observation_repo.clone()))
+        .merge(bundle_routes(patient_repo, observation_repo))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

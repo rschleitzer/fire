@@ -75,6 +75,10 @@ The server will start on `http://127.0.0.1:3000`
 - `GET /fhir/Observation/:id/_history` - Get observation history
 - `GET /fhir/Observation/:id/_history/:version_id` - Get specific version
 
+### Transaction Bundles
+
+- `POST /fhir` - Process transaction or batch bundle
+
 ### Search Parameters
 
 #### Patient Search
@@ -100,6 +104,7 @@ The server will start on `http://127.0.0.1:3000`
 - `_sort` - Sort results (comma-separated, prefix with `-` for descending)
 - `_total` - Include total count (`accurate`)
 - `_include` - Include referenced resources (e.g., `Observation:patient`, `Observation:subject`)
+- `_revinclude` - Include resources that reference the result (e.g., `Observation:patient`, `Observation:subject`)
 
 ### Search Modifiers
 
@@ -139,6 +144,11 @@ curl "http://localhost:3000/fhir/Patient?family:exact=Smith&_sort=-birthdate,giv
 Check for missing family name:
 ```bash
 curl "http://localhost:3000/fhir/Patient?family:missing=true"
+```
+
+Search patients with their observations:
+```bash
+curl "http://localhost:3000/fhir/Patient?name=Smith&_revinclude=Observation:patient"
 ```
 
 ### Search Observations
@@ -187,6 +197,54 @@ curl -X POST http://localhost:3000/fhir/Observation \
       "system": "http://unitsofmeasure.org",
       "code": "/min"
     }
+  }'
+```
+
+### Transaction Bundle
+
+Create multiple resources in a single transaction:
+```bash
+curl -X POST http://localhost:3000/fhir \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resourceType": "Bundle",
+    "type": "transaction",
+    "entry": [
+      {
+        "request": {
+          "method": "POST",
+          "url": "Patient"
+        },
+        "resource": {
+          "resourceType": "Patient",
+          "name": [{"family": "Smith", "given": ["John"]}],
+          "gender": "male",
+          "birthDate": "1980-01-01"
+        }
+      },
+      {
+        "request": {
+          "method": "POST",
+          "url": "Observation"
+        },
+        "resource": {
+          "resourceType": "Observation",
+          "status": "final",
+          "code": {
+            "coding": [{
+              "system": "http://loinc.org",
+              "code": "8867-4",
+              "display": "Heart rate"
+            }]
+          },
+          "subject": {"reference": "Patient/123"},
+          "valueQuantity": {
+            "value": 72,
+            "unit": "beats/minute"
+          }
+        }
+      }
+    ]
   }'
 ```
 
@@ -262,7 +320,7 @@ fire/
 
 ✅ **Phase 3 Complete** - Observation Resource
 - Full Observation resource implementation
-- CRUD operations (create, read, delete)
+- CRUD operations (create, read, update, delete)
 - Rich search parameter extraction:
   - Status, category, code
   - Subject/patient references
@@ -270,11 +328,26 @@ fire/
   - Multiple value types (quantity, codeable concept, string)
 - Observation-specific validation
 - Comprehensive database schema with optimized indexes
+- History tracking with version management
+
+✅ **Phase 4 Complete** - Advanced Search Features
+- Observation search with multiple parameters:
+  - Status, code, category, patient, subject, date
+- `_include` parameter for including referenced Patient resources
+- Support for `_sort`, `_count`, `_offset`, `_total` parameters
+- FHIR-compliant search bundle responses
+
+✅ **Phase 5 Complete** - Transaction Bundles & Reverse Includes
+- Transaction bundle support for atomic multi-resource operations
+- Batch bundle support for non-atomic operations
+- Support for POST, PUT, GET, DELETE within bundles
+- `_revinclude` parameter for reverse reference inclusion
+- Observation:patient and Observation:subject reverse includes
 
 ## Next Steps
 
-- Phase 4: Search for Observation, Transaction bundles, _include/_revinclude
-- Phase 5: Production readiness (auth, logging, comprehensive testing)
+- Phase 6: Production readiness (authentication, authorization, comprehensive logging, testing)
+- Phase 7: Additional FHIR resources and advanced features
 
 ## License
 

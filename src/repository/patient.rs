@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
+use crate::models::observation::Observation;
 use crate::models::patient::{extract_patient_search_params, Patient, PatientHistory};
 use crate::search::{SearchCondition, SearchQuery};
 use crate::services::validate_patient;
@@ -572,4 +573,33 @@ fn build_count_sql(query: &SearchQuery) -> String {
     }
 
     sql
+}
+
+impl PatientRepository {
+    /// Find observations that reference a specific patient (for _revinclude support)
+    pub async fn find_observations_by_patient(&self, patient_id: &Uuid) -> Result<Vec<Observation>> {
+        let patient_ref = format!("Patient/{}", patient_id);
+
+        let observations = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated, deleted,
+                content as "content: Value",
+                status, category_system, category_code,
+                code_system, code_code,
+                subject_reference, patient_reference, encounter_reference,
+                effective_datetime, effective_period_start, effective_period_end,
+                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_codeable_concept_code, value_string, performer_reference
+            FROM observation
+            WHERE patient_reference = $1 AND deleted = FALSE
+            "#,
+            patient_ref
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(observations)
+    }
 }
