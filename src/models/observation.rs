@@ -1,0 +1,240 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::FromRow;
+use uuid::Uuid;
+
+use super::traits::VersionedResource;
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Observation {
+    pub id: Uuid,
+    pub version_id: i32,
+    pub last_updated: DateTime<Utc>,
+    pub deleted: bool,
+    pub content: Value,
+
+    // Search parameters
+    pub status: Option<String>,
+    pub category_system: Option<Vec<String>>,
+    pub category_code: Option<Vec<String>>,
+    pub code_system: Option<String>,
+    pub code_code: Option<String>,
+    pub subject_reference: Option<String>,
+    pub patient_reference: Option<String>,
+    pub encounter_reference: Option<String>,
+    pub effective_datetime: Option<DateTime<Utc>>,
+    pub effective_period_start: Option<DateTime<Utc>>,
+    pub effective_period_end: Option<DateTime<Utc>>,
+    pub issued: Option<DateTime<Utc>>,
+    pub value_quantity_value: Option<sqlx::types::BigDecimal>,
+    pub value_quantity_unit: Option<String>,
+    pub value_quantity_system: Option<String>,
+    pub value_codeable_concept_code: Option<Vec<String>>,
+    pub value_string: Option<String>,
+    pub performer_reference: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ObservationHistory {
+    pub id: Uuid,
+    pub version_id: i32,
+    pub last_updated: DateTime<Utc>,
+    pub deleted: bool,
+    pub content: Value,
+
+    // Same search parameters
+    pub status: Option<String>,
+    pub category_system: Option<Vec<String>>,
+    pub category_code: Option<Vec<String>>,
+    pub code_system: Option<String>,
+    pub code_code: Option<String>,
+    pub subject_reference: Option<String>,
+    pub patient_reference: Option<String>,
+    pub encounter_reference: Option<String>,
+    pub effective_datetime: Option<DateTime<Utc>>,
+    pub effective_period_start: Option<DateTime<Utc>>,
+    pub effective_period_end: Option<DateTime<Utc>>,
+    pub issued: Option<DateTime<Utc>>,
+    pub value_quantity_value: Option<sqlx::types::BigDecimal>,
+    pub value_quantity_unit: Option<String>,
+    pub value_quantity_system: Option<String>,
+    pub value_codeable_concept_code: Option<Vec<String>>,
+    pub value_string: Option<String>,
+    pub performer_reference: Option<Vec<String>>,
+
+    // History metadata
+    pub history_operation: String,
+    pub history_timestamp: DateTime<Utc>,
+}
+
+impl VersionedResource for Observation {
+    type History = ObservationHistory;
+
+    const RESOURCE_TYPE: &'static str = "Observation";
+    const TABLE_NAME: &'static str = "observation";
+    const HISTORY_TABLE_NAME: &'static str = "observation_history";
+
+    fn get_id(&self) -> &Uuid {
+        &self.id
+    }
+
+    fn get_version_id(&self) -> i32 {
+        self.version_id
+    }
+
+    fn get_last_updated(&self) -> &DateTime<Utc> {
+        &self.last_updated
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+
+    fn get_content(&self) -> &Value {
+        &self.content
+    }
+}
+
+/// Extract search parameters from FHIR Observation JSON
+pub fn extract_observation_search_params(content: &Value) -> ObservationSearchParams {
+    let mut params = ObservationSearchParams::default();
+
+    // Extract status
+    if let Some(status) = content.get("status").and_then(|s| s.as_str()) {
+        params.status = Some(status.to_string());
+    }
+
+    // Extract category
+    if let Some(categories) = content.get("category").and_then(|c| c.as_array()) {
+        for category in categories {
+            if let Some(codings) = category.get("coding").and_then(|c| c.as_array()) {
+                for coding in codings {
+                    if let Some(system) = coding.get("system").and_then(|s| s.as_str()) {
+                        params.category_system.push(system.to_string());
+                    }
+                    if let Some(code) = coding.get("code").and_then(|c| c.as_str()) {
+                        params.category_code.push(code.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract code
+    if let Some(code_obj) = content.get("code") {
+        if let Some(codings) = code_obj.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get("system").and_then(|s| s.as_str()) {
+                    params.code_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.code_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract subject
+    if let Some(subject) = content.get("subject").and_then(|s| s.get("reference")).and_then(|r| r.as_str()) {
+        params.subject_reference = Some(subject.to_string());
+        if subject.starts_with("Patient/") {
+            params.patient_reference = Some(subject.to_string());
+        }
+    }
+
+    // Extract encounter
+    if let Some(encounter) = content.get("encounter").and_then(|e| e.get("reference")).and_then(|r| r.as_str()) {
+        params.encounter_reference = Some(encounter.to_string());
+    }
+
+    // Extract effectiveDateTime
+    if let Some(effective) = content.get("effectiveDateTime").and_then(|e| e.as_str()) {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {
+            params.effective_datetime = Some(dt.with_timezone(&Utc));
+        }
+    }
+
+    // Extract effectivePeriod
+    if let Some(period) = content.get("effectivePeriod") {
+        if let Some(start) = period.get("start").and_then(|s| s.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(start) {
+                params.effective_period_start = Some(dt.with_timezone(&Utc));
+            }
+        }
+        if let Some(end) = period.get("end").and_then(|e| e.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
+                params.effective_period_end = Some(dt.with_timezone(&Utc));
+            }
+        }
+    }
+
+    // Extract issued
+    if let Some(issued) = content.get("issued").and_then(|i| i.as_str()) {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(issued) {
+            params.issued = Some(dt.with_timezone(&Utc));
+        }
+    }
+
+    // Extract valueQuantity
+    if let Some(value_qty) = content.get("valueQuantity") {
+        if let Some(value) = value_qty.get("value").and_then(|v| v.as_f64()) {
+            params.value_quantity_value = Some(value);
+        }
+        if let Some(unit) = value_qty.get("unit").and_then(|u| u.as_str()) {
+            params.value_quantity_unit = Some(unit.to_string());
+        }
+        if let Some(system) = value_qty.get("system").and_then(|s| s.as_str()) {
+            params.value_quantity_system = Some(system.to_string());
+        }
+    }
+
+    // Extract valueCodeableConcept
+    if let Some(value_cc) = content.get("valueCodeableConcept") {
+        if let Some(codings) = value_cc.get("coding").and_then(|c| c.as_array()) {
+            for coding in codings {
+                if let Some(code) = coding.get("code").and_then(|c| c.as_str()) {
+                    params.value_codeable_concept_code.push(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract valueString
+    if let Some(value_str) = content.get("valueString").and_then(|v| v.as_str()) {
+        params.value_string = Some(value_str.to_string());
+    }
+
+    // Extract performer
+    if let Some(performers) = content.get("performer").and_then(|p| p.as_array()) {
+        for performer in performers {
+            if let Some(reference) = performer.get("reference").and_then(|r| r.as_str()) {
+                params.performer_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    params
+}
+
+#[derive(Debug, Default)]
+pub struct ObservationSearchParams {
+    pub status: Option<String>,
+    pub category_system: Vec<String>,
+    pub category_code: Vec<String>,
+    pub code_system: Option<String>,
+    pub code_code: Option<String>,
+    pub subject_reference: Option<String>,
+    pub patient_reference: Option<String>,
+    pub encounter_reference: Option<String>,
+    pub effective_datetime: Option<DateTime<Utc>>,
+    pub effective_period_start: Option<DateTime<Utc>>,
+    pub effective_period_end: Option<DateTime<Utc>>,
+    pub issued: Option<DateTime<Utc>>,
+    pub value_quantity_value: Option<f64>,
+    pub value_quantity_unit: Option<String>,
+    pub value_quantity_system: Option<String>,
+    pub value_codeable_concept_code: Vec<String>,
+    pub value_string: Option<String>,
+    pub performer_reference: Vec<String>,
+}

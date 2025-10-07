@@ -65,6 +65,12 @@ The server will start on `http://127.0.0.1:3000`
 - `GET /fhir/Patient/:id/_history` - Get patient history
 - `GET /fhir/Patient/:id/_history/:version_id` - Get specific version
 
+### Observation Resource
+
+- `POST /fhir/Observation` - Create observation
+- `GET /fhir/Observation/:id` - Read observation
+- `DELETE /fhir/Observation/:id` - Delete observation (soft delete)
+
 ### Search Parameters
 
 - `name` - Search by family or given name (partial match)
@@ -119,6 +125,33 @@ Check for missing family name:
 curl "http://localhost:3000/fhir/Patient?family:missing=true"
 ```
 
+### Create Observation
+```bash
+curl -X POST http://localhost:3000/fhir/Observation \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resourceType": "Observation",
+    "status": "final",
+    "code": {
+      "coding": [{
+        "system": "http://loinc.org",
+        "code": "8867-4",
+        "display": "Heart rate"
+      }]
+    },
+    "subject": {
+      "reference": "Patient/123"
+    },
+    "effectiveDateTime": "2024-01-15T10:30:00Z",
+    "valueQuantity": {
+      "value": 72,
+      "unit": "beats/minute",
+      "system": "http://unitsofmeasure.org",
+      "code": "/min"
+    }
+  }'
+```
+
 ## Development
 
 ### Build
@@ -152,15 +185,18 @@ fire/
 │   │   └── routes.rs
 │   ├── models/              # Data models
 │   │   ├── traits.rs
-│   │   └── patient.rs
+│   │   ├── patient.rs
+│   │   └── observation.rs
 │   ├── repository/          # Database operations
-│   │   └── patient.rs
+│   │   ├── patient.rs
+│   │   └── observation.rs
 │   ├── search/              # Search query builder
 │   │   └── mod.rs
 │   └── services/            # Business logic
 │       └── validation.rs    # FHIR validation
 ├── migrations/              # SQL migrations
-│   └── 001_create_patient_tables.sql
+│   ├── 001_create_patient_tables.sql
+│   └── 002_create_observation_tables.sql
 ├── Cargo.toml
 └── CLAUDE.md               # Architecture documentation
 ```
@@ -186,10 +222,20 @@ fire/
   - Structure validation (names, identifiers)
   - Comprehensive test coverage
 
+✅ **Phase 3 Complete** - Observation Resource
+- Full Observation resource implementation
+- CRUD operations (create, read, delete)
+- Rich search parameter extraction:
+  - Status, category, code
+  - Subject/patient references
+  - Effective dates and periods
+  - Multiple value types (quantity, codeable concept, string)
+- Observation-specific validation
+- Comprehensive database schema with optimized indexes
+
 ## Next Steps
 
-- Phase 3: Additional resources (Observation, MedicationRequest)
-- Phase 4: Transaction bundles, _include/_revinclude
+- Phase 4: Search for Observation, Transaction bundles, _include/_revinclude
 - Phase 5: Production readiness (auth, logging, comprehensive testing)
 
 ## License

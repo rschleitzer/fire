@@ -4,9 +4,9 @@ use std::sync::Arc;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use fire::api::patient_routes;
+use fire::api::{observation_routes, patient_routes};
 use fire::config::Config;
-use fire::repository::PatientRepository;
+use fire::repository::{ObservationRepository, PatientRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,10 +38,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create repositories
     let patient_repo = Arc::new(PatientRepository::new(pool.clone()));
+    let observation_repo = Arc::new(ObservationRepository::new(pool.clone()));
 
     // Build application routes
     let app = Router::new()
         .merge(patient_routes(patient_repo))
+        .merge(observation_routes(observation_repo))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

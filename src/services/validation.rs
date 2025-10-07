@@ -216,3 +216,113 @@ mod tests {
         assert!(validate_patient(&patient).is_ok());
     }
 }
+
+/// Validates a FHIR Observation resource
+pub fn validate_observation(content: &Value) -> Result<()> {
+    // Validate resourceType
+    let resource_type = content
+        .get("resourceType")
+        .and_then(|r| r.as_str())
+        .ok_or_else(|| FhirError::InvalidResource("Missing resourceType".to_string()))?;
+
+    if resource_type != "Observation" {
+        return Err(FhirError::InvalidResource(format!(
+            "Expected resourceType 'Observation', got '{}'",
+            resource_type
+        )));
+    }
+
+    // Status is required
+    let status = content
+        .get("status")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| FhirError::ValidationError("status is required".to_string()))?;
+
+    // Validate status values
+    let valid_statuses = [
+        "registered",
+        "preliminary",
+        "final",
+        "amended",
+        "corrected",
+        "cancelled",
+        "entered-in-error",
+        "unknown",
+    ];
+    if !valid_statuses.contains(&status) {
+        return Err(FhirError::ValidationError(format!(
+            "Invalid status '{}'. Must be one of: {}",
+            status,
+            valid_statuses.join(", ")
+        )));
+    }
+
+    // Code is required
+    if content.get("code").is_none() {
+        return Err(FhirError::ValidationError(
+            "code is required".to_string(),
+        ));
+    }
+
+    // Validate code structure
+    if let Some(code) = content.get("code") {
+        if !code.is_object() {
+            return Err(FhirError::ValidationError(
+                "code must be an object".to_string(),
+            ));
+        }
+
+        // Should have coding array
+        if let Some(coding) = code.get("coding") {
+            if !coding.is_array() {
+                return Err(FhirError::ValidationError(
+                    "code.coding must be an array".to_string(),
+                ));
+            }
+        }
+    }
+
+    // Subject is required
+    if content.get("subject").is_none() {
+        return Err(FhirError::ValidationError(
+            "subject is required".to_string(),
+        ));
+    }
+
+    // Validate subject has reference
+    if let Some(subject) = content.get("subject") {
+        if subject.get("reference").is_none() {
+            return Err(FhirError::ValidationError(
+                "subject.reference is required".to_string(),
+            ));
+        }
+    }
+
+    // Validate effective[x] - at least one should be present for most observations
+    let has_effective = content.get("effectiveDateTime").is_some()
+        || content.get("effectivePeriod").is_some()
+        || content.get("effectiveTiming").is_some()
+        || content.get("effectiveInstant").is_some();
+
+    if !has_effective {
+        // Not strictly required by FHIR, but recommended
+        // Just log a warning in real implementation
+    }
+
+    // Validate value[x] structure if present
+    if let Some(value_qty) = content.get("valueQuantity") {
+        if !value_qty.is_object() {
+            return Err(FhirError::ValidationError(
+                "valueQuantity must be an object".to_string(),
+            ));
+        }
+        // Value is required in Quantity
+        if value_qty.get("value").is_none() {
+            return Err(FhirError::ValidationError(
+                "valueQuantity.value is required".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
