@@ -81,54 +81,6 @@ impl ObservationRepository {
         .execute(&mut *tx)
         .await?;
 
-        // Insert into history table
-        sqlx::query!(
-            r#"
-            INSERT INTO observation_history (
-                id, version_id, last_updated, content,
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
-                history_operation, history_timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-            "#,
-            id,
-            version_id,
-            last_updated,
-            &content,
-            params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system)),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(params.category_code)),
-            params.code_system,
-            params.code_code,
-            params.subject_reference,
-            params.patient_reference,
-            params.encounter_reference,
-            params.effective_datetime,
-            params.effective_period_start,
-            params.effective_period_end,
-            params.issued,
-            value_qty_decimal,
-            params.value_quantity_unit,
-            params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code)),
-            params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation)),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type)),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference)),
-            params.body_structure_reference,
-            "CREATE",
-            Utc::now(),
-        )
-        .execute(&mut *tx)
-        .await?;
-
         tx.commit().await?;
 
         // Fetch and return the created observation
@@ -268,24 +220,61 @@ impl ObservationRepository {
 
         let mut tx = self.pool.begin().await?;
 
-        // Get current version with lock
-        let current = sqlx::query!(
-            r#"
-            SELECT version_id
-            FROM observation
-            WHERE id = $1
-            FOR UPDATE
-            "#,
-            id
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(FhirError::NotFound)?;
+        // Get current version with lock (need full data to store in history)
+        let old_observation = self.read(id).await?;
 
-        let new_version_id = current.version_id + 1;
+        let new_version_id = old_observation.version_id + 1;
         let last_updated = Utc::now();
 
-        // Extract search parameters
+        // Insert OLD version into history before updating
+        sqlx::query!(
+            r#"
+            INSERT INTO observation_history (
+                id, version_id, last_updated, content,
+                status, category_system, category_code,
+                code_system, code_code,
+                subject_reference, patient_reference, encounter_reference,
+                effective_datetime, effective_period_start, effective_period_end,
+                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
+                history_operation, history_timestamp
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+            "#,
+            old_observation.id,
+            old_observation.version_id,
+            old_observation.last_updated,
+            &old_observation.content,
+            old_observation.status,
+            &old_observation.category_system,
+            &old_observation.category_code,
+            old_observation.code_system,
+            old_observation.code_code,
+            old_observation.subject_reference,
+            old_observation.patient_reference,
+            old_observation.encounter_reference,
+            old_observation.effective_datetime,
+            old_observation.effective_period_start,
+            old_observation.effective_period_end,
+            old_observation.issued,
+            old_observation.value_quantity_value,
+            old_observation.value_quantity_unit,
+            old_observation.value_quantity_system,
+            &old_observation.value_codeable_concept_code,
+            old_observation.value_string,
+            &old_observation.performer_reference,
+            &old_observation.triggered_by_observation,
+            &old_observation.triggered_by_type,
+            &old_observation.focus_reference,
+            old_observation.body_structure_reference,
+            "UPDATE",
+            Utc::now(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Extract search parameters for new content
         let params = extract_observation_search_params(&content);
 
         // Convert f64 to BigDecimal
@@ -293,7 +282,7 @@ impl ObservationRepository {
             sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
         });
 
-        // Update current table
+        // Update current table with new version
         sqlx::query!(
             r#"
             UPDATE observation
@@ -355,63 +344,15 @@ impl ObservationRepository {
         .execute(&mut *tx)
         .await?;
 
-        // Insert new version into history table
-        sqlx::query!(
-            r#"
-            INSERT INTO observation_history (
-                id, version_id, last_updated, content,
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
-                history_operation, history_timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-            "#,
-            id,
-            new_version_id,
-            last_updated,
-            &content,
-            params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system)),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(params.category_code)),
-            params.code_system,
-            params.code_code,
-            params.subject_reference,
-            params.patient_reference,
-            params.encounter_reference,
-            params.effective_datetime,
-            params.effective_period_start,
-            params.effective_period_end,
-            params.issued,
-            value_qty_decimal,
-            params.value_quantity_unit,
-            params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code)),
-            params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation)),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type)),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference)),
-            params.body_structure_reference,
-            "UPDATE",
-            Utc::now(),
-        )
-        .execute(&mut *tx)
-        .await?;
-
         tx.commit().await?;
 
         // Fetch and return updated observation
         self.read(id).await
     }
 
-    /// Get all versions of an observation from history
+    /// Get all versions of an observation from history (includes current version if exists)
     pub async fn history(&self, id: &Uuid) -> Result<Vec<ObservationHistory>> {
-        let history = sqlx::query_as!(
+        let mut history = sqlx::query_as!(
             ObservationHistory,
             r#"
             SELECT
@@ -434,6 +375,42 @@ impl ObservationRepository {
         .fetch_all(&self.pool)
         .await?;
 
+        // Try to get current version and add it to history
+        if let Ok(current) = self.read(id).await {
+            // Convert current Observation to ObservationHistory format
+            let current_as_history = ObservationHistory {
+                id: current.id,
+                version_id: current.version_id,
+                last_updated: current.last_updated,
+                content: current.content,
+                status: current.status,
+                category_system: current.category_system,
+                category_code: current.category_code,
+                code_system: current.code_system,
+                code_code: current.code_code,
+                subject_reference: current.subject_reference,
+                patient_reference: current.patient_reference,
+                encounter_reference: current.encounter_reference,
+                effective_datetime: current.effective_datetime,
+                effective_period_start: current.effective_period_start,
+                effective_period_end: current.effective_period_end,
+                issued: current.issued,
+                value_quantity_value: current.value_quantity_value,
+                value_quantity_unit: current.value_quantity_unit,
+                value_quantity_system: current.value_quantity_system,
+                value_codeable_concept_code: current.value_codeable_concept_code,
+                value_string: current.value_string,
+                performer_reference: current.performer_reference,
+                triggered_by_observation: current.triggered_by_observation,
+                triggered_by_type: current.triggered_by_type,
+                focus_reference: current.focus_reference,
+                body_structure_reference: current.body_structure_reference,
+                history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                history_timestamp: current.last_updated,
+            };
+            history.insert(0, current_as_history);
+        }
+
         if history.is_empty() {
             return Err(FhirError::NotFound);
         }
@@ -441,8 +418,46 @@ impl ObservationRepository {
         Ok(history)
     }
 
-    /// Read a specific version from history
+    /// Read a specific version from history (checks current version first)
     pub async fn read_version(&self, id: &Uuid, version_id: i32) -> Result<ObservationHistory> {
+        // Check if requested version is the current version
+        if let Ok(current) = self.read(id).await {
+            if current.version_id == version_id {
+                // Convert to ObservationHistory format
+                return Ok(ObservationHistory {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    status: current.status,
+                    category_system: current.category_system,
+                    category_code: current.category_code,
+                    code_system: current.code_system,
+                    code_code: current.code_code,
+                    subject_reference: current.subject_reference,
+                    patient_reference: current.patient_reference,
+                    encounter_reference: current.encounter_reference,
+                    effective_datetime: current.effective_datetime,
+                    effective_period_start: current.effective_period_start,
+                    effective_period_end: current.effective_period_end,
+                    issued: current.issued,
+                    value_quantity_value: current.value_quantity_value,
+                    value_quantity_unit: current.value_quantity_unit,
+                    value_quantity_system: current.value_quantity_system,
+                    value_codeable_concept_code: current.value_codeable_concept_code,
+                    value_string: current.value_string,
+                    performer_reference: current.performer_reference,
+                    triggered_by_observation: current.triggered_by_observation,
+                    triggered_by_type: current.triggered_by_type,
+                    focus_reference: current.focus_reference,
+                    body_structure_reference: current.body_structure_reference,
+                    history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                    history_timestamp: current.last_updated,
+                });
+            }
+        }
+
+        // Not current version, check history table
         let observation = sqlx::query_as!(
             ObservationHistory,
             r#"

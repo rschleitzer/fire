@@ -71,34 +71,6 @@ impl PatientRepository {
         .fetch_one(&mut *tx)
         .await?;
 
-        // Insert into history table
-        sqlx::query!(
-            r#"
-            INSERT INTO patient_history (
-                id, version_id, last_updated, content,
-                family_name, given_name, identifier_system, identifier_value,
-                birthdate, gender, active,
-                history_operation, history_timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            "#,
-            patient.id,
-            patient.version_id,
-            patient.last_updated,
-            &patient.content,
-            &patient.family_name,
-            &patient.given_name,
-            &patient.identifier_system,
-            &patient.identifier_value,
-            patient.birthdate,
-            &patient.gender,
-            patient.active,
-            "CREATE",
-            Utc::now(),
-        )
-        .execute(&mut *tx)
-        .await?;
-
         tx.commit().await?;
 
         Ok(patient)
@@ -136,10 +108,18 @@ impl PatientRepository {
 
         let mut tx = self.pool.begin().await?;
 
-        // Get current version with lock
-        let current = sqlx::query!(
+        // Get current version with lock (need full data to store in history)
+        let old_patient = sqlx::query_as!(
+            Patient,
             r#"
-            SELECT version_id
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value",
+                family_name as "family_name?",
+                given_name as "given_name?",
+                identifier_system as "identifier_system?",
+                identifier_value as "identifier_value?",
+                birthdate, gender, active
             FROM patient
             WHERE id = $1
             FOR UPDATE
@@ -150,13 +130,41 @@ impl PatientRepository {
         .await?
         .ok_or(FhirError::NotFound)?;
 
-        let new_version_id = current.version_id + 1;
+        let new_version_id = old_patient.version_id + 1;
         let last_updated = Utc::now();
 
-        // Extract search parameters
+        // Insert OLD version into history before updating
+        sqlx::query!(
+            r#"
+            INSERT INTO patient_history (
+                id, version_id, last_updated, content,
+                family_name, given_name, identifier_system, identifier_value,
+                birthdate, gender, active,
+                history_operation, history_timestamp
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+            old_patient.id,
+            old_patient.version_id,
+            old_patient.last_updated,
+            &old_patient.content,
+            &old_patient.family_name,
+            &old_patient.given_name,
+            &old_patient.identifier_system,
+            &old_patient.identifier_value,
+            old_patient.birthdate,
+            &old_patient.gender,
+            old_patient.active,
+            "UPDATE",
+            Utc::now(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Extract search parameters for new content
         let params = extract_patient_search_params(&content);
 
-        // Update current table
+        // Update current table with new version
         let patient = sqlx::query_as!(
             Patient,
             r#"
@@ -195,34 +203,6 @@ impl PatientRepository {
             params.active,
         )
         .fetch_one(&mut *tx)
-        .await?;
-
-        // Insert new version into history table
-        sqlx::query!(
-            r#"
-            INSERT INTO patient_history (
-                id, version_id, last_updated, content,
-                family_name, given_name, identifier_system, identifier_value,
-                birthdate, gender, active,
-                history_operation, history_timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            "#,
-            patient.id,
-            patient.version_id,
-            patient.last_updated,
-            &patient.content,
-            &patient.family_name,
-            &patient.given_name,
-            &patient.identifier_system,
-            &patient.identifier_value,
-            patient.birthdate,
-            &patient.gender,
-            patient.active,
-            "UPDATE",
-            Utc::now(),
-        )
-        .execute(&mut *tx)
         .await?;
 
         tx.commit().await?;
@@ -303,9 +283,9 @@ impl PatientRepository {
         Ok(())
     }
 
-    /// Get all versions of a patient from history
+    /// Get all versions of a patient from history (includes current version if exists)
     pub async fn history(&self, id: &Uuid) -> Result<Vec<PatientHistory>> {
-        let history = sqlx::query_as!(
+        let mut history = sqlx::query_as!(
             PatientHistory,
             r#"
             SELECT
@@ -326,6 +306,28 @@ impl PatientRepository {
         .fetch_all(&self.pool)
         .await?;
 
+        // Try to get current version and add it to history
+        if let Ok(current) = self.read(id).await {
+            // Convert current Patient to PatientHistory format
+            // Current version isn't in history yet (only gets added on update/delete)
+            let current_as_history = PatientHistory {
+                id: current.id,
+                version_id: current.version_id,
+                last_updated: current.last_updated,
+                content: current.content,
+                family_name: current.family_name,
+                given_name: current.given_name,
+                identifier_system: current.identifier_system,
+                identifier_value: current.identifier_value,
+                birthdate: current.birthdate,
+                gender: current.gender,
+                active: current.active,
+                history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                history_timestamp: current.last_updated,
+            };
+            history.insert(0, current_as_history);
+        }
+
         if history.is_empty() {
             return Err(FhirError::NotFound);
         }
@@ -333,8 +335,31 @@ impl PatientRepository {
         Ok(history)
     }
 
-    /// Read a specific version from history
+    /// Read a specific version from history (checks current version first)
     pub async fn read_version(&self, id: &Uuid, version_id: i32) -> Result<PatientHistory> {
+        // Check if requested version is the current version
+        if let Ok(current) = self.read(id).await {
+            if current.version_id == version_id {
+                // Convert to PatientHistory format
+                return Ok(PatientHistory {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    family_name: current.family_name,
+                    given_name: current.given_name,
+                    identifier_system: current.identifier_system,
+                    identifier_value: current.identifier_value,
+                    birthdate: current.birthdate,
+                    gender: current.gender,
+                    active: current.active,
+                    history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                    history_timestamp: current.last_updated,
+                });
+            }
+        }
+
+        // Not current version, check history table
         let patient = sqlx::query_as!(
             PatientHistory,
             r#"
