@@ -1,0 +1,6 @@
+# Cargo configuration for Fire FHIR Server
+
+# Integration tests share a test database, so they must run serially
+# to avoid conflicts. This sets the default RUST_TEST_THREADS to 1.
+[env]
+RUST_TEST_THREADS = "1"
