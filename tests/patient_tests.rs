@@ -19,7 +19,6 @@ async fn test_create_patient() {
         .expect("Failed to create patient");
 
     assert_eq!(patient.version_id, 1);
-    assert_eq!(patient.deleted, false);
     assert_eq!(patient.content["resourceType"], "Patient");
     assert_eq!(patient.content["name"][0]["family"], "TestFamily");
 

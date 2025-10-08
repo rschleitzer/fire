@@ -3,7 +3,6 @@ CREATE TABLE patient (
     id UUID PRIMARY KEY,
     version_id INTEGER NOT NULL DEFAULT 1,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     content JSONB NOT NULL,
 
     -- Extracted search parameters (indexed)
@@ -24,7 +23,6 @@ CREATE INDEX idx_patient_birthdate ON patient (birthdate);
 CREATE INDEX idx_patient_gender ON patient (gender);
 CREATE INDEX idx_patient_active ON patient (active);
 CREATE INDEX idx_patient_last_updated ON patient (last_updated);
-CREATE INDEX idx_patient_deleted ON patient (deleted);
 
 -- Create GIN index for JSONB content (for advanced queries)
 CREATE INDEX idx_patient_content ON patient USING GIN (content);
@@ -34,7 +32,6 @@ CREATE TABLE patient_history (
     id UUID NOT NULL,
     version_id INTEGER NOT NULL,
     last_updated TIMESTAMPTZ NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     content JSONB NOT NULL,
 
     -- Same search parameters as current
@@ -66,7 +63,6 @@ CREATE TABLE observation (
     id UUID PRIMARY KEY,
     version_id INTEGER NOT NULL DEFAULT 1,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     content JSONB NOT NULL,
 
     -- Extracted search parameters (indexed)
@@ -106,7 +102,6 @@ CREATE INDEX idx_observation_effective_period ON observation (effective_period_s
 CREATE INDEX idx_observation_issued ON observation (issued);
 CREATE INDEX idx_observation_value_quantity ON observation (value_quantity_value);
 CREATE INDEX idx_observation_last_updated ON observation (last_updated);
-CREATE INDEX idx_observation_deleted ON observation (deleted);
 CREATE INDEX idx_observation_triggered_by ON observation USING GIN (triggered_by_observation);
 CREATE INDEX idx_observation_focus ON observation USING GIN (focus_reference);
 CREATE INDEX idx_observation_body_structure ON observation (body_structure_reference);
@@ -119,7 +114,6 @@ CREATE TABLE observation_history (
     id UUID NOT NULL,
     version_id INTEGER NOT NULL,
     last_updated TIMESTAMPTZ NOT NULL,
-    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     content JSONB NOT NULL,
 
     -- Same search parameters as current

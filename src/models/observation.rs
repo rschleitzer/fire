@@ -11,7 +11,6 @@ pub struct Observation {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub deleted: bool,
     pub content: Value,
 
     // Search parameters
@@ -46,7 +45,6 @@ pub struct ObservationHistory {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub deleted: bool,
     pub content: Value,
 
     // Same search parameters
@@ -97,10 +95,6 @@ impl VersionedResource for Observation {
 
     fn get_last_updated(&self) -> &DateTime<Utc> {
         &self.last_updated
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.deleted
     }
 
     fn get_content(&self) -> &Value {

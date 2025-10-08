@@ -40,7 +40,7 @@ impl ObservationRepository {
         sqlx::query!(
             r#"
             INSERT INTO observation (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
@@ -49,12 +49,11 @@ impl ObservationRepository {
                 value_codeable_concept_code, value_string, performer_reference,
                 triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
             "#,
             id,
             version_id,
             last_updated,
-            false,
             content,
             params.status,
             params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system.clone())),
@@ -86,7 +85,7 @@ impl ObservationRepository {
         sqlx::query!(
             r#"
             INSERT INTO observation_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
@@ -96,12 +95,11 @@ impl ObservationRepository {
                 triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
             "#,
             id,
             version_id,
             last_updated,
-            false,
             &content,
             params.status,
             params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system)),
@@ -142,16 +140,17 @@ impl ObservationRepository {
         let row = sqlx::query!(
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference
+                value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
             FROM observation
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             "#,
             id
         )
@@ -163,7 +162,6 @@ impl ObservationRepository {
             id: row.id,
             version_id: row.version_id,
             last_updated: row.last_updated,
-            deleted: row.deleted,
             content: row.content,
             status: row.status,
             category_system: row.category_system,
@@ -183,28 +181,29 @@ impl ObservationRepository {
             value_codeable_concept_code: row.value_codeable_concept_code,
             value_string: row.value_string,
             performer_reference: row.performer_reference,
+            triggered_by_observation: row.triggered_by_observation,
+            triggered_by_type: row.triggered_by_type,
+            focus_reference: row.focus_reference,
+            body_structure_reference: row.body_structure_reference,
         })
     }
 
-    /// Delete an observation (soft delete)
+    /// Delete an observation (hard delete)
     pub async fn delete(&self, id: &Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Get current observation
+        // Get current observation (to store in history)
         let observation = self.read(id).await?;
         let new_version_id = observation.version_id + 1;
         let last_updated = Utc::now();
 
-        // Mark as deleted in current table
+        // Delete from current table
         sqlx::query!(
             r#"
-            UPDATE observation
-            SET deleted = TRUE, version_id = $2, last_updated = $3
+            DELETE FROM observation
             WHERE id = $1
             "#,
             id,
-            new_version_id,
-            last_updated,
         )
         .execute(&mut *tx)
         .await?;
@@ -213,16 +212,17 @@ impl ObservationRepository {
         sqlx::query!(
             r#"
             INSERT INTO observation_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
             "#,
             id,
             new_version_id,
@@ -246,6 +246,10 @@ impl ObservationRepository {
             &observation.value_codeable_concept_code,
             observation.value_string,
             &observation.performer_reference,
+            &observation.triggered_by_observation,
+            &observation.triggered_by_type,
+            &observation.focus_reference,
+            observation.body_structure_reference,
             "DELETE",
             Utc::now(),
         )
@@ -269,7 +273,7 @@ impl ObservationRepository {
             r#"
             SELECT version_id
             FROM observation
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             FOR UPDATE
             "#,
             id
@@ -355,7 +359,7 @@ impl ObservationRepository {
         sqlx::query!(
             r#"
             INSERT INTO observation_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
@@ -365,12 +369,11 @@ impl ObservationRepository {
                 triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
             "#,
             id,
             new_version_id,
             last_updated,
-            false,
             &content,
             params.status,
             params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system)),
@@ -412,7 +415,7 @@ impl ObservationRepository {
             ObservationHistory,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 status, category_system, category_code,
                 code_system, code_code,
@@ -420,6 +423,7 @@ impl ObservationRepository {
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             FROM observation_history
             WHERE id = $1
@@ -443,7 +447,7 @@ impl ObservationRepository {
             ObservationHistory,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 status, category_system, category_code,
                 code_system, code_code,
@@ -451,6 +455,7 @@ impl ObservationRepository {
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             FROM observation_history
             WHERE id = $1 AND version_id = $2
@@ -472,7 +477,7 @@ impl ObservationRepository {
         let query = SearchQuery::from_params(params)?;
 
         // Build WHERE clause
-        let mut where_conditions = vec!["deleted = FALSE".to_string()];
+        let mut where_conditions = vec!["1=1".to_string()];
         let mut bind_values: Vec<String> = Vec::new();
 
         // Status parameter
@@ -580,12 +585,13 @@ impl ObservationRepository {
 
         // Build main query
         let sql = format!(
-            "SELECT id, version_id, last_updated, deleted, content as \"content: Value\",
+            "SELECT id, version_id, last_updated, content as \"content: Value\",
                     status, category_system, category_code, code_system, code_code,
                     subject_reference, patient_reference, encounter_reference,
                     effective_datetime, effective_period_start, effective_period_end,
                     issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_codeable_concept_code, value_string, performer_reference
+                    value_codeable_concept_code, value_string, performer_reference,
+                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
              FROM observation
              WHERE {}
              {}
@@ -613,13 +619,13 @@ impl ObservationRepository {
         let row = sqlx::query!(
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name, given_name,
                 identifier_system, identifier_value,
                 birthdate, gender, active
             FROM patient
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             "#,
             id
         )
@@ -631,7 +637,6 @@ impl ObservationRepository {
             id: row.id,
             version_id: row.version_id,
             last_updated: row.last_updated,
-            deleted: row.deleted,
             content: row.content,
             family_name: row.family_name,
             given_name: row.given_name,

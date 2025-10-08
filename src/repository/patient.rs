@@ -42,13 +42,13 @@ impl PatientRepository {
             Patient,
             r#"
             INSERT INTO patient (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 family_name, given_name, identifier_system, identifier_value,
                 birthdate, gender, active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -59,7 +59,6 @@ impl PatientRepository {
             id,
             version_id,
             last_updated,
-            false,
             content,
             params.family_name.is_empty().then_some(None).unwrap_or(Some(params.family_name)),
             params.given_name.is_empty().then_some(None).unwrap_or(Some(params.given_name)),
@@ -76,17 +75,16 @@ impl PatientRepository {
         sqlx::query!(
             r#"
             INSERT INTO patient_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 family_name, given_name, identifier_system, identifier_value,
                 birthdate, gender, active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
             patient.id,
             patient.version_id,
             patient.last_updated,
-            patient.deleted,
             &patient.content,
             &patient.family_name,
             &patient.given_name,
@@ -112,7 +110,7 @@ impl PatientRepository {
             Patient,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -120,7 +118,7 @@ impl PatientRepository {
                 identifier_value as "identifier_value?",
                 birthdate, gender, active
             FROM patient
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             "#,
             id
         )
@@ -143,7 +141,7 @@ impl PatientRepository {
             r#"
             SELECT version_id
             FROM patient
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             FOR UPDATE
             "#,
             id
@@ -176,7 +174,7 @@ impl PatientRepository {
                 active = $11
             WHERE id = $1
             RETURNING
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -203,17 +201,16 @@ impl PatientRepository {
         sqlx::query!(
             r#"
             INSERT INTO patient_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 family_name, given_name, identifier_system, identifier_value,
                 birthdate, gender, active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
             patient.id,
             patient.version_id,
             patient.last_updated,
-            patient.deleted,
             &patient.content,
             &patient.family_name,
             &patient.given_name,
@@ -233,16 +230,16 @@ impl PatientRepository {
         Ok(patient)
     }
 
-    /// Delete a patient resource (soft delete)
+    /// Delete a patient resource (hard delete)
     pub async fn delete(&self, id: &Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Get current patient
+        // Get current patient (to store in history)
         let patient = sqlx::query_as!(
             Patient,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -250,7 +247,7 @@ impl PatientRepository {
                 identifier_value as "identifier_value?",
                 birthdate, gender, active
             FROM patient
-            WHERE id = $1 AND deleted = FALSE
+            WHERE id = $1
             FOR UPDATE
             "#,
             id
@@ -262,16 +259,13 @@ impl PatientRepository {
         let new_version_id = patient.version_id + 1;
         let last_updated = Utc::now();
 
-        // Mark as deleted in current table
+        // Delete from current table
         sqlx::query!(
             r#"
-            UPDATE patient
-            SET deleted = TRUE, version_id = $2, last_updated = $3
+            DELETE FROM patient
             WHERE id = $1
             "#,
             id,
-            new_version_id,
-            last_updated,
         )
         .execute(&mut *tx)
         .await?;
@@ -280,12 +274,12 @@ impl PatientRepository {
         sqlx::query!(
             r#"
             INSERT INTO patient_history (
-                id, version_id, last_updated, deleted, content,
+                id, version_id, last_updated, content,
                 family_name, given_name, identifier_system, identifier_value,
                 birthdate, gender, active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
             id,
             new_version_id,
@@ -315,7 +309,7 @@ impl PatientRepository {
             PatientHistory,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -345,7 +339,7 @@ impl PatientRepository {
             PatientHistory,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 family_name as "family_name?",
                 given_name as "given_name?",
@@ -371,10 +365,10 @@ impl PatientRepository {
         let query = SearchQuery::from_params(params)?;
 
         let mut sql = String::from(
-            r#"SELECT id, version_id, last_updated, deleted, content,
+            r#"SELECT id, version_id, last_updated, content,
                family_name, given_name, identifier_system, identifier_value,
                birthdate, gender, active
-               FROM patient WHERE deleted = FALSE"#,
+               FROM patient WHERE 1=1"#,
         );
 
         let mut bind_values: Vec<String> = Vec::new();
@@ -483,7 +477,6 @@ impl PatientRepository {
                 id: row.get("id"),
                 version_id: row.get("version_id"),
                 last_updated: row.get("last_updated"),
-                deleted: row.get("deleted"),
                 content: row.get("content"),
                 family_name: row.get("family_name"),
                 given_name: row.get("given_name"),
@@ -513,7 +506,7 @@ impl PatientRepository {
 }
 
 fn build_count_sql(query: &SearchQuery) -> String {
-    let mut sql = String::from("SELECT COUNT(*) FROM patient WHERE deleted = FALSE");
+    let mut sql = String::from("SELECT COUNT(*) FROM patient WHERE 1=1");
     let mut bind_count = 0;
 
     for condition in &query.conditions {
@@ -588,16 +581,17 @@ impl PatientRepository {
             Observation,
             r#"
             SELECT
-                id, version_id, last_updated, deleted,
+                id, version_id, last_updated,
                 content as "content: Value",
                 status, category_system, category_code,
                 code_system, code_code,
                 subject_reference, patient_reference, encounter_reference,
                 effective_datetime, effective_period_start, effective_period_end,
                 issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference
+                value_codeable_concept_code, value_string, performer_reference,
+                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
             FROM observation
-            WHERE patient_reference = $1 AND deleted = FALSE
+            WHERE patient_reference = $1
             "#,
             patient_ref
         )

@@ -11,7 +11,6 @@ pub struct Patient {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub deleted: bool,
     pub content: Value,
 
     // Search parameters
@@ -29,7 +28,6 @@ pub struct PatientHistory {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub deleted: bool,
     pub content: Value,
 
     // Search parameters (same as current)
@@ -63,10 +61,6 @@ impl VersionedResource for Patient {
 
     fn get_last_updated(&self) -> &DateTime<Utc> {
         &self.last_updated
-    }
-
-    fn is_deleted(&self) -> bool {
-        self.deleted
     }
 
     fn get_content(&self) -> &Value {

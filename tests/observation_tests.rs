@@ -24,7 +24,6 @@ async fn test_create_observation() {
         .expect("Failed to create observation");
 
     assert_eq!(observation.version_id, 1);
-    assert_eq!(observation.deleted, false);
     assert_eq!(observation.content["resourceType"], "Observation");
     assert_eq!(observation.status, Some("final".to_string()));
 

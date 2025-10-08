@@ -15,7 +15,6 @@ pub trait VersionedResource: Sized + Send + Sync {
     fn get_id(&self) -> &Uuid;
     fn get_version_id(&self) -> i32;
     fn get_last_updated(&self) -> &DateTime<Utc>;
-    fn is_deleted(&self) -> bool;
     fn get_content(&self) -> &Value;
 }
 
