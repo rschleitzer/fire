@@ -19,7 +19,7 @@ pub async fn create_patient(
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>)> {
     let patient = repo.create(content).await?;
-    Ok((StatusCode::CREATED, Json(patient.content.clone())))
+    Ok((StatusCode::CREATED, Json(patient.to_fhir_json())))
 }
 
 /// Read a patient by ID
@@ -28,7 +28,7 @@ pub async fn read_patient(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
     let patient = repo.read(&id).await?;
-    Ok(Json(patient.content))
+    Ok(Json(patient.to_fhir_json()))
 }
 
 /// Update a patient
@@ -38,7 +38,7 @@ pub async fn update_patient(
     Json(content): Json<Value>,
 ) -> Result<Json<Value>> {
     let patient = repo.update(&id, content).await?;
-    Ok(Json(patient.content))
+    Ok(Json(patient.to_fhir_json()))
 }
 
 /// Delete a patient
@@ -63,11 +63,11 @@ pub async fn search_patients(
     // Build Bundle using efficient string concatenation
     let mut entries = Vec::new();
 
-    // Add patient entries (raw JSON already in content)
+    // Add patient entries with id and meta fields
     for p in &patients {
         entries.push(format!(
             r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&p.content)?
+            serde_json::to_string(&p.to_fhir_json())?
         ));
     }
 
@@ -80,7 +80,7 @@ pub async fn search_patients(
                 for obs in observations {
                     entries.push(format!(
                         r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&obs.content)?
+                        serde_json::to_string(&obs.to_fhir_json())?
                     ));
                 }
             }

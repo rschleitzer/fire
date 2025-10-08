@@ -52,6 +52,27 @@ impl VersionedResource for Observation {
     }
 }
 
+impl Observation {
+    /// Returns the FHIR resource with id and meta fields injected
+    pub fn to_fhir_json(&self) -> Value {
+        let mut resource = self.content.clone();
+
+        // Ensure it's an object
+        if let Some(obj) = resource.as_object_mut() {
+            // Add id
+            obj.insert("id".to_string(), serde_json::json!(self.id.to_string()));
+
+            // Add meta with versionId and lastUpdated
+            obj.insert("meta".to_string(), serde_json::json!({
+                "versionId": self.version_id.to_string(),
+                "lastUpdated": self.last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            }));
+        }
+
+        resource
+    }
+}
+
 /// Extract search parameters from FHIR Observation JSON
 pub fn extract_observation_search_params(content: &Value) -> ObservationSearchParams {
     let mut params = ObservationSearchParams::default();

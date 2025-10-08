@@ -19,7 +19,7 @@ pub async fn create_observation(
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>)> {
     let observation = repo.create(content).await?;
-    Ok((StatusCode::CREATED, Json(observation.content.clone())))
+    Ok((StatusCode::CREATED, Json(observation.to_fhir_json())))
 }
 
 /// Read an observation by ID
@@ -28,7 +28,7 @@ pub async fn read_observation(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
     let observation = repo.read(&id).await?;
-    Ok(Json(observation.content))
+    Ok(Json(observation.to_fhir_json()))
 }
 
 /// Update an observation
@@ -38,7 +38,7 @@ pub async fn update_observation(
     Json(content): Json<Value>,
 ) -> Result<Json<Value>> {
     let observation = repo.update(&id, content).await?;
-    Ok(Json(observation.content))
+    Ok(Json(observation.to_fhir_json()))
 }
 
 /// Delete an observation
@@ -103,11 +103,11 @@ pub async fn search_observations(
     // Build Bundle using efficient string concatenation
     let mut entries = Vec::new();
 
-    // Add observation entries (raw JSON already in content)
+    // Add observation entries with id and meta fields
     for obs in &observations {
         entries.push(format!(
             r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&obs.content)?
+            serde_json::to_string(&obs.to_fhir_json())?
         ));
     }
 
@@ -135,7 +135,7 @@ pub async fn search_observations(
                 if let Ok(patient) = repo.read_patient(&patient_id).await {
                     entries.push(format!(
                         r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&patient.content)?
+                        serde_json::to_string(&patient.to_fhir_json())?
                     ));
                 }
             }
