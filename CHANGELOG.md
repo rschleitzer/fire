@@ -7,23 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- **BREAKING**: Updated to FHIR R5 (5.0.0) from R4 (4.0.1)
-- Updated capability statement to advertise FHIR R5 compliance
-- Updated all documentation to reflect R5 specification
-
-### Added
-- **FHIR R5 Support**: Complete implementation of FHIR R5 (5.0.0)
-- R5-specific Observation fields:
-  - `triggeredBy` - Reflex/repeat testing support
-  - `focus` - Observation focus references
-  - `bodyStructure` - Body structure references
-- Database migration `003_add_r5_observation_fields.sql`
-- R5 validation for `triggeredBy` structure and types
-- Comprehensive R5 upgrade guide (`FHIR_R5_UPGRADE.md`)
-- R5 field extraction in search parameter processing
-- Database indexes for R5 fields
-
 ## [0.1.0] - 2024-01-01
 
 ### Added

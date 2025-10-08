@@ -481,31 +481,28 @@ impl IntoResponse for FhirError {
 
 ## FHIR R5 Compliance
 
-Fire FHIR Server implements **FHIR R5 (5.0.0)**, the latest normative release. Key R5 features:
+Fire FHIR Server implements **FHIR R5 (5.0.0)**, the latest normative release.
 
-### R5-Specific Implementation
+### Observation Resource Fields
 
-**Observation Resource R5 Fields:**
+**Standard Observation Fields:**
 - `triggeredBy` - Identifies observations that triggered this observation (reflex testing)
 - `focus` - What the observation is about when not about the subject
 - `bodyStructure` - Specific body structure observed
 
 **Database Support:**
-- Migration `003_add_r5_observation_fields.sql` adds R5 columns
-- Indexed for efficient querying
-- Backward compatible with R4 data
+- All fields indexed for efficient querying
+- Full JSONB storage for complete resource representation
 
 **Validation:**
-- R5-specific field validation in `src/services/validation.rs`
+- Field validation in `src/services/validation.rs`
 - `triggeredBy.type` must be: `reflex`, `repeat`, or `re-run`
 - Observation reference required for triggered observations
 
 **Capability Statement:**
 - Advertises FHIR R5 (5.0.0) compliance
-- Lists supported R5 features
-- Updated metadata endpoint
-
-See [FHIR_R5_UPGRADE.md](FHIR_R5_UPGRADE.md) for complete R5 migration guide.
+- Lists all supported features
+- Available at `/fhir/metadata` endpoint
 
 ## Questions to Resolve Later
 

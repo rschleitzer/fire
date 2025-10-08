@@ -463,7 +463,7 @@ cargo run
 
 ## Resources
 
-- [FHIR R4 Specification](http://hl7.org/fhir/R4/)
+- [FHIR R5 Specification](http://hl7.org/fhir/R5/)
 - [LOINC Codes](https://loinc.org/)
 - [FHIR Test Data](https://github.com/smart-on-fhir/sample-patients)
 

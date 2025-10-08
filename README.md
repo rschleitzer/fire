@@ -2,7 +2,7 @@
 
 A high-performance FHIR R5 (Fast Healthcare Interoperability Resources) server implementation in Rust.
 
-**FHIR Version**: R5 (5.0.0) - [See R5 Upgrade Guide](FHIR_R5_UPGRADE.md)
+**FHIR Version**: R5 (5.0.0)
 
 ## Architecture
 
