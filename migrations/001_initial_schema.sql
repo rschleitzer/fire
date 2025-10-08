@@ -8,6 +8,9 @@ CREATE TABLE patient (
     -- Extracted search parameters (indexed)
     family_name TEXT[],
     given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
     identifier_system TEXT[],
     identifier_value TEXT[],
     birthdate DATE,
@@ -18,6 +21,9 @@ CREATE TABLE patient (
 -- Create indexes for current table
 CREATE INDEX idx_patient_family_name ON patient USING GIN (family_name);
 CREATE INDEX idx_patient_given_name ON patient USING GIN (given_name);
+CREATE INDEX idx_patient_prefix ON patient USING GIN (prefix);
+CREATE INDEX idx_patient_suffix ON patient USING GIN (suffix);
+CREATE INDEX idx_patient_name_text ON patient USING GIN (name_text);
 CREATE INDEX idx_patient_identifier_value ON patient USING GIN (identifier_value);
 CREATE INDEX idx_patient_birthdate ON patient (birthdate);
 CREATE INDEX idx_patient_gender ON patient (gender);
@@ -37,6 +43,9 @@ CREATE TABLE patient_history (
     -- Same search parameters as current
     family_name TEXT[],
     given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
     identifier_system TEXT[],
     identifier_value TEXT[],
     birthdate DATE,

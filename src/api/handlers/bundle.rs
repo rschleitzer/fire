@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, Json};
 use serde_json::Value;
 use std::sync::Arc;
 use uuid::Uuid;

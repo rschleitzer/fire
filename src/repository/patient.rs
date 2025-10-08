@@ -42,10 +42,11 @@ impl PatientRepository {
             r#"
             INSERT INTO patient (
                 id, version_id, last_updated, content,
-                family_name, given_name, identifier_system, identifier_value,
+                family_name, given_name, prefix, suffix, name_text,
+                identifier_system, identifier_value,
                 birthdate, gender, active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             "#,
             id,
             version_id,
@@ -53,6 +54,9 @@ impl PatientRepository {
             content,
             params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
             params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
+            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
+            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
             params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
             params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
@@ -123,11 +127,12 @@ impl PatientRepository {
             r#"
             INSERT INTO patient_history (
                 id, version_id, last_updated, content,
-                family_name, given_name, identifier_system, identifier_value,
+                family_name, given_name, prefix, suffix, name_text,
+                identifier_system, identifier_value,
                 birthdate, gender, active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             "#,
             old_patient.id,
             old_patient.version_id,
@@ -135,6 +140,9 @@ impl PatientRepository {
             &old_patient.content,
             old_params.family_name.is_empty().then_some(None).unwrap_or(Some(&old_params.family_name[..])),
             old_params.given_name.is_empty().then_some(None).unwrap_or(Some(&old_params.given_name[..])),
+            old_params.prefix.is_empty().then_some(None).unwrap_or(Some(&old_params.prefix[..])),
+            old_params.suffix.is_empty().then_some(None).unwrap_or(Some(&old_params.suffix[..])),
+            old_params.name_text.is_empty().then_some(None).unwrap_or(Some(&old_params.name_text[..])),
             old_params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_system[..])),
             old_params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_value[..])),
             old_params.birthdate,
@@ -159,11 +167,14 @@ impl PatientRepository {
                 content = $4,
                 family_name = $5,
                 given_name = $6,
-                identifier_system = $7,
-                identifier_value = $8,
-                birthdate = $9,
-                gender = $10,
-                active = $11
+                prefix = $7,
+                suffix = $8,
+                name_text = $9,
+                identifier_system = $10,
+                identifier_value = $11,
+                birthdate = $12,
+                gender = $13,
+                active = $14
             WHERE id = $1
             "#,
             id,
@@ -172,6 +183,9 @@ impl PatientRepository {
             content,
             params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
             params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
+            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
+            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
             params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
             params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
@@ -230,11 +244,12 @@ impl PatientRepository {
             r#"
             INSERT INTO patient_history (
                 id, version_id, last_updated, content,
-                family_name, given_name, identifier_system, identifier_value,
+                family_name, given_name, prefix, suffix, name_text,
+                identifier_system, identifier_value,
                 birthdate, gender, active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             "#,
             id,
             new_version_id,
@@ -242,6 +257,9 @@ impl PatientRepository {
             &patient.content,
             params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
             params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
+            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
+            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
             params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
             params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
@@ -349,6 +367,44 @@ impl PatientRepository {
 
         for condition in &query.conditions {
             match condition {
+                SearchCondition::Name(search) => {
+                    // Search all HumanName string fields: family, given, prefix, suffix, text
+                    match search.modifier {
+                        crate::search::StringModifier::Contains => {
+                            bind_count += 1;
+                            let param_num = bind_count;
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                param_num
+                            ));
+                            bind_values.push(format!("%{}%", search.value));
+                        }
+                        crate::search::StringModifier::Exact => {
+                            bind_count += 1;
+                            let param_num = bind_count;
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt = ${0}))",
+                                param_num
+                            ));
+                            bind_values.push(search.value.clone());
+                        }
+                        crate::search::StringModifier::Missing => {
+                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL) \
+                                         AND (given_name IS NULL OR array_length(given_name, 1) IS NULL) \
+                                         AND (prefix IS NULL OR array_length(prefix, 1) IS NULL) \
+                                         AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
+                                         AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
+                        }
+                    }
+                }
                 SearchCondition::FamilyName(search) => {
                     match search.modifier {
                         crate::search::StringModifier::Contains => {
@@ -474,6 +530,40 @@ fn build_count_sql(query: &SearchQuery) -> String {
 
     for condition in &query.conditions {
         match condition {
+            SearchCondition::Name(search) => {
+                bind_count += 1;
+                let param_num = bind_count;
+                match search.modifier {
+                    crate::search::StringModifier::Contains => {
+                        sql.push_str(&format!(
+                            " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                            param_num
+                        ));
+                    }
+                    crate::search::StringModifier::Exact => {
+                        sql.push_str(&format!(
+                            " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt = ${0}))",
+                            param_num
+                        ));
+                    }
+                    crate::search::StringModifier::Missing => {
+                        sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL) \
+                                     AND (given_name IS NULL OR array_length(given_name, 1) IS NULL) \
+                                     AND (prefix IS NULL OR array_length(prefix, 1) IS NULL) \
+                                     AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
+                                     AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
+                        bind_count -= 1;
+                    }
+                }
+            }
             SearchCondition::FamilyName(search) => {
                 bind_count += 1;
                 match search.modifier {

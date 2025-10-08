@@ -27,6 +27,7 @@ pub enum SortDirection {
 pub enum SearchCondition {
     FamilyName(StringSearch),
     GivenName(StringSearch),
+    Name(StringSearch),  // Searches both family and given with OR
     Identifier(String),
     Birthdate(DateComparison),
     Gender(String),
@@ -133,11 +134,10 @@ impl SearchQuery {
             }
         }
 
-        // Parse name (searches both family and given)
+        // Parse name (searches both family and given with OR)
         if let Some(name) = params.get("name") {
             let search = parse_string_param("name", name, params)?;
-            conditions.push(SearchCondition::FamilyName(search.clone()));
-            conditions.push(SearchCondition::GivenName(search));
+            conditions.push(SearchCondition::Name(search));
         }
 
         // Parse identifier
@@ -196,12 +196,46 @@ impl SearchQuery {
     }
 
     pub fn build_sql(&self) -> (String, Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>>) {
-        let mut sql = String::from("SELECT id, version_id, last_updated, deleted, content, family_name, given_name, identifier_system, identifier_value, birthdate, gender, active FROM patient WHERE deleted = FALSE");
+        let mut sql = String::from("SELECT id, version_id, last_updated, deleted, content, family_name, given_name, prefix, suffix, name_text, identifier_system, identifier_value, birthdate, gender, active FROM patient WHERE deleted = FALSE");
         let mut bind_count = 0;
         let params: Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>> = Vec::new();
 
         for condition in &self.conditions {
             match condition {
+                SearchCondition::Name(search) => {
+                    bind_count += 1;
+                    let param_num = bind_count;
+                    match search.modifier {
+                        StringModifier::Contains => {
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                param_num
+                            ));
+                        }
+                        StringModifier::Exact => {
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt = ${0}))",
+                                param_num
+                            ));
+                        }
+                        StringModifier::Missing => {
+                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL) \
+                                         AND (given_name IS NULL OR array_length(given_name, 1) IS NULL) \
+                                         AND (prefix IS NULL OR array_length(prefix, 1) IS NULL) \
+                                         AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
+                                         AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
+                            bind_count -= 1; // No bind parameter needed
+                        }
+                    }
+                }
                 SearchCondition::FamilyName(search) => {
                     bind_count += 1;
                     match search.modifier {

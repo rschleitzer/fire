@@ -59,15 +59,41 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     // Extract names
     if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
         for name in names {
+            // Extract family
             if let Some(family) = name.get("family").and_then(|f| f.as_str()) {
                 params.family_name.push(family.to_string());
             }
+
+            // Extract given names
             if let Some(given) = name.get("given").and_then(|g| g.as_array()) {
                 for g in given {
                     if let Some(given_str) = g.as_str() {
                         params.given_name.push(given_str.to_string());
                     }
                 }
+            }
+
+            // Extract prefix (Dr., Mr., Ms., etc.)
+            if let Some(prefix) = name.get("prefix").and_then(|p| p.as_array()) {
+                for p in prefix {
+                    if let Some(prefix_str) = p.as_str() {
+                        params.prefix.push(prefix_str.to_string());
+                    }
+                }
+            }
+
+            // Extract suffix (Jr., Sr., III, etc.)
+            if let Some(suffix) = name.get("suffix").and_then(|s| s.as_array()) {
+                for s in suffix {
+                    if let Some(suffix_str) = s.as_str() {
+                        params.suffix.push(suffix_str.to_string());
+                    }
+                }
+            }
+
+            // Extract text (full name as text)
+            if let Some(text) = name.get("text").and_then(|t| t.as_str()) {
+                params.name_text.push(text.to_string());
             }
         }
     }
@@ -108,6 +134,9 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
 pub struct PatientSearchParams {
     pub family_name: Vec<String>,
     pub given_name: Vec<String>,
+    pub prefix: Vec<String>,
+    pub suffix: Vec<String>,
+    pub name_text: Vec<String>,
     pub identifier_system: Vec<String>,
     pub identifier_value: Vec<String>,
     pub birthdate: Option<NaiveDate>,
