@@ -25,7 +25,7 @@ async fn test_create_observation() {
 
     assert_eq!(observation.version_id, 1);
     assert_eq!(observation.content["resourceType"], "Observation");
-    assert_eq!(observation.status, Some("final".to_string()));
+    assert_eq!(observation.content["status"], "final");
 
     common::cleanup_test_db(&pool).await;
 }
@@ -52,7 +52,7 @@ async fn test_read_observation() {
 
     assert_eq!(observation.id, created.id);
     assert_eq!(observation.version_id, 1);
-    assert_eq!(observation.status, Some("final".to_string()));
+    assert_eq!(observation.content["status"], "final");
 
     common::cleanup_test_db(&pool).await;
 }
@@ -82,7 +82,7 @@ async fn test_update_observation() {
 
     assert_eq!(updated.id, created.id);
     assert_eq!(updated.version_id, 2);
-    assert_eq!(updated.status, Some("amended".to_string()));
+    assert_eq!(updated.content["status"], "amended");
 
     common::cleanup_test_db(&pool).await;
 }
@@ -217,7 +217,7 @@ async fn test_search_observation_by_status() {
     let (results, _) = obs_repo.search(&params, false).await.expect("Failed to search");
 
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].status, Some("final".to_string()));
+    assert_eq!(results[0].content["status"], "final");
 
     common::cleanup_test_db(&pool).await;
 }
@@ -258,8 +258,8 @@ async fn test_search_observation_by_patient() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(
-        results[0].patient_reference,
-        Some(format!("Patient/{}", patient1.id))
+        results[0].content["subject"]["reference"],
+        format!("Patient/{}", patient1.id)
     );
 
     common::cleanup_test_db(&pool).await;

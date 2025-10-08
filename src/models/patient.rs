@@ -11,16 +11,8 @@ pub struct Patient {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub content: Value,
-
-    // Search parameters
-    pub family_name: Option<Vec<String>>,
-    pub given_name: Option<Vec<String>>,
-    pub identifier_system: Option<Vec<String>>,
-    pub identifier_value: Option<Vec<String>>,
-    pub birthdate: Option<NaiveDate>,
-    pub gender: Option<String>,
-    pub active: Option<bool>,
+    #[serde(flatten)]
+    pub content: Value,  // Raw JSON stored as-is, returned without deserialization
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -28,16 +20,8 @@ pub struct PatientHistory {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub content: Value,
-
-    // Search parameters (same as current)
-    pub family_name: Option<Vec<String>>,
-    pub given_name: Option<Vec<String>>,
-    pub identifier_system: Option<Vec<String>>,
-    pub identifier_value: Option<Vec<String>>,
-    pub birthdate: Option<NaiveDate>,
-    pub gender: Option<String>,
-    pub active: Option<bool>,
+    #[serde(flatten)]
+    pub content: Value,  // Raw JSON stored as-is
 
     // History metadata
     pub history_operation: String,

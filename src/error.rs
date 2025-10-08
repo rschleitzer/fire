@@ -22,6 +22,9 @@ pub enum FhirError {
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
 
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
 
@@ -79,6 +82,16 @@ impl IntoResponse for FhirError {
                     "error",
                     "exception",
                     "Database error occurred".to_string(),
+                )
+            }
+            FhirError::JsonError(err) => {
+                // Log JSON errors with details
+                tracing::error!("JSON error: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "error",
+                    "exception",
+                    "JSON processing error".to_string(),
                 )
             }
             FhirError::Internal(err) => {

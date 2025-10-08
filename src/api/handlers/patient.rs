@@ -60,18 +60,16 @@ pub async fn search_patients(
 
     let (patients, total) = repo.search(&params, include_total).await?;
 
-    // Build FHIR Bundle response
-    let mut entries: Vec<Value> = patients
-        .iter()
-        .map(|p| {
-            serde_json::json!({
-                "resource": p.content,
-                "search": {
-                    "mode": "match"
-                }
-            })
-        })
-        .collect();
+    // Build Bundle using efficient string concatenation
+    let mut entries = Vec::new();
+
+    // Add patient entries (raw JSON already in content)
+    for p in &patients {
+        entries.push(format!(
+            r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
+            serde_json::to_string(&p.content)?
+        ));
+    }
 
     // Handle _revinclude parameter for Observation references
     if let Some(revinclude_param) = params.get("_revinclude") {
@@ -80,28 +78,31 @@ pub async fn search_patients(
             for patient in &patients {
                 let observations = repo.find_observations_by_patient(&patient.id).await?;
                 for obs in observations {
-                    entries.push(serde_json::json!({
-                        "resource": obs.content,
-                        "search": {
-                            "mode": "include"
-                        }
-                    }));
+                    entries.push(format!(
+                        r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                        serde_json::to_string(&obs.content)?
+                    ));
                 }
             }
         }
     }
 
-    let mut bundle = serde_json::json!({
-        "resourceType": "Bundle",
-        "type": "searchset",
-        "entry": entries
-    });
+    // Build final Bundle JSON string
+    let entries_str = entries.join(",");
+    let bundle_str = if let Some(total_count) = total {
+        format!(
+            r#"{{"resourceType":"Bundle","type":"searchset","total":{},"entry":[{}]}}"#,
+            total_count, entries_str
+        )
+    } else {
+        format!(
+            r#"{{"resourceType":"Bundle","type":"searchset","entry":[{}]}}"#,
+            entries_str
+        )
+    };
 
-    // Add total if requested or if we have it
-    if let Some(total_count) = total {
-        bundle["total"] = serde_json::json!(total_count);
-    }
-
+    // Parse string back to Value for Json response
+    let bundle: Value = serde_json::from_str(&bundle_str)?;
     Ok(Json(bundle))
 }
 
@@ -112,30 +113,29 @@ pub async fn get_patient_history(
 ) -> Result<Json<Value>> {
     let history = repo.history(&id).await?;
 
-    let entries: Vec<Value> = history
+    // Build Bundle using efficient string concatenation
+    let total = history.len();
+    let entries: Vec<String> = history
         .into_iter()
         .map(|h| {
-            serde_json::json!({
-                "resource": h.content,
-                "request": {
-                    "method": h.history_operation,
-                    "url": format!("Patient/{}", h.id)
-                },
-                "response": {
-                    "status": "200",
-                    "lastModified": h.last_updated
-                }
-            })
+            format!(
+                r#"{{"resource":{},"request":{{"method":"{}","url":"Patient/{}"}},"response":{{"status":"200","lastModified":"{}"}}}}"#,
+                serde_json::to_string(&h.content).unwrap_or_default(),
+                h.history_operation,
+                h.id,
+                h.last_updated.to_rfc3339()
+            )
         })
         .collect();
 
-    let bundle = serde_json::json!({
-        "resourceType": "Bundle",
-        "type": "history",
-        "total": entries.len(),
-        "entry": entries
-    });
+    let entries_str = entries.join(",");
+    let bundle_str = format!(
+        r#"{{"resourceType":"Bundle","type":"history","total":{},"entry":[{}]}}"#,
+        total, entries_str
+    );
 
+    // Parse string back to Value for Json response
+    let bundle: Value = serde_json::from_str(&bundle_str)?;
     Ok(Json(bundle))
 }
 

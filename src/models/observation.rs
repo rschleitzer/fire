@@ -11,33 +11,8 @@ pub struct Observation {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub content: Value,
-
-    // Search parameters
-    pub status: Option<String>,
-    pub category_system: Option<Vec<String>>,
-    pub category_code: Option<Vec<String>>,
-    pub code_system: Option<String>,
-    pub code_code: Option<String>,
-    pub subject_reference: Option<String>,
-    pub patient_reference: Option<String>,
-    pub encounter_reference: Option<String>,
-    pub effective_datetime: Option<DateTime<Utc>>,
-    pub effective_period_start: Option<DateTime<Utc>>,
-    pub effective_period_end: Option<DateTime<Utc>>,
-    pub issued: Option<DateTime<Utc>>,
-    pub value_quantity_value: Option<sqlx::types::BigDecimal>,
-    pub value_quantity_unit: Option<String>,
-    pub value_quantity_system: Option<String>,
-    pub value_codeable_concept_code: Option<Vec<String>>,
-    pub value_string: Option<String>,
-    pub performer_reference: Option<Vec<String>>,
-
-    // R5 specific fields
-    pub triggered_by_observation: Option<Vec<String>>,
-    pub triggered_by_type: Option<Vec<String>>,
-    pub focus_reference: Option<Vec<String>>,
-    pub body_structure_reference: Option<String>,
+    #[serde(flatten)]
+    pub content: Value,  // Raw JSON stored as-is, returned without deserialization
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -45,33 +20,8 @@ pub struct ObservationHistory {
     pub id: Uuid,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
-    pub content: Value,
-
-    // Same search parameters
-    pub status: Option<String>,
-    pub category_system: Option<Vec<String>>,
-    pub category_code: Option<Vec<String>>,
-    pub code_system: Option<String>,
-    pub code_code: Option<String>,
-    pub subject_reference: Option<String>,
-    pub patient_reference: Option<String>,
-    pub encounter_reference: Option<String>,
-    pub effective_datetime: Option<DateTime<Utc>>,
-    pub effective_period_start: Option<DateTime<Utc>>,
-    pub effective_period_end: Option<DateTime<Utc>>,
-    pub issued: Option<DateTime<Utc>>,
-    pub value_quantity_value: Option<sqlx::types::BigDecimal>,
-    pub value_quantity_unit: Option<String>,
-    pub value_quantity_system: Option<String>,
-    pub value_codeable_concept_code: Option<Vec<String>>,
-    pub value_string: Option<String>,
-    pub performer_reference: Option<Vec<String>>,
-
-    // R5 specific fields
-    pub triggered_by_observation: Option<Vec<String>>,
-    pub triggered_by_type: Option<Vec<String>>,
-    pub focus_reference: Option<Vec<String>>,
-    pub body_structure_reference: Option<String>,
+    #[serde(flatten)]
+    pub content: Value,  // Raw JSON stored as-is
 
     // History metadata
     pub history_operation: String,

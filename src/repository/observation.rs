@@ -56,8 +56,8 @@ impl ObservationRepository {
             last_updated,
             content,
             params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system.clone())),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(params.category_code.clone())),
+            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
             params.code_system,
             params.code_code,
             params.subject_reference,
@@ -70,12 +70,12 @@ impl ObservationRepository {
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code.clone())),
+            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
             params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference)),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation.clone())),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type.clone())),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference.clone())),
+            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
             params.body_structure_reference,
         )
         .execute(&mut *tx)
@@ -87,20 +87,14 @@ impl ObservationRepository {
         self.read(&id).await
     }
 
-    /// Read current version of an observation
+    /// Read current version of an observation (returns raw JSON)
     pub async fn read(&self, id: &Uuid) -> Result<Observation> {
-        let row = sqlx::query!(
+        let observation = sqlx::query_as!(
+            Observation,
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+                content as "content: Value"
             FROM observation
             WHERE id = $1
             "#,
@@ -110,34 +104,7 @@ impl ObservationRepository {
         .await?
         .ok_or(FhirError::NotFound)?;
 
-        Ok(Observation {
-            id: row.id,
-            version_id: row.version_id,
-            last_updated: row.last_updated,
-            content: row.content,
-            status: row.status,
-            category_system: row.category_system,
-            category_code: row.category_code,
-            code_system: row.code_system,
-            code_code: row.code_code,
-            subject_reference: row.subject_reference,
-            patient_reference: row.patient_reference,
-            encounter_reference: row.encounter_reference,
-            effective_datetime: row.effective_datetime,
-            effective_period_start: row.effective_period_start,
-            effective_period_end: row.effective_period_end,
-            issued: row.issued,
-            value_quantity_value: row.value_quantity_value,
-            value_quantity_unit: row.value_quantity_unit,
-            value_quantity_system: row.value_quantity_system,
-            value_codeable_concept_code: row.value_codeable_concept_code,
-            value_string: row.value_string,
-            performer_reference: row.performer_reference,
-            triggered_by_observation: row.triggered_by_observation,
-            triggered_by_type: row.triggered_by_type,
-            focus_reference: row.focus_reference,
-            body_structure_reference: row.body_structure_reference,
-        })
+        Ok(observation)
     }
 
     /// Delete an observation (hard delete)
@@ -148,6 +115,14 @@ impl ObservationRepository {
         let observation = self.read(id).await?;
         let new_version_id = observation.version_id + 1;
         let last_updated = Utc::now();
+
+        // Extract search parameters from content for history
+        let params = extract_observation_search_params(&observation.content);
+
+        // Convert f64 to BigDecimal
+        let value_qty_decimal = params.value_quantity_value.map(|v| {
+            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+        });
 
         // Delete from current table
         sqlx::query!(
@@ -180,28 +155,28 @@ impl ObservationRepository {
             new_version_id,
             last_updated,
             &observation.content,
-            observation.status,
-            &observation.category_system,
-            &observation.category_code,
-            observation.code_system,
-            observation.code_code,
-            observation.subject_reference,
-            observation.patient_reference,
-            observation.encounter_reference,
-            observation.effective_datetime,
-            observation.effective_period_start,
-            observation.effective_period_end,
-            observation.issued,
-            observation.value_quantity_value,
-            observation.value_quantity_unit,
-            observation.value_quantity_system,
-            &observation.value_codeable_concept_code,
-            observation.value_string,
-            &observation.performer_reference,
-            &observation.triggered_by_observation,
-            &observation.triggered_by_type,
-            &observation.focus_reference,
-            observation.body_structure_reference,
+            params.status,
+            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+            params.code_system,
+            params.code_code,
+            params.subject_reference,
+            params.patient_reference,
+            params.encounter_reference,
+            params.effective_datetime,
+            params.effective_period_start,
+            params.effective_period_end,
+            params.issued,
+            value_qty_decimal,
+            params.value_quantity_unit,
+            params.value_quantity_system,
+            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
+            params.value_string,
+            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
+            params.body_structure_reference,
             "DELETE",
             Utc::now(),
         )
@@ -226,6 +201,14 @@ impl ObservationRepository {
         let new_version_id = old_observation.version_id + 1;
         let last_updated = Utc::now();
 
+        // Extract search parameters from OLD content for history
+        let old_params = extract_observation_search_params(&old_observation.content);
+
+        // Convert f64 to BigDecimal for old params
+        let old_value_qty_decimal = old_params.value_quantity_value.map(|v| {
+            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+        });
+
         // Insert OLD version into history before updating
         sqlx::query!(
             r#"
@@ -246,29 +229,29 @@ impl ObservationRepository {
             old_observation.version_id,
             old_observation.last_updated,
             &old_observation.content,
-            old_observation.status,
-            &old_observation.category_system,
-            &old_observation.category_code,
-            old_observation.code_system,
-            old_observation.code_code,
-            old_observation.subject_reference,
-            old_observation.patient_reference,
-            old_observation.encounter_reference,
-            old_observation.effective_datetime,
-            old_observation.effective_period_start,
-            old_observation.effective_period_end,
-            old_observation.issued,
-            old_observation.value_quantity_value,
-            old_observation.value_quantity_unit,
-            old_observation.value_quantity_system,
-            &old_observation.value_codeable_concept_code,
-            old_observation.value_string,
-            &old_observation.performer_reference,
-            &old_observation.triggered_by_observation,
-            &old_observation.triggered_by_type,
-            &old_observation.focus_reference,
-            old_observation.body_structure_reference,
-            "UPDATE",
+            old_params.status,
+            old_params.category_system.is_empty().then_some(None).unwrap_or(Some(&old_params.category_system[..])),
+            old_params.category_code.is_empty().then_some(None).unwrap_or(Some(&old_params.category_code[..])),
+            old_params.code_system,
+            old_params.code_code,
+            old_params.subject_reference,
+            old_params.patient_reference,
+            old_params.encounter_reference,
+            old_params.effective_datetime,
+            old_params.effective_period_start,
+            old_params.effective_period_end,
+            old_params.issued,
+            old_value_qty_decimal,
+            old_params.value_quantity_unit,
+            old_params.value_quantity_system,
+            old_params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&old_params.value_codeable_concept_code[..])),
+            old_params.value_string,
+            old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
+            old_params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_observation[..])),
+            old_params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_type[..])),
+            old_params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.focus_reference[..])),
+            old_params.body_structure_reference,
+            if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
             Utc::now(),
         )
         .execute(&mut *tx)
@@ -319,8 +302,8 @@ impl ObservationRepository {
             last_updated,
             content,
             params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(params.category_system.clone())),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(params.category_code.clone())),
+            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
             params.code_system,
             params.code_code,
             params.subject_reference,
@@ -333,12 +316,12 @@ impl ObservationRepository {
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(params.value_codeable_concept_code.clone())),
+            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
             params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(params.performer_reference.clone())),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_observation.clone())),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(params.triggered_by_type.clone())),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(params.focus_reference.clone())),
+            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
             params.body_structure_reference,
         )
         .execute(&mut *tx)
@@ -358,13 +341,6 @@ impl ObservationRepository {
             SELECT
                 id, version_id, last_updated,
                 content as "content: Value",
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             FROM observation_history
             WHERE id = $1
@@ -383,28 +359,6 @@ impl ObservationRepository {
                 version_id: current.version_id,
                 last_updated: current.last_updated,
                 content: current.content,
-                status: current.status,
-                category_system: current.category_system,
-                category_code: current.category_code,
-                code_system: current.code_system,
-                code_code: current.code_code,
-                subject_reference: current.subject_reference,
-                patient_reference: current.patient_reference,
-                encounter_reference: current.encounter_reference,
-                effective_datetime: current.effective_datetime,
-                effective_period_start: current.effective_period_start,
-                effective_period_end: current.effective_period_end,
-                issued: current.issued,
-                value_quantity_value: current.value_quantity_value,
-                value_quantity_unit: current.value_quantity_unit,
-                value_quantity_system: current.value_quantity_system,
-                value_codeable_concept_code: current.value_codeable_concept_code,
-                value_string: current.value_string,
-                performer_reference: current.performer_reference,
-                triggered_by_observation: current.triggered_by_observation,
-                triggered_by_type: current.triggered_by_type,
-                focus_reference: current.focus_reference,
-                body_structure_reference: current.body_structure_reference,
                 history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
                 history_timestamp: current.last_updated,
             };
@@ -429,28 +383,6 @@ impl ObservationRepository {
                     version_id: current.version_id,
                     last_updated: current.last_updated,
                     content: current.content,
-                    status: current.status,
-                    category_system: current.category_system,
-                    category_code: current.category_code,
-                    code_system: current.code_system,
-                    code_code: current.code_code,
-                    subject_reference: current.subject_reference,
-                    patient_reference: current.patient_reference,
-                    encounter_reference: current.encounter_reference,
-                    effective_datetime: current.effective_datetime,
-                    effective_period_start: current.effective_period_start,
-                    effective_period_end: current.effective_period_end,
-                    issued: current.issued,
-                    value_quantity_value: current.value_quantity_value,
-                    value_quantity_unit: current.value_quantity_unit,
-                    value_quantity_system: current.value_quantity_system,
-                    value_codeable_concept_code: current.value_codeable_concept_code,
-                    value_string: current.value_string,
-                    performer_reference: current.performer_reference,
-                    triggered_by_observation: current.triggered_by_observation,
-                    triggered_by_type: current.triggered_by_type,
-                    focus_reference: current.focus_reference,
-                    body_structure_reference: current.body_structure_reference,
                     history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
                     history_timestamp: current.last_updated,
                 });
@@ -464,13 +396,6 @@ impl ObservationRepository {
             SELECT
                 id, version_id, last_updated,
                 content as "content: Value",
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
                 history_operation, history_timestamp
             FROM observation_history
             WHERE id = $1 AND version_id = $2
@@ -487,104 +412,61 @@ impl ObservationRepository {
 
     /// Search observations with optional total count
     pub async fn search(&self, params: &std::collections::HashMap<String, String>, include_total: bool) -> crate::error::Result<(Vec<Observation>, Option<i64>)> {
-        use crate::search::SearchQuery;
-
-        let query = SearchQuery::from_params(params)?;
-
-        // Build WHERE clause
+        // Build WHERE clause manually for observation-specific parameters
         let mut where_conditions = vec!["1=1".to_string()];
         let mut bind_values: Vec<String> = Vec::new();
 
         // Status parameter
-        if let Some(status) = query.string_params.get("status") {
-            bind_values.push(status.value.clone());
+        if let Some(status) = params.get("status") {
+            bind_values.push(status.clone());
             where_conditions.push(format!("status = ${}", bind_values.len()));
         }
 
         // Code parameter (code_code)
-        if let Some(code) = query.string_params.get("code") {
-            bind_values.push(code.value.clone());
+        if let Some(code) = params.get("code") {
+            bind_values.push(code.clone());
             where_conditions.push(format!("code_code = ${}", bind_values.len()));
         }
 
         // Category parameter (category_code array)
-        if let Some(category) = query.string_params.get("category") {
-            bind_values.push(category.value.clone());
+        if let Some(category) = params.get("category") {
+            bind_values.push(category.clone());
             where_conditions.push(format!("${} = ANY(category_code)", bind_values.len()));
         }
 
         // Patient/subject reference
-        if let Some(patient) = query.string_params.get("patient") {
-            bind_values.push(format!("Patient/{}", patient.value));
+        if let Some(patient) = params.get("patient") {
+            bind_values.push(format!("Patient/{}", patient));
             where_conditions.push(format!("patient_reference = ${}", bind_values.len()));
         }
 
-        if let Some(subject) = query.string_params.get("subject") {
-            bind_values.push(subject.value.clone());
+        if let Some(subject) = params.get("subject") {
+            bind_values.push(subject.clone());
             where_conditions.push(format!("subject_reference = ${}", bind_values.len()));
         }
 
-        // Date parameters for effective dates
-        if let Some(date_param) = query.date_params.get("date") {
-            let column = "effective_datetime";
-            match date_param.prefix.as_str() {
-                "eq" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} = ${}::timestamptz", column, bind_values.len()));
-                }
-                "ne" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} != ${}::timestamptz", column, bind_values.len()));
-                }
-                "gt" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} > ${}::timestamptz", column, bind_values.len()));
-                }
-                "lt" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} < ${}::timestamptz", column, bind_values.len()));
-                }
-                "ge" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} >= ${}::timestamptz", column, bind_values.len()));
-                }
-                "le" => {
-                    bind_values.push(date_param.value.clone());
-                    where_conditions.push(format!("{} <= ${}::timestamptz", column, bind_values.len()));
-                }
-                _ => {}
-            }
+        // Date parameters for effective dates (simplified - just eq comparison)
+        if let Some(date) = params.get("date") {
+            bind_values.push(date.clone());
+            where_conditions.push(format!("effective_datetime = ${}::timestamptz", bind_values.len()));
         }
 
         let where_clause = where_conditions.join(" AND ");
 
+        // Parse pagination
+        let limit = params
+            .get("_count")
+            .and_then(|c| c.parse::<i64>().ok())
+            .unwrap_or(50)
+            .min(1000);
+
+        let offset = params
+            .get("_offset")
+            .and_then(|o| o.parse::<i64>().ok())
+            .unwrap_or(0);
+
         // Build ORDER BY clause
-        let order_by = if query.sort.is_empty() {
-            "ORDER BY last_updated DESC".to_string()
-        } else {
-            let mut order_parts = Vec::new();
-            for sort in &query.sort {
-                let direction = match sort.direction {
-                    crate::search::SortDirection::Ascending => "ASC",
-                    crate::search::SortDirection::Descending => "DESC",
-                };
-                let column = match sort.field.as_str() {
-                    "status" => "status",
-                    "code" => "code_code",
-                    "date" => "effective_datetime",
-                    "patient" => "patient_reference",
-                    "subject" => "subject_reference",
-                    "_lastUpdated" => "last_updated",
-                    _ => continue,
-                };
-                order_parts.push(format!("{} {}", column, direction));
-            }
-            if order_parts.is_empty() {
-                "ORDER BY last_updated DESC".to_string()
-            } else {
-                format!("ORDER BY {}", order_parts.join(", "))
-            }
-        };
+        let order_by = "ORDER BY last_updated DESC";
 
         // Get total count if requested
         let total = if include_total {
@@ -598,15 +480,9 @@ impl ObservationRepository {
             None
         };
 
-        // Build main query
+        // Build main query (only select fields we need for raw JSON model)
         let sql = format!(
-            "SELECT id, version_id, last_updated, content as \"content: Value\",
-                    status, category_system, category_code, code_system, code_code,
-                    subject_reference, patient_reference, encounter_reference,
-                    effective_datetime, effective_period_start, effective_period_end,
-                    issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_codeable_concept_code, value_string, performer_reference,
-                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+            "SELECT id, version_id, last_updated, content
              FROM observation
              WHERE {}
              {}
@@ -614,8 +490,8 @@ impl ObservationRepository {
              OFFSET {}",
             where_clause,
             order_by,
-            query.count.unwrap_or(50).min(1000),
-            query.offset.unwrap_or(0)
+            limit,
+            offset
         );
 
         // Execute query
@@ -631,14 +507,12 @@ impl ObservationRepository {
 
     /// Read a patient by ID (for _include support)
     pub async fn read_patient(&self, id: &Uuid) -> Result<Patient> {
-        let row = sqlx::query!(
+        let patient = sqlx::query_as!(
+            Patient,
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                family_name, given_name,
-                identifier_system, identifier_value,
-                birthdate, gender, active
+                content as "content: Value"
             FROM patient
             WHERE id = $1
             "#,
@@ -648,18 +522,6 @@ impl ObservationRepository {
         .await?
         .ok_or(FhirError::NotFound)?;
 
-        Ok(Patient {
-            id: row.id,
-            version_id: row.version_id,
-            last_updated: row.last_updated,
-            content: row.content,
-            family_name: row.family_name,
-            given_name: row.given_name,
-            identifier_system: row.identifier_system,
-            identifier_value: row.identifier_value,
-            birthdate: row.birthdate,
-            gender: row.gender,
-            active: row.active,
-        })
+        Ok(patient)
     }
 }

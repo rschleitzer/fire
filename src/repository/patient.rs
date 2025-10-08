@@ -38,8 +38,7 @@ impl PatientRepository {
         let mut tx = self.pool.begin().await?;
 
         // Insert into current table
-        let patient = sqlx::query_as!(
-            Patient,
+        sqlx::query!(
             r#"
             INSERT INTO patient (
                 id, version_id, last_updated, content,
@@ -47,48 +46,36 @@ impl PatientRepository {
                 birthdate, gender, active
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING
-                id, version_id, last_updated,
-                content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active
             "#,
             id,
             version_id,
             last_updated,
             content,
-            params.family_name.is_empty().then_some(None).unwrap_or(Some(params.family_name)),
-            params.given_name.is_empty().then_some(None).unwrap_or(Some(params.given_name)),
-            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(params.identifier_system)),
-            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(params.identifier_value)),
+            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
+            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
+            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
             params.gender,
             params.active,
         )
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await?;
 
         tx.commit().await?;
 
-        Ok(patient)
+        // Fetch and return the created patient
+        self.read(&id).await
     }
 
-    /// Read current version of a patient
+    /// Read current version of a patient (returns raw JSON)
     pub async fn read(&self, id: &Uuid) -> Result<Patient> {
         let patient = sqlx::query_as!(
             Patient,
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active
+                content as "content: Value"
             FROM patient
             WHERE id = $1
             "#,
@@ -108,18 +95,13 @@ impl PatientRepository {
 
         let mut tx = self.pool.begin().await?;
 
-        // Get current version with lock (need full data to store in history)
+        // Get current version with lock (only need content to store in history)
         let old_patient = sqlx::query_as!(
             Patient,
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active
+                content as "content: Value"
             FROM patient
             WHERE id = $1
             FOR UPDATE
@@ -132,6 +114,9 @@ impl PatientRepository {
 
         let new_version_id = old_patient.version_id + 1;
         let last_updated = Utc::now();
+
+        // Extract search params from OLD content for history
+        let old_params = extract_patient_search_params(&old_patient.content);
 
         // Insert OLD version into history before updating
         sqlx::query!(
@@ -148,14 +133,14 @@ impl PatientRepository {
             old_patient.version_id,
             old_patient.last_updated,
             &old_patient.content,
-            &old_patient.family_name,
-            &old_patient.given_name,
-            &old_patient.identifier_system,
-            &old_patient.identifier_value,
-            old_patient.birthdate,
-            &old_patient.gender,
-            old_patient.active,
-            "UPDATE",
+            old_params.family_name.is_empty().then_some(None).unwrap_or(Some(&old_params.family_name[..])),
+            old_params.given_name.is_empty().then_some(None).unwrap_or(Some(&old_params.given_name[..])),
+            old_params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_system[..])),
+            old_params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params.birthdate,
+            old_params.gender,
+            old_params.active,
+            if old_patient.version_id == 1 { "CREATE" } else { "UPDATE" },
             Utc::now(),
         )
         .execute(&mut *tx)
@@ -165,8 +150,7 @@ impl PatientRepository {
         let params = extract_patient_search_params(&content);
 
         // Update current table with new version
-        let patient = sqlx::query_as!(
-            Patient,
+        sqlx::query!(
             r#"
             UPDATE patient
             SET
@@ -181,33 +165,26 @@ impl PatientRepository {
                 gender = $10,
                 active = $11
             WHERE id = $1
-            RETURNING
-                id, version_id, last_updated,
-                content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active
             "#,
             id,
             new_version_id,
             last_updated,
             content,
-            params.family_name.is_empty().then_some(None).unwrap_or(Some(params.family_name)),
-            params.given_name.is_empty().then_some(None).unwrap_or(Some(params.given_name)),
-            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(params.identifier_system)),
-            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(params.identifier_value)),
+            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
+            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
+            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
             params.gender,
             params.active,
         )
-        .fetch_one(&mut *tx)
+        .execute(&mut *tx)
         .await?;
 
         tx.commit().await?;
 
-        Ok(patient)
+        // Fetch and return updated patient
+        self.read(id).await
     }
 
     /// Delete a patient resource (hard delete)
@@ -220,12 +197,7 @@ impl PatientRepository {
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active
+                content as "content: Value"
             FROM patient
             WHERE id = $1
             FOR UPDATE
@@ -238,6 +210,9 @@ impl PatientRepository {
 
         let new_version_id = patient.version_id + 1;
         let last_updated = Utc::now();
+
+        // Extract search params from content for history
+        let params = extract_patient_search_params(&patient.content);
 
         // Delete from current table
         sqlx::query!(
@@ -265,13 +240,13 @@ impl PatientRepository {
             new_version_id,
             last_updated,
             &patient.content,
-            &patient.family_name,
-            &patient.given_name,
-            &patient.identifier_system,
-            &patient.identifier_value,
-            patient.birthdate,
-            &patient.gender,
-            patient.active,
+            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
+            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
+            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
+            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
+            params.birthdate,
+            params.gender,
+            params.active,
             "DELETE",
             Utc::now(),
         )
@@ -291,11 +266,6 @@ impl PatientRepository {
             SELECT
                 id, version_id, last_updated,
                 content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active,
                 history_operation, history_timestamp
             FROM patient_history
             WHERE id = $1
@@ -308,20 +278,12 @@ impl PatientRepository {
 
         // Try to get current version and add it to history
         if let Ok(current) = self.read(id).await {
-            // Convert current Patient to PatientHistory format
-            // Current version isn't in history yet (only gets added on update/delete)
+            // Convert current Patient to PatientHistory format (much simpler now!)
             let current_as_history = PatientHistory {
                 id: current.id,
                 version_id: current.version_id,
                 last_updated: current.last_updated,
                 content: current.content,
-                family_name: current.family_name,
-                given_name: current.given_name,
-                identifier_system: current.identifier_system,
-                identifier_value: current.identifier_value,
-                birthdate: current.birthdate,
-                gender: current.gender,
-                active: current.active,
                 history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
                 history_timestamp: current.last_updated,
             };
@@ -340,19 +302,12 @@ impl PatientRepository {
         // Check if requested version is the current version
         if let Ok(current) = self.read(id).await {
             if current.version_id == version_id {
-                // Convert to PatientHistory format
+                // Convert to PatientHistory format (much simpler now!)
                 return Ok(PatientHistory {
                     id: current.id,
                     version_id: current.version_id,
                     last_updated: current.last_updated,
                     content: current.content,
-                    family_name: current.family_name,
-                    given_name: current.given_name,
-                    identifier_system: current.identifier_system,
-                    identifier_value: current.identifier_value,
-                    birthdate: current.birthdate,
-                    gender: current.gender,
-                    active: current.active,
                     history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
                     history_timestamp: current.last_updated,
                 });
@@ -366,11 +321,6 @@ impl PatientRepository {
             SELECT
                 id, version_id, last_updated,
                 content as "content: Value",
-                family_name as "family_name?",
-                given_name as "given_name?",
-                identifier_system as "identifier_system?",
-                identifier_value as "identifier_value?",
-                birthdate, gender, active,
                 history_operation, history_timestamp
             FROM patient_history
             WHERE id = $1 AND version_id = $2
@@ -390,9 +340,7 @@ impl PatientRepository {
         let query = SearchQuery::from_params(params)?;
 
         let mut sql = String::from(
-            r#"SELECT id, version_id, last_updated, content,
-               family_name, given_name, identifier_system, identifier_value,
-               birthdate, gender, active
+            r#"SELECT id, version_id, last_updated, content
                FROM patient WHERE 1=1"#,
         );
 
@@ -481,12 +429,9 @@ impl PatientRepository {
             }
         }
 
-        bind_count += 1;
-        sql.push_str(&format!(" LIMIT ${}", bind_count));
-        bind_values.push(query.limit.to_string());
-        bind_count += 1;
-        sql.push_str(&format!(" OFFSET ${}", bind_count));
-        bind_values.push(query.offset.to_string());
+        // Add LIMIT and OFFSET directly (not as bind parameters since they're integers we control)
+        sql.push_str(&format!(" LIMIT {}", query.limit));
+        sql.push_str(&format!(" OFFSET {}", query.offset));
 
         // Build dynamic query
         let mut query_builder = sqlx::query(&sql);
@@ -503,13 +448,6 @@ impl PatientRepository {
                 version_id: row.get("version_id"),
                 last_updated: row.get("last_updated"),
                 content: row.get("content"),
-                family_name: row.get("family_name"),
-                given_name: row.get("given_name"),
-                identifier_system: row.get("identifier_system"),
-                identifier_value: row.get("identifier_value"),
-                birthdate: row.get("birthdate"),
-                gender: row.get("gender"),
-                active: row.get("active"),
             })
             .collect();
 
@@ -607,14 +545,7 @@ impl PatientRepository {
             r#"
             SELECT
                 id, version_id, last_updated,
-                content as "content: Value",
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
-                effective_datetime, effective_period_start, effective_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+                content as "content: Value"
             FROM observation
             WHERE patient_reference = $1
             "#,
