@@ -1,0 +1,105 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug executable 'fire'",
+			"cargo": {
+				"args": [
+					"build",
+					"--bin=fire",
+					"--package=fire"
+				],
+				"filter": {
+					"name": "fire",
+					"kind": "bin"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir",
+				"SERVER_HOST": "127.0.0.1",
+				"SERVER_PORT": "3000",
+				"RUST_LOG": "fire=debug,tower_http=debug,sqlx=info"
+			}
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug unit tests",
+			"cargo": {
+				"args": [
+					"test",
+					"--no-run",
+					"--lib",
+					"--package=fire"
+				],
+				"filter": {
+					"name": "fire",
+					"kind": "lib"
+				}
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir_test"
+			}
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug integration tests",
+			"cargo": {
+				"args": [
+					"test",
+					"--no-run",
+					"--test=${input:testName}",
+					"--package=fire"
+				]
+			},
+			"args": [],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir_test"
+			}
+		},
+		{
+			"type": "lldb",
+			"request": "launch",
+			"name": "Debug specific test",
+			"cargo": {
+				"args": [
+					"test",
+					"--no-run",
+					"--package=fire",
+					"${input:specificTest}"
+				]
+			},
+			"args": [
+				"--exact",
+				"${input:specificTest}"
+			],
+			"cwd": "${workspaceFolder}",
+			"env": {
+				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir_test",
+				"RUST_LOG": "debug"
+			}
+		}
+	],
+	"inputs": [
+		{
+			"id": "testName",
+			"type": "promptString",
+			"description": "Enter the name of the test file (e.g., patient_tests)",
+			"default": "patient_tests"
+		},
+		{
+			"id": "specificTest",
+			"type": "promptString",
+			"description": "Enter the name of the specific test to debug",
+			"default": ""
+		}
+	]
+}

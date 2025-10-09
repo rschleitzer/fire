@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, version_id, last_updated,\n                content as \"content: Value\"\n            FROM patient\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "version_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
+        "name": "last_updated",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "content: Value",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5a761417ba77c12f2a2021ad8d0d691819c4408b990c9d22e29f945cad8ec618"
+}

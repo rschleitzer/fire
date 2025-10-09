@@ -273,9 +273,31 @@ curl -X POST http://localhost:3000/fhir \
 ## Development
 
 ### Build
+
+The project uses SQLx with compile-time query verification. You can build in two ways:
+
+**Option 1: With database (default)**
 ```bash
+# Start PostgreSQL
+docker compose up postgres -d
+
+# Build (queries verified against database)
 cargo build
 ```
+
+**Option 2: Offline mode (no database required)**
+```bash
+# Build using cached query metadata from .sqlx/ directory
+SQLX_OFFLINE=true cargo build
+```
+
+To regenerate the offline query metadata after modifying SQL queries:
+```bash
+export DATABASE_URL="postgres://postgres:postgres@localhost:5432/fhir"
+cargo sqlx prepare --workspace
+```
+
+The `.sqlx/` directory contains cached query metadata and should be committed to version control.
 
 ### Run tests
 
