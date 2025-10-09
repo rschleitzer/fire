@@ -11,416 +11,68 @@ Building a production-grade **FHIR R5** (Fast Healthcare Interoperability Resour
 
 ## Core Architectural Decisions
 
-### 1. Web Framework: Axum
-**Chosen over Actix-Web** for:
-- Better developer ergonomics and type inference
-- Cleaner syntax with extractors
-- Direct Tokio integration (no runtime wrapper)
-- Excellent compile-time error messages
-- Easier middleware composition via Tower
-- More modern, actively evolving codebase
+### 1. Web Framework: Axum ✅
+**Chosen over Actix-Web** for better developer ergonomics, cleaner syntax, direct Tokio integration, and easier middleware composition. Healthcare APIs are I/O-bound, so Axum's excellent DX outweighs marginal performance differences.
 
-Healthcare APIs are I/O-bound (database queries), not CPU-bound, so Axum's excellent DX outweighs any marginal performance differences.
+### 2. Database: PostgreSQL with JSONB ✅
+- JSONB for flexible FHIR resource storage
+- ACID transactions (critical for bundles)
+- GIN indexes for JSON queries
+- Using `sqlx` with compile-time checked queries
+- Custom query builder for FHIR search
 
-### 2. Database: PostgreSQL with JSONB
-**Primary database choice:**
-- Excellent JSONB support for flexible FHIR resource storage
-- ACID transactions (critical for FHIR transaction bundles)
-- Rich indexing capabilities (GIN indexes for JSON)
-- Mature, reliable, well-supported in Rust ecosystem
+### 3. Table-Per-Resource Architecture ✅
 
-**NOT using a traditional ORM:**
-- FHIR search is too complex for ORMs (dynamic parameters, modifiers, chained searches)
-- Use `sqlx` for connection pooling, compile-time checked queries, and transactions
-- Build custom query builder for FHIR search operations
-- Raw SQL with type safety via sqlx for complex queries
+**Each FHIR resource type gets TWO tables:**
+- **Current Table** - Only latest version, heavily indexed, fast searches
+- **History Table** - All versions, lighter indexing, archivable
 
-### 3. Table-Per-Resource Architecture
+**Benefits:** 22x faster reads, 5x faster searches, separate indexing strategies.
 
-**Going beyond HAPI FHIR:** Each FHIR resource type gets TWO tables:
+### 4. Search Parameter Extraction ✅
+Resources stored as complete JSONB + critical search parameters extracted to dedicated indexed columns.
 
-#### Current Table (e.g., `patient`)
-- Stores **only the latest/current version** of each resource
-- Heavily indexed for fast searches (90% of queries)
-- Optimized for reads and searches
-- Small, fast, cache-friendly
+### 5. Repository Pattern ✅
+Each resource has: `create()`, `read()`, `read_version()`, `update()`, `delete()`, `search()`, `history()`. All operations use sqlx transactions.
 
-#### History Table (e.g., `patient_history`)
-- Stores **all versions** including deleted resources
-- Lighter indexing (history queries less frequent)
-- Partitionable by timestamp
-- Can be compressed/archived
+## Current Status
 
-**Example Schema:**
-```sql
-CREATE TABLE patient (
-    id UUID PRIMARY KEY,
-    version_id INTEGER NOT NULL,
-    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted BOOLEAN DEFAULT FALSE,
-    content JSONB NOT NULL,  -- Full FHIR resource
-    
-    -- Extracted search parameters (indexed)
-    family_name TEXT[],
-    given_name TEXT[],
-    identifier_system TEXT[],
-    identifier_value TEXT[],
-    birthdate DATE,
-    gender TEXT,
-    active BOOLEAN
-);
+### ✅ Completed
+- Project setup with Axum, sqlx, PostgreSQL
+- Patient and Observation resources (current + history tables)
+- Full CRUD operations
+- Search with basic parameters
+- History operations and version reading
+- Transaction bundles (POST /fhir)
+- Capability statement (GET /fhir/metadata)
+- Health check endpoints
+- Error handling, middleware (logging, request_id)
+- FHIR R5 fields (triggeredBy, focus, bodyStructure)
 
-CREATE TABLE patient_history (
-    id UUID NOT NULL,
-    version_id INTEGER NOT NULL,
-    last_updated TIMESTAMPTZ NOT NULL,
-    deleted BOOLEAN DEFAULT FALSE,
-    content JSONB NOT NULL,
-    
-    -- Same search parameters
-    family_name TEXT[],
-    given_name TEXT[],
-    -- ... etc
-    
-    -- History metadata
-    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
-    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    
-    PRIMARY KEY (id, version_id)
-);
-```
+### 🚧 Pending
+- Advanced search (modifiers, prefixes, chaining)
+- `_include`, `_revinclude`, `_summary`, `_elements`
+- Code generation for 140+ FHIR resources
+- Authentication/Authorization (SMART on FHIR)
+- Rate limiting, audit logging
+- Performance optimization, comprehensive tests
 
-**Benefits:**
-- 22x faster current resource reads
-- 5x faster current resource searches
-- Separate indexing strategies
-- Easy archival and partitioning
-- Clear separation of concerns
-
-### 4. Search Parameter Extraction
-
-FHIR resources are stored as complete JSONB documents, but critical search parameters are **extracted** into dedicated columns for performance:
-
-```rust
-// Extract from FHIR JSON and store in columns
-family_name: ["Smith", "Johnson"]  // From name[*].family
-identifier_system: ["http://hospital.org/mrn"]
-identifier_value: ["12345"]
-birthdate: "1980-05-15"
-```
-
-This allows fast indexed queries without parsing JSONB for every search.
-
-### 5. Code Generation Strategy
-
-**140+ FHIR resources** require automation:
-
-1. **Use Rust macros** or `build.rs` to generate from FHIR StructureDefinitions
-2. **Generate for each resource:**
-   - SQL table creation scripts
-   - Rust structs (current + history)
-   - Repository implementations
-   - Search parameter extraction logic
-   - Route handlers
-
-3. **Declarative resource definitions:**
-```rust
-#[fhir_resource(
-    name = "Patient",
-    search_params = [
-        string("name", "name.family, name.given"),
-        token("identifier", "identifier"),
-        date("birthdate", "birthDate"),
-    ]
-)]
-pub struct Patient { /* ... */ }
-```
-
-**Code Generation Approach:**
-This project will use template-based code generation to handle 140+ FHIR resources. See the [Code Generation Reference](#code-generation-with-dsslopenjade) section below for complete patterns and examples. For a step-by-step tutorial, see [GeneratingCode.md](GeneratingCode.md).
-
-### 6. Repository Pattern
-
-Each resource has a repository with:
-- `create()` - Insert into both current and history tables
-- `read()` - Read from current table
-- `read_version()` - Read specific version from history
-- `update()` - Replace in current, insert into history
-- `delete()` - Soft delete in current, record in history
-- `search()` - Dynamic query builder for current table
-- `history()` - Retrieve all versions from history table
-
-Operations are transactional using sqlx transactions.
-
-## Technology Stack
-
-```toml
-[dependencies]
-# Web framework
-axum = "0.7"
-tokio = { version = "1", features = ["full"] }
-tower = "0.4"
-tower-http = "0.5"
-
-# Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# Database
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "json", "uuid", "chrono"] }
-
-# Error handling
-anyhow = "1"
-thiserror = "1"
-
-# UUID and time
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-
-# Validation
-validator = "0.18"
-
-# Authentication (future)
-jsonwebtoken = "9"
-```
-
-## Project Structure
-
-```
-fhir-server/
-├── Cargo.toml
-├── CLAUDE.md (this file)
-├── migrations/
-│   ├── 001_create_common_functions.sql
-│   ├── 002_create_patient_tables.sql
-│   ├── 003_create_observation_tables.sql
-│   └── ... (generated per resource)
-├── src/
-│   ├── main.rs
-│   ├── lib.rs
-│   ├── api/
-│   │   ├── mod.rs
-│   │   ├── routes.rs
-│   │   ├── handlers/
-│   │   │   ├── patient.rs
-│   │   │   ├── observation.rs
-│   │   │   └── ...
-│   ├── models/
-│   │   ├── mod.rs
-│   │   ├── patient.rs
-│   │   ├── observation.rs
-│   │   ├── traits.rs
-│   │   └── ...
-│   ├── repository/
-│   │   ├── mod.rs
-│   │   ├── patient.rs
-│   │   ├── observation.rs
-│   │   └── ...
-│   ├── services/
-│   │   ├── mod.rs
-│   │   ├── search.rs
-│   │   ├── validation.rs
-│   │   └── ...
-│   ├── search/
-│   │   ├── mod.rs
-│   │   ├── query_builder.rs
-│   │   ├── parameters.rs
-│   │   └── ...
-│   ├── error.rs
-│   └── config.rs
-├── build.rs (optional - for code generation)
-└── tests/
-```
-
-## Key Implementation Patterns
-
-### Versioned Resource Trait
-
-```rust
-#[async_trait]
-pub trait VersionedResource: Sized + Send + Sync {
-    type History: Send + Sync;
-    
-    const RESOURCE_TYPE: &'static str;
-    const TABLE_NAME: &'static str;
-    const HISTORY_TABLE_NAME: &'static str;
-    
-    fn get_id(&self) -> &Uuid;
-    fn get_version_id(&self) -> i32;
-    fn extract_search_params(content: &serde_json::Value) -> SearchParams;
-}
-```
-
-### Resource Repository Operations
-
-```rust
-pub struct PatientRepository {
-    pool: PgPool,
-}
-
-impl PatientRepository {
-    // Create new resource (version 1)
-    pub async fn create(&self, content: Value) -> Result<Patient> {
-        // 1. Extract search parameters
-        // 2. INSERT into current table
-        // 3. INSERT into history table with operation='CREATE'
-        // 4. All in transaction
-    }
-    
-    // Update resource (increment version)
-    pub async fn update(&self, id: &Uuid, content: Value) -> Result<Patient> {
-        // 1. Get current version (with FOR UPDATE lock)
-        // 2. UPDATE current table (replaces row)
-        // 3. INSERT new version into history table with operation='UPDATE'
-        // 4. All in transaction
-    }
-    
-    // Delete resource (soft delete)
-    pub async fn delete(&self, id: &Uuid) -> Result<()> {
-        // 1. Mark deleted=true in current table
-        // 2. INSERT into history table with operation='DELETE'
-    }
-    
-    // Search current resources
-    pub async fn search(&self, params: &HashMap<String, String>) -> Result<Vec<Patient>> {
-        // 1. Build dynamic SQL query
-        // 2. Query current table only
-        // 3. Use indexed search parameter columns
-    }
-    
-    // Get resource history
-    pub async fn history(&self, id: &Uuid) -> Result<Vec<PatientHistory>> {
-        // Query history table for all versions
-    }
-}
-```
-
-### Search Query Builder
-
-FHIR search is complex. Build queries dynamically:
-
-```rust
-pub struct FhirSearchBuilder {
-    resource_type: String,
-    conditions: Vec<SearchCondition>,
-    sort: Vec<SortSpec>,
-    offset: usize,
-    limit: usize,
-}
-
-pub enum SearchCondition {
-    StringContains { param: String, value: String },
-    StringExact { param: String, value: String },
-    Token { param: String, system: Option<String>, value: String },
-    Date { param: String, prefix: DatePrefix, value: String },
-    Reference { param: String, value: String },
-    Number { param: String, prefix: NumberPrefix, value: f64 },
-}
-
-impl FhirSearchBuilder {
-    pub fn build(&self) -> (String, Vec<SqlValue>) {
-        // Build dynamic SQL with proper parameter binding
-    }
-}
-```
-
-### Error Handling
-
-```rust
-use axum::response::{IntoResponse, Response};
-use axum::http::StatusCode;
-
-#[derive(Debug, thiserror::Error)]
-pub enum FhirError {
-    #[error("Resource not found")]
-    NotFound,
-    
-    #[error("Invalid resource: {0}")]
-    InvalidResource(String),
-    
-    #[error("Version conflict")]
-    VersionConflict,
-    
-    #[error("Database error: {0}")]
-    DatabaseError(#[from] sqlx::Error),
-    
-    #[error("Internal error: {0}")]
-    Internal(#[from] anyhow::Error),
-}
-
-impl IntoResponse for FhirError {
-    fn into_response(self) -> Response {
-        let (status, operation_outcome) = match self {
-            FhirError::NotFound => (
-                StatusCode::NOT_FOUND,
-                create_operation_outcome("not-found", &self.to_string())
-            ),
-            FhirError::InvalidResource(_) => (
-                StatusCode::BAD_REQUEST,
-                create_operation_outcome("invalid", &self.to_string())
-            ),
-            // ... etc
-        };
-        
-        (status, Json(operation_outcome)).into_response()
-    }
-}
-```
-
-## FHIR-Specific Considerations
+## FHIR Operations Reference
 
 ### Search Parameter Types
-1. **String** - name, address, etc. (support :contains, :exact modifiers)
-2. **Token** - identifiers, codes (system|value pairs)
-3. **Date** - birthdate, dates (support prefixes: gt, lt, ge, le, eq)
-4. **Reference** - patient, subject (Patient/123 format)
-5. **Number** - quantities (support prefixes)
+1. **String** - name, address (:contains, :exact)
+2. **Token** - identifiers, codes (system|value)
+3. **Date** - birthdate, dates (gt, lt, ge, le, eq)
+4. **Reference** - patient, subject (Patient/123)
+5. **Number** - quantities (with prefixes)
 6. **Quantity** - measurements with units
 7. **URI** - profile, urls
 
-### Search Modifiers
-- `:exact` - exact string match
-- `:contains` - substring match
-- `:text` - full-text search
-- `:missing` - parameter presence/absence
-- `:not` - negation
-
-### Search Prefixes (for dates/numbers)
-- `eq` - equals
-- `ne` - not equals
-- `gt` - greater than
-- `lt` - less than
-- `ge` - greater or equal
-- `le` - less or equal
-
 ### Result Parameters
-- `_count` - page size
-- `_offset` - pagination offset
-- `_sort` - sort order (e.g., `-birthdate` for descending)
-- `_include` - include referenced resources
-- `_revinclude` - include resources that reference this
-- `_summary` - return summary only
-- `_elements` - return specific elements only
-
-### FHIR Operations to Implement
-1. **CRUD**
-   - `POST /fhir/Patient` - Create
-   - `GET /fhir/Patient/{id}` - Read
-   - `PUT /fhir/Patient/{id}` - Update
-   - `DELETE /fhir/Patient/{id}` - Delete
-
-2. **Search**
-   - `GET /fhir/Patient?name=Smith&birthdate=gt1990-01-01`
-
-3. **History**
-   - `GET /fhir/Patient/{id}/_history` - Resource history
-   - `GET /fhir/Patient/{id}/_history/{vid}` - Specific version
-
-4. **Batch/Transaction**
-   - `POST /fhir` - Bundle of operations (atomic transactions)
-
-5. **Capability Statement**
-   - `GET /fhir/metadata` - Server capabilities
+- `_count`, `_offset` - pagination
+- `_sort` - sort order
+- `_include`, `_revinclude` - referenced resources
+- `_summary`, `_elements` - partial responses
 
 ## Code Generation with DSSSL/OpenJade
 
@@ -872,119 +524,29 @@ impl " resource-name "Repository {
 
     pub async fn create(&self, resource: " resource-name ") -> Result<" resource-name ", FhirError> {
         let mut tx = self.pool.begin().await?;
-
         // Insert into current table
-        sqlx::query!(
-            r#\"
-            INSERT INTO " table-name " (id, version_id, content)
-            VALUES ($1, 1, $2)
-            \"#,
-            resource.id,
-            serde_json::to_value(&resource)?
-        )
-        .execute(&mut tx)
-        .await?;
-
-        // Insert into history table
-        sqlx::query!(
-            r#\"
-            INSERT INTO " table-name "_history
-            (id, version_id, content, history_operation)
-            VALUES ($1, 1, $2, 'CREATE')
-            \"#,
-            resource.id,
-            serde_json::to_value(&resource)?
-        )
-        .execute(&mut tx)
-        .await?;
-
+        // Insert into history table with operation='CREATE'
         tx.commit().await?;
         Ok(resource)
     }
 
     pub async fn read(&self, id: &Uuid) -> Result<Option<" resource-name ">, FhirError> {
-        let row = sqlx::query!(
-            r#\"SELECT content FROM " table-name " WHERE id = $1 AND deleted = false\"#,
-            id
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        match row {
-            Some(r) => Ok(Some(serde_json::from_value(r.content)?)),
-            None => Ok(None)
-        }
+        // Read from current table where deleted = false
     }
 
     pub async fn update(&self, id: &Uuid, resource: " resource-name ") -> Result<" resource-name ", FhirError> {
         let mut tx = self.pool.begin().await?;
-
-        // Get current version
-        let current_version = sqlx::query!(
-            r#\"SELECT version_id FROM " table-name " WHERE id = $1 FOR UPDATE\"#,
-            id
-        )
-        .fetch_one(&mut tx)
-        .await?
-        .version_id;
-
-        let new_version = current_version + 1;
-
-        // Update current table
-        sqlx::query!(
-            r#\"
-            UPDATE " table-name "
-            SET version_id = $1, content = $2, last_updated = NOW()
-            WHERE id = $3
-            \"#,
-            new_version,
-            serde_json::to_value(&resource)?,
-            id
-        )
-        .execute(&mut tx)
-        .await?;
-
-        // Insert into history
-        sqlx::query!(
-            r#\"
-            INSERT INTO " table-name "_history
-            (id, version_id, content, history_operation)
-            VALUES ($1, $2, $3, 'UPDATE')
-            \"#,
-            id,
-            new_version,
-            serde_json::to_value(&resource)?
-        )
-        .execute(&mut tx)
-        .await?;
-
+        // Get current version with FOR UPDATE lock
+        // Update current table, increment version
+        // Insert into history table with operation='UPDATE'
         tx.commit().await?;
         Ok(resource)
     }
 
     pub async fn delete(&self, id: &Uuid) -> Result<(), FhirError> {
         let mut tx = self.pool.begin().await?;
-
-        sqlx::query!(
-            r#\"UPDATE " table-name " SET deleted = true WHERE id = $1\"#,
-            id
-        )
-        .execute(&mut tx)
-        .await?;
-
-        sqlx::query!(
-            r#\"
-            INSERT INTO " table-name "_history
-            (id, version_id, content, history_operation)
-            SELECT id, version_id, content, 'DELETE'
-            FROM " table-name "
-            WHERE id = $1
-            \"#,
-            id
-        )
-        .execute(&mut tx)
-        .await?;
-
+        // Mark deleted=true in current table
+        // Insert into history table with operation='DELETE'
         tx.commit().await?;
         Ok(())
     }
@@ -1057,49 +619,9 @@ impl " resource-name "Repository {
     )
 ```
 
-### Best Practices for Fire
-
-1. **Separate Metamodel from Generator**
-   - DTD defines FHIR resource structure
-   - DSSSL contains generation logic
-   - Model instances are FHIR StructureDefinitions (converted to XML if needed)
-
-2. **Generate for Development, Check In Results**
-   - Run generator during development
-   - Check generated code into git
-   - Allows code review of generated code
-   - Enables manual tweaks when needed
-
-3. **Use Inline Templates**
-   - Embed Rust code directly in DSSSL strings
-   - Easier to maintain and understand
-   - See generated code structure immediately
-
-4. **Modular Generator Organization**
-   ```
-   codegen/
-   ├── map.dsl           # Main entry, includes all modules
-   ├── utilities.scm     # Helper functions, string manipulation
-   ├── rust.scm          # Rust struct generation
-   ├── sql.scm           # SQL DDL generation
-   ├── repository.scm    # Repository implementation
-   └── handlers.scm      # Axum handler generation
-   ```
-
-5. **Test Generation**
-   - Generate for a few resources manually
-   - Verify output matches expectations
-   - Then generate all 140+ resources
-
-6. **Handle FHIR Complexity**
-   - Choice types (value[x]) → multiple fields
-   - Cardinality (0..1 vs 0..*) → Option vs Vec
-   - References → special handling for Resource/id format
-   - Search parameters → extract to columns + build indexes
-
 ### Production-Proven File Structure
 
-Based on successful production healthcare code generators (SchwebNet, Telemed5000), use this proven modular structure:
+Use this proven modular structure for code generation:
 
 **Directory Layout:**
 ```
@@ -1254,9 +776,6 @@ export SGML_CATALOG_FILES="$(pwd)/catalog"
 export SP_CHARSET_FIXED="YES"
 export SP_ENCODING="XML"
 
-# Add OpenJade to PATH if needed
-# export PATH="$PATH:/usr/local/bin"
-
 # Parse FHIR StructureDefinitions to XML model
 echo "Parsing FHIR StructureDefinitions..."
 python3 scripts/parse_fhir_definitions.py \
@@ -1268,7 +787,6 @@ echo "Generating code with OpenJade..."
 openjade -t sgml -d codegen/map.dsl model/fhir-resources.xml
 
 echo "Generation complete. Files created in src/, migrations/, etc."
-echo "Review changes before committing."
 ```
 
 **Windows (generate.bat):**
@@ -1276,7 +794,7 @@ echo "Review changes before committing."
 @echo off
 setlocal
 
-REM OpenJade paths (adjust for your installation)
+REM OpenJade paths
 set JADEPATH=C:\Program Files\openjade-1.3.1
 set PATH=%PATH%;%JADEPATH%\bin
 
@@ -1285,26 +803,19 @@ set SGML_CATALOG_FILES=%CD%\catalog
 set SP_CHARSET_FIXED=YES
 set SP_ENCODING=XML
 
-REM Parse FHIR StructureDefinitions to XML model
-echo Parsing FHIR StructureDefinitions...
+REM Parse and generate
 python scripts\parse_fhir_definitions.py ^
     --input fhir-spec\resources ^
     --output model\fhir-resources.xml
 
-REM Run OpenJade generator
-echo Generating code with OpenJade...
 openjade -t sgml -d codegen\map.dsl model\fhir-resources.xml
-
-echo Generation complete. Files created in src\, migrations\, etc.
-echo Review changes before committing.
 ```
 
 **Environment Variable Reference:**
-
 - **SGML_CATALOG_FILES** - Path to catalog file (required)
 - **SP_CHARSET_FIXED** - Set to "YES" to fix character encoding issues
 - **SP_ENCODING** - Set to "XML" for XML input processing
-- **JADEPATH** - Path to OpenJade installation (Windows primarily)
+- **JADEPATH** - Path to OpenJade installation
 
 #### Installation
 
@@ -1315,18 +826,12 @@ sudo apt-get install openjade
 
 # Fedora/RHEL
 sudo dnf install openjade
-
-# Arch
-sudo pacman -S openjade
 ```
 
 **macOS:**
 ```bash
 # MacPorts
 sudo port install openjade
-
-# Homebrew (may need manual compilation)
-brew install openjade
 ```
 
 **Windows:**
@@ -1336,7 +841,7 @@ brew install openjade
 #### Usage Workflow
 
 ```bash
-# 1. Make the script executable (Unix)
+# 1. Make executable (Unix)
 chmod +x generate.sh
 
 # 2. Run generation
@@ -1345,37 +850,45 @@ chmod +x generate.sh
 # 3. Review generated files
 git diff src/ migrations/
 
-# 4. Run tests to verify
+# 4. Run tests
 cargo test
 
-# 5. Format generated code
+# 5. Format and commit
 cargo fmt
-
-# 6. Commit changes
 git add src/ migrations/
 git commit -m "Generate code for FHIR resources"
 ```
 
-#### Troubleshooting
+### Best Practices for Fire
 
-**Issue: "openjade: command not found"**
-- Solution: Install OpenJade or add to PATH
+1. **Separate Metamodel from Generator**
+   - DTD defines FHIR resource structure
+   - DSSSL contains generation logic
+   - Model instances are FHIR StructureDefinitions (converted to XML if needed)
 
-**Issue: "cannot open catalog file"**
-- Solution: Ensure SGML_CATALOG_FILES points to correct location
-- Check: `echo $SGML_CATALOG_FILES` (Unix) or `echo %SGML_CATALOG_FILES%` (Windows)
+2. **Generate for Development, Check In Results**
+   - Run generator during development
+   - Check generated code into git
+   - Allows code review of generated code
+   - Enables manual tweaks when needed
 
-**Issue: "cannot find xml.dcl"**
-- Solution: Copy xml.dcl from OpenJade installation to project root
+3. **Use Inline Templates**
+   - Embed Rust code directly in DSSSL strings
+   - Easier to maintain and understand
+   - See generated code structure immediately
 
-**Issue: Character encoding errors**
-- Solution: Set `SP_CHARSET_FIXED=YES` and `SP_ENCODING=XML`
+4. **Modular Generator Organization** - See file structure above
 
-**Issue: "undefined function" in DSSSL**
-- Solution: Check module load order in map.dsl (utilities must load first)
+5. **Test Generation**
+   - Generate for a few resources manually
+   - Verify output matches expectations
+   - Then generate all 140+ resources
 
-**Issue: Generated files have wrong line endings**
-- Solution: Configure git to handle line endings: `git config core.autocrlf input`
+6. **Handle FHIR Complexity**
+   - Choice types (value[x]) → multiple fields
+   - Cardinality (0..1 vs 0..*) → Option vs Vec
+   - References → special handling for Resource/id format
+   - Search parameters → extract to columns + build indexes
 
 ### Transition Strategy
 
@@ -1394,100 +907,24 @@ git commit -m "Generate code for FHIR resources"
 - Add handwritten optimizations
 - Profile and improve hot paths
 
----
-
-## Implementation Priority
-
-### Phase 1: Core Foundation
-1. ✅ Architecture decisions made
-2. Project setup with Cargo
-3. Database connection with sqlx
-4. Basic Patient resource (current + history tables)
-5. Simple CRUD operations for Patient
-6. Basic search for Patient (name, birthdate, identifier)
-
-### Phase 2: Search & Validation
-7. Dynamic query builder for search
-8. Search modifiers and prefixes
-9. FHIR resource validation
-10. Pagination support
-
-### Phase 3: Multiple Resources
-11. Code generation for resources
-12. Observation resource
-13. MedicationRequest resource
-14. Additional common resources
-
-### Phase 4: Advanced Features
-15. Transaction bundles
-16. `_include` and `_revinclude`
-17. History operations
-18. Capability statement
-
-### Phase 5: Production Readiness
-19. Authentication/Authorization (SMART on FHIR)
-20. Rate limiting
-21. Audit logging
-22. Performance optimization
-23. Comprehensive testing
-
-## Current Status
-
-**Ready to begin implementation** with all core architectural decisions made:
-- ✅ Web framework: Axum
-- ✅ Database: PostgreSQL + sqlx
-- ✅ No ORM, custom query builder
-- ✅ Table-per-resource with current/history separation
-- ✅ Repository pattern
-- ✅ Search parameter extraction strategy
-
-**Next Step:** Create initial project structure and implement Patient resource with basic CRUD operations.
-
 ## Notes for Claude Code
 
-- Always use `sqlx::query_as!` for type-safe queries when possible
-- Never use localStorage/sessionStorage in any code (not supported)
-- Use transactions for any multi-step database operations
+- Always use `sqlx::query!` or `sqlx::query_as!` for type-safe queries
+- Use transactions for multi-step database operations
 - Extract search parameters into dedicated columns for performance
 - Current table queries should never filter by version_id (always latest)
 - History queries work with history table
-- Generate code for repetitive resources (140+ in FHIR)
-- FHIR search is complex - don't try to simplify it, embrace the complexity
+- FHIR search is complex - embrace it, don't oversimplify
 - Performance matters - this is healthcare data at scale
 - Type safety is critical - leverage Rust's type system
 
-## FHIR R5 Compliance
-
-Fire FHIR Server implements **FHIR R5 (5.0.0)**, the latest normative release.
-
-### Observation Resource Fields
-
-**Standard Observation Fields:**
-- `triggeredBy` - Identifies observations that triggered this observation (reflex testing)
-- `focus` - What the observation is about when not about the subject
-- `bodyStructure` - Specific body structure observed
-
-**Database Support:**
-- All fields indexed for efficient querying
-- Full JSONB storage for complete resource representation
-
-**Validation:**
-- Field validation in `src/services/validation.rs`
-- `triggeredBy.type` must be: `reflex`, `repeat`, or `re-run`
-- Observation reference required for triggered observations
-
-**Capability Statement:**
-- Advertises FHIR R5 (5.0.0) compliance
-- Lists all supported features
-- Available at `/fhir/metadata` endpoint
-
-## Questions to Resolve Later
+## Open Questions (For Future Phases)
 
 1. How to handle custom search parameters defined in profiles?
 2. Subscription mechanism for real-time updates?
 3. GraphQL interface in addition to REST?
 4. Multi-tenancy strategy (if needed)?
-5. Elasticsearch integration for advanced search?
+5. Elasticsearch integration for advanced full-text search?
 
 ---
 
