@@ -1,8 +1,8 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
-    Json,
+    response::{Html, IntoResponse, Redirect, Response},
+    Form, Json,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -13,6 +13,17 @@ use crate::api::content_negotiation::*;
 use crate::error::Result;
 use crate::repository::ObservationRepository;
 use askama::Template;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+pub struct ObservationFormData {
+    pub code: String,
+    pub status: String,
+    pub value: String,
+    pub subject: String,
+    #[serde(rename = "effectiveDateTime")]
+    pub effective_date_time: String,
+}
 
 pub type SharedObservationRepo = Arc<ObservationRepository>;
 
@@ -79,6 +90,32 @@ pub async fn update_observation(
 ) -> Result<Json<Value>> {
     let observation = repo.update(&id, content).await?;
     Ok(Json(observation.to_fhir_json()))
+}
+
+/// Update an observation (HTML form)
+pub async fn update_observation_form(
+    State(repo): State<SharedObservationRepo>,
+    Path(id): Path<Uuid>,
+    Form(form_data): Form<ObservationFormData>,
+) -> Result<Redirect> {
+    // Convert form data to FHIR JSON
+    let content = serde_json::json!({
+        "resourceType": "Observation",
+        "status": form_data.status,
+        "code": {
+            "text": form_data.code
+        },
+        "subject": {
+            "reference": form_data.subject
+        },
+        "effectiveDateTime": form_data.effective_date_time,
+        "valueString": form_data.value
+    });
+
+    repo.update(&id, content).await?;
+
+    // Redirect back to the observation detail page
+    Ok(Redirect::to(&format!("/fhir/Observation/{}", id)))
 }
 
 /// Delete an observation

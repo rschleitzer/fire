@@ -57,6 +57,8 @@ pub struct PatientDetailTemplate {
     pub version_id: String,
     pub last_updated: String,
     pub name: String,
+    pub family: String,
+    pub given: String,
     pub gender: String,
     pub birth_date: String,
     pub active: bool,
@@ -125,6 +127,34 @@ pub fn extract_patient_name(content: &Value) -> String {
         }
     }
     "Unknown".to_string()
+}
+
+/// Extract family name from Patient FHIR JSON
+pub fn extract_patient_family(content: &Value) -> String {
+    if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
+        if let Some(first_name) = names.first() {
+            if let Some(family) = first_name.get("family").and_then(|f| f.as_str()) {
+                return family.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Extract given name from Patient FHIR JSON
+pub fn extract_patient_given(content: &Value) -> String {
+    if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
+        if let Some(first_name) = names.first() {
+            if let Some(given_arr) = first_name.get("given").and_then(|g| g.as_array()) {
+                return given_arr
+                    .iter()
+                    .filter_map(|g| g.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+        }
+    }
+    String::new()
 }
 
 /// Extract observation code display text from FHIR JSON

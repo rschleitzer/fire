@@ -1,9 +1,10 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
-    Json,
+    response::{Html, IntoResponse, Redirect, Response},
+    Form, Json,
 };
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,6 +14,16 @@ use crate::api::content_negotiation::*;
 use crate::error::Result;
 use crate::repository::PatientRepository;
 use askama::Template;
+
+#[derive(Debug, Deserialize)]
+pub struct PatientFormData {
+    pub family: String,
+    pub given: String,
+    pub gender: String,
+    #[serde(rename = "birthDate")]
+    pub birth_date: String,
+    pub active: String,
+}
 
 pub type SharedPatientRepo = Arc<PatientRepository>;
 
@@ -38,13 +49,15 @@ pub async fn read_patient(
         ResponseFormat::Html => {
             // Extract fields for HTML template
             let name = extract_patient_name(&fhir_json);
+            let family = extract_patient_family(&fhir_json);
+            let given = extract_patient_given(&fhir_json);
             let gender = fhir_json.get("gender")
                 .and_then(|g| g.as_str())
-                .unwrap_or("Unknown")
+                .unwrap_or("unknown")
                 .to_string();
             let birth_date = fhir_json.get("birthDate")
                 .and_then(|b| b.as_str())
-                .unwrap_or("Unknown")
+                .unwrap_or("")
                 .to_string();
             let active = fhir_json.get("active")
                 .and_then(|a| a.as_bool())
@@ -55,6 +68,8 @@ pub async fn read_patient(
                 version_id: patient.version_id.to_string(),
                 last_updated: patient.last_updated.to_rfc3339(),
                 name,
+                family,
+                given,
                 gender,
                 birth_date,
                 active,
@@ -67,7 +82,7 @@ pub async fn read_patient(
     }
 }
 
-/// Update a patient
+/// Update a patient (JSON)
 pub async fn update_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
@@ -75,6 +90,30 @@ pub async fn update_patient(
 ) -> Result<Json<Value>> {
     let patient = repo.update(&id, content).await?;
     Ok(Json(patient.to_fhir_json()))
+}
+
+/// Update a patient (HTML form)
+pub async fn update_patient_form(
+    State(repo): State<SharedPatientRepo>,
+    Path(id): Path<Uuid>,
+    Form(form_data): Form<PatientFormData>,
+) -> Result<Redirect> {
+    // Convert form data to FHIR JSON
+    let content = serde_json::json!({
+        "resourceType": "Patient",
+        "name": [{
+            "family": form_data.family,
+            "given": [form_data.given]
+        }],
+        "gender": form_data.gender,
+        "birthDate": form_data.birth_date,
+        "active": form_data.active == "true"
+    });
+
+    repo.update(&id, content).await?;
+
+    // Redirect back to the patient detail page
+    Ok(Redirect::to(&format!("/fhir/Patient/{}", id)))
 }
 
 /// Delete a patient
