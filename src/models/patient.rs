@@ -55,21 +55,36 @@ impl VersionedResource for Patient {
 impl Patient {
     /// Returns the FHIR resource with id and meta fields injected
     pub fn to_fhir_json(&self) -> Value {
-        let mut resource = self.content.clone();
+        if let Some(content_obj) = self.content.as_object() {
+            // Create new object with fields in FHIR-standard order
+            let mut resource = serde_json::Map::new();
 
-        // Ensure it's an object
-        if let Some(obj) = resource.as_object_mut() {
-            // Add id
-            obj.insert("id".to_string(), serde_json::json!(self.id.to_string()));
+            // 1. resourceType (if present in content)
+            if let Some(resource_type) = content_obj.get("resourceType") {
+                resource.insert("resourceType".to_string(), resource_type.clone());
+            }
 
-            // Add meta with versionId and lastUpdated
-            obj.insert("meta".to_string(), serde_json::json!({
+            // 2. id
+            resource.insert("id".to_string(), serde_json::json!(self.id.to_string()));
+
+            // 3. meta
+            resource.insert("meta".to_string(), serde_json::json!({
                 "versionId": self.version_id.to_string(),
                 "lastUpdated": self.last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
             }));
-        }
 
-        resource
+            // 4. All other fields from content (except resourceType which we already added)
+            for (key, value) in content_obj {
+                if key != "resourceType" && key != "id" && key != "meta" {
+                    resource.insert(key.clone(), value.clone());
+                }
+            }
+
+            Value::Object(resource)
+        } else {
+            // Fallback if content is not an object
+            self.content.clone()
+        }
     }
 }
 
