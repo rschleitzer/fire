@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Observations - Fire FHIR Server{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Observations</h2>
+    <p class="meta-info">Total: {{ total }} observations</p>
+
+    {% if observations.len() > 0 %}
+    <table>
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Status</th>
+                <th>Value</th>
+                <th>Subject</th>
+                <th>Effective Date</th>
+                <th>ID</th>
+                <th>Last Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for obs in observations %}
+            <tr>
+                <td>
+                    <a href="/fhir/Observation/{{ obs.id }}">
+                        {{ obs.code }}
+                    </a>
+                </td>
+                <td><span class="badge badge-info">{{ obs.status }}</span></td>
+                <td>{{ obs.value }}</td>
+                <td>{{ obs.subject }}</td>
+                <td>{{ obs.effective_date }}</td>
+                <td><code>{{ obs.id }}</code></td>
+                <td class="meta-info">{{ obs.last_updated }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No observations found.</p>
+    </div>
+    {% endif %}
+
+    <div class="download-links">
+        <strong>Download:</strong>
+        <a href="{{ current_url }}&_format=json">JSON</a>
+        <a href="{{ current_url }}&_format=xml">XML</a>
+    </div>
+</div>
+{% endblock %}

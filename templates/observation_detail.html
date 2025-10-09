@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Observation: {{ code }} - Fire FHIR Server{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Observation: {{ code }}</h2>
+    <p class="meta-info">
+        ID: <code>{{ id }}</code> |
+        Version: {{ version_id }} |
+        Last Updated: {{ last_updated }}
+    </p>
+
+    <table style="margin-top: 2rem;">
+        <tr>
+            <th style="width: 200px;">Code</th>
+            <td>{{ code }}</td>
+        </tr>
+        <tr>
+            <th>Status</th>
+            <td><span class="badge badge-info">{{ status }}</span></td>
+        </tr>
+        <tr>
+            <th>Value</th>
+            <td>{{ value }}</td>
+        </tr>
+        <tr>
+            <th>Subject</th>
+            <td>{{ subject }}</td>
+        </tr>
+        <tr>
+            <th>Effective Date</th>
+            <td>{{ effective_date }}</td>
+        </tr>
+    </table>
+
+    <h3 style="margin-top: 2rem;">Full Resource (JSON)</h3>
+    <div class="resource-detail">
+        <pre>{{ resource_json }}</pre>
+    </div>
+
+    <div class="download-links">
+        <strong>Actions:</strong>
+        <a href="/fhir/Observation/{{ id }}?_format=json">Download JSON</a>
+        <a href="/fhir/Observation/{{ id }}?_format=xml">Download XML</a>
+        <a href="/fhir/Observation/{{ id }}/_history">View History</a>
+        <a href="/fhir/Observation">Back to Observations</a>
+    </div>
+</div>
+{% endblock %}

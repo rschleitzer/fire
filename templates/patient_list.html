@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Patients - Fire FHIR Server{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Patients</h2>
+    <p class="meta-info">Total: {{ total }} patients</p>
+
+    {% if patients.len() > 0 %}
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Gender</th>
+                <th>Birth Date</th>
+                <th>Active</th>
+                <th>ID</th>
+                <th>Last Updated</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for patient in patients %}
+            <tr>
+                <td>
+                    <a href="/fhir/Patient/{{ patient.id }}">
+                        {{ patient.name }}
+                    </a>
+                </td>
+                <td>{{ patient.gender }}</td>
+                <td>{{ patient.birth_date }}</td>
+                <td>
+                    {% if patient.active %}
+                    <span class="badge badge-success">Active</span>
+                    {% else %}
+                    <span class="badge badge-danger">Inactive</span>
+                    {% endif %}
+                </td>
+                <td><code>{{ patient.id }}</code></td>
+                <td class="meta-info">{{ patient.last_updated }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No patients found.</p>
+    </div>
+    {% endif %}
+
+    <div class="download-links">
+        <strong>Download:</strong>
+        <a href="{{ current_url }}&_format=json">JSON</a>
+        <a href="{{ current_url }}&_format=xml">XML</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ name }} - Fire FHIR Server{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Patient: {{ name }}</h2>
+    <p class="meta-info">
+        ID: <code>{{ id }}</code> |
+        Version: {{ version_id }} |
+        Last Updated: {{ last_updated }}
+    </p>
+
+    <table style="margin-top: 2rem;">
+        <tr>
+            <th style="width: 200px;">Name</th>
+            <td>{{ name }}</td>
+        </tr>
+        <tr>
+            <th>Gender</th>
+            <td>{{ gender }}</td>
+        </tr>
+        <tr>
+            <th>Birth Date</th>
+            <td>{{ birth_date }}</td>
+        </tr>
+        <tr>
+            <th>Active</th>
+            <td>
+                {% if active %}
+                <span class="badge badge-success">Active</span>
+                {% else %}
+                <span class="badge badge-danger">Inactive</span>
+                {% endif %}
+            </td>
+        </tr>
+    </table>
+
+    <h3 style="margin-top: 2rem;">Full Resource (JSON)</h3>
+    <div class="resource-detail">
+        <pre>{{ resource_json }}</pre>
+    </div>
+
+    <div class="download-links">
+        <strong>Actions:</strong>
+        <a href="/fhir/Patient/{{ id }}?_format=json">Download JSON</a>
+        <a href="/fhir/Patient/{{ id }}?_format=xml">Download XML</a>
+        <a href="/fhir/Patient/{{ id }}/_history">View History</a>
+        <a href="/fhir/Patient">Back to Patients</a>
+    </div>
+</div>
+{% endblock %}

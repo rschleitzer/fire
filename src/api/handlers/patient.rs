@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 use serde_json::Value;
@@ -8,8 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::api::content_negotiation::*;
 use crate::error::Result;
 use crate::repository::PatientRepository;
+use askama::Template;
 
 pub type SharedPatientRepo = Arc<PatientRepository>;
 
@@ -26,9 +29,42 @@ pub async fn create_patient(
 pub async fn read_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Value>> {
+    headers: HeaderMap,
+) -> Result<Response> {
     let patient = repo.read(&id).await?;
-    Ok(Json(patient.to_fhir_json()))
+    let fhir_json = patient.to_fhir_json();
+
+    match preferred_format(&headers) {
+        ResponseFormat::Html => {
+            // Extract fields for HTML template
+            let name = extract_patient_name(&fhir_json);
+            let gender = fhir_json.get("gender")
+                .and_then(|g| g.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let birth_date = fhir_json.get("birthDate")
+                .and_then(|b| b.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let active = fhir_json.get("active")
+                .and_then(|a| a.as_bool())
+                .unwrap_or(true);
+
+            let template = PatientDetailTemplate {
+                id: id.to_string(),
+                version_id: patient.version_id.to_string(),
+                last_updated: patient.last_updated.to_rfc3339(),
+                name,
+                gender,
+                birth_date,
+                active,
+                resource_json: serde_json::to_string_pretty(&fhir_json)?,
+            };
+
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+    }
 }
 
 /// Update a patient
@@ -54,7 +90,8 @@ pub async fn delete_patient(
 pub async fn search_patients(
     State(repo): State<SharedPatientRepo>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Value>> {
+    headers: HeaderMap,
+) -> Result<Response> {
     // Check if _total parameter is requested
     let include_total = params.get("_total").map(|t| t == "accurate").unwrap_or(false);
 
@@ -103,7 +140,43 @@ pub async fn search_patients(
 
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
-    Ok(Json(bundle))
+
+    match preferred_format(&headers) {
+        ResponseFormat::Html => {
+            // Convert patients to HTML table rows
+            let patient_rows: Vec<PatientRow> = patients
+                .iter()
+                .map(|p| {
+                    let fhir_json = p.to_fhir_json();
+                    PatientRow {
+                        id: p.id.to_string(),
+                        name: extract_patient_name(&fhir_json),
+                        gender: fhir_json.get("gender")
+                            .and_then(|g| g.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        birth_date: fhir_json.get("birthDate")
+                            .and_then(|b| b.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        active: fhir_json.get("active")
+                            .and_then(|a| a.as_bool())
+                            .unwrap_or(true),
+                        last_updated: p.last_updated.to_rfc3339(),
+                    }
+                })
+                .collect();
+
+            let template = PatientListTemplate {
+                patients: patient_rows,
+                total: total.map(|t| t as usize).unwrap_or(patients.len()),
+                current_url: "/fhir/Patient?".to_string(),
+            };
+
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+    }
 }
 
 /// Get patient history

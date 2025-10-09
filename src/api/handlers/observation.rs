@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Response},
     Json,
 };
 use serde_json::Value;
@@ -8,8 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::api::content_negotiation::*;
 use crate::error::Result;
 use crate::repository::ObservationRepository;
+use askama::Template;
 
 pub type SharedObservationRepo = Arc<ObservationRepository>;
 
@@ -26,9 +29,46 @@ pub async fn create_observation(
 pub async fn read_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Value>> {
+    headers: HeaderMap,
+) -> Result<Response> {
     let observation = repo.read(&id).await?;
-    Ok(Json(observation.to_fhir_json()))
+    let fhir_json = observation.to_fhir_json();
+
+    match preferred_format(&headers) {
+        ResponseFormat::Html => {
+            // Extract fields for HTML template
+            let code = extract_observation_code(&fhir_json);
+            let status = fhir_json.get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let value = extract_observation_value(&fhir_json);
+            let subject = fhir_json.get("subject")
+                .and_then(|s| s.get("reference"))
+                .and_then(|r| r.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            let effective_date = fhir_json.get("effectiveDateTime")
+                .and_then(|e| e.as_str())
+                .unwrap_or("Unknown")
+                .to_string();
+
+            let template = ObservationDetailTemplate {
+                id: id.to_string(),
+                version_id: observation.version_id.to_string(),
+                last_updated: observation.last_updated.to_rfc3339(),
+                code,
+                status,
+                value,
+                subject,
+                effective_date,
+                resource_json: serde_json::to_string_pretty(&fhir_json)?,
+            };
+
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+    }
 }
 
 /// Update an observation
@@ -96,7 +136,8 @@ pub async fn read_observation_version(
 pub async fn search_observations(
     State(repo): State<SharedObservationRepo>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Value>> {
+    headers: HeaderMap,
+) -> Result<Response> {
     let include_total = params.get("_total").map_or(false, |v| v == "accurate");
     let (observations, total) = repo.search(&params, include_total).await?;
 
@@ -158,5 +199,44 @@ pub async fn search_observations(
 
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
-    Ok(Json(bundle))
+
+    match preferred_format(&headers) {
+        ResponseFormat::Html => {
+            // Convert observations to HTML table rows
+            let observation_rows: Vec<ObservationRow> = observations
+                .iter()
+                .map(|obs| {
+                    let fhir_json = obs.to_fhir_json();
+                    ObservationRow {
+                        id: obs.id.to_string(),
+                        code: extract_observation_code(&fhir_json),
+                        status: fhir_json.get("status")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        value: extract_observation_value(&fhir_json),
+                        subject: fhir_json.get("subject")
+                            .and_then(|s| s.get("reference"))
+                            .and_then(|r| r.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        effective_date: fhir_json.get("effectiveDateTime")
+                            .and_then(|e| e.as_str())
+                            .unwrap_or("Unknown")
+                            .to_string(),
+                        last_updated: obs.last_updated.to_rfc3339(),
+                    }
+                })
+                .collect();
+
+            let template = ObservationListTemplate {
+                observations: observation_rows,
+                total: total.map(|t| t as usize).unwrap_or(observations.len()),
+                current_url: "/fhir/Observation?".to_string(),
+            };
+
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+    }
 }
