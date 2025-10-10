@@ -8,18 +8,24 @@ use super::handlers::bundle::{process_bundle, BundleState};
 use super::handlers::health::{health_check, liveness_check, readiness_check, SharedPool};
 use super::handlers::metadata::capability_statement;
 use super::handlers::observation::{
-    create_observation, delete_observation, get_observation_history, read_observation,
-    read_observation_version, search_observations, update_observation, update_observation_form,
-    SharedObservationRepo,
+    create_observation, delete_observation, delete_observations, get_observation_history,
+    read_observation, read_observation_version, search_observations, update_observation,
+    update_observation_form, SharedObservationRepo,
 };
 use super::handlers::patient::{
-    create_patient, delete_patient, get_patient_history, read_patient, read_patient_version,
-    search_patients, update_patient, update_patient_form, SharedPatientRepo,
+    create_patient, delete_patient, delete_patients, get_patient_history, read_patient,
+    read_patient_version, search_patients, update_patient, update_patient_form,
+    SharedPatientRepo,
 };
 
 pub fn patient_routes(repo: SharedPatientRepo) -> Router {
     Router::new()
-        .route("/fhir/Patient", get(search_patients).post(create_patient))
+        .route(
+            "/fhir/Patient",
+            get(search_patients)
+                .post(create_patient)
+                .delete(delete_patients),
+        )
         .route(
             "/fhir/Patient/:id",
             get(read_patient)
@@ -39,7 +45,9 @@ pub fn observation_routes(repo: SharedObservationRepo) -> Router {
     Router::new()
         .route(
             "/fhir/Observation",
-            get(search_observations).post(create_observation),
+            get(search_observations)
+                .post(create_observation)
+                .delete(delete_observations),
         )
         .route(
             "/fhir/Observation/:id",

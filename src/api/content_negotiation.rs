@@ -45,6 +45,7 @@ pub struct PatientListTemplate {
 #[derive(Clone)]
 pub struct PatientRow {
     pub id: String,
+    pub version_id: String,
     pub name: String,
     pub gender: String,
     pub birth_date: String,
@@ -78,6 +79,7 @@ pub struct ObservationListTemplate {
 #[derive(Clone)]
 pub struct ObservationRow {
     pub id: String,
+    pub version_id: String,
     pub code: String,
     pub status: String,
     pub value: String,

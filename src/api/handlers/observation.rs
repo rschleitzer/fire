@@ -172,6 +172,34 @@ pub async fn read_observation_version(
     Ok(Json(observation.content))
 }
 
+/// Delete observations (batch delete)
+pub async fn delete_observations(
+    State(repo): State<SharedObservationRepo>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<StatusCode> {
+    // Check if _id parameter is present for batch delete
+    if let Some(id_param) = params.get("_id") {
+        // Split comma-separated IDs
+        let ids: Vec<&str> = id_param.split(',').collect();
+
+        // Delete each observation
+        for id_str in ids {
+            if let Ok(id) = Uuid::parse_str(id_str.trim()) {
+                repo.delete(&id).await?;
+            }
+        }
+    } else {
+        // Delete all observations matching the search criteria
+        let (observations, _) = repo.search(&params, false).await?;
+
+        for observation in observations {
+            repo.delete(&observation.id).await?;
+        }
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Search observations
 pub async fn search_observations(
     State(repo): State<SharedObservationRepo>,
@@ -251,6 +279,7 @@ pub async fn search_observations(
                     let fhir_json = obs.to_fhir_json();
                     ObservationRow {
                         id: obs.id.to_string(),
+                        version_id: obs.version_id.to_string(),
                         code: extract_observation_code(&fhir_json),
                         status: fhir_json
                             .get("status")

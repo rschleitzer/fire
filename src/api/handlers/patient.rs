@@ -195,6 +195,7 @@ pub async fn search_patients(
                     let fhir_json = p.to_fhir_json();
                     PatientRow {
                         id: p.id.to_string(),
+                        version_id: p.version_id.to_string(),
                         name: extract_patient_name(&fhir_json),
                         gender: fhir_json
                             .get("gender")
@@ -267,4 +268,32 @@ pub async fn read_patient_version(
 ) -> Result<Json<Value>> {
     let patient = repo.read_version(&id, version_id).await?;
     Ok(Json(patient.content))
+}
+
+/// Delete patients (batch delete)
+pub async fn delete_patients(
+    State(repo): State<SharedPatientRepo>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<StatusCode> {
+    // Check if _id parameter is present for batch delete
+    if let Some(id_param) = params.get("_id") {
+        // Split comma-separated IDs
+        let ids: Vec<&str> = id_param.split(',').collect();
+
+        // Delete each patient
+        for id_str in ids {
+            if let Ok(id) = Uuid::parse_str(id_str.trim()) {
+                repo.delete(&id).await?;
+            }
+        }
+    } else {
+        // Delete all patients matching the search criteria
+        let (patients, _) = repo.search(&params, false).await?;
+
+        for patient in patients {
+            repo.delete(&patient.id).await?;
+        }
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
