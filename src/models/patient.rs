@@ -12,7 +12,7 @@ pub struct Patient {
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
-    pub content: Value,  // Raw JSON stored as-is, returned without deserialization
+    pub content: Value, // Raw JSON stored as-is, returned without deserialization
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -21,7 +21,7 @@ pub struct PatientHistory {
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
-    pub content: Value,  // Raw JSON stored as-is
+    pub content: Value, // Raw JSON stored as-is
 
     // History metadata
     pub history_operation: String,

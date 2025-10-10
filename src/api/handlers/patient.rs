@@ -51,15 +51,18 @@ pub async fn read_patient(
             let name = extract_patient_name(&fhir_json);
             let family = extract_patient_family(&fhir_json);
             let given = extract_patient_given(&fhir_json);
-            let gender = fhir_json.get("gender")
+            let gender = fhir_json
+                .get("gender")
                 .and_then(|g| g.as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let birth_date = fhir_json.get("birthDate")
+            let birth_date = fhir_json
+                .get("birthDate")
                 .and_then(|b| b.as_str())
                 .unwrap_or("")
                 .to_string();
-            let active = fhir_json.get("active")
+            let active = fhir_json
+                .get("active")
                 .and_then(|a| a.as_bool())
                 .unwrap_or(true);
 
@@ -132,7 +135,10 @@ pub async fn search_patients(
     headers: HeaderMap,
 ) -> Result<Response> {
     // Check if _total parameter is requested
-    let include_total = params.get("_total").map(|t| t == "accurate").unwrap_or(false);
+    let include_total = params
+        .get("_total")
+        .map(|t| t == "accurate")
+        .unwrap_or(false);
 
     let (patients, total) = repo.search(&params, include_total).await?;
 
@@ -190,15 +196,18 @@ pub async fn search_patients(
                     PatientRow {
                         id: p.id.to_string(),
                         name: extract_patient_name(&fhir_json),
-                        gender: fhir_json.get("gender")
+                        gender: fhir_json
+                            .get("gender")
                             .and_then(|g| g.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        birth_date: fhir_json.get("birthDate")
+                        birth_date: fhir_json
+                            .get("birthDate")
                             .and_then(|b| b.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        active: fhir_json.get("active")
+                        active: fhir_json
+                            .get("active")
                             .and_then(|a| a.as_bool())
                             .unwrap_or(true),
                         last_updated: p.last_updated.to_rfc3339(),

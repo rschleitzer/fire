@@ -1,10 +1,12 @@
 use axum::{middleware, Router};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use fire::api::{bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes};
+use fire::api::{
+    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes,
+};
 use fire::config::Config;
 use fire::middleware::request_id::add_request_id;
 use fire::repository::{ObservationRepository, PatientRepository};
@@ -21,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing_subscriber::fmt::layer()
                 .with_target(true)
                 .with_thread_ids(true)
-                .with_line_number(true)
+                .with_line_number(true),
         )
         .init();
 
@@ -35,7 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(config.db_max_connections)
         .min_connections(config.db_min_connections)
-        .acquire_timeout(std::time::Duration::from_secs(config.db_connection_timeout_secs))
+        .acquire_timeout(std::time::Duration::from_secs(
+            config.db_connection_timeout_secs,
+        ))
         .idle_timeout(std::time::Duration::from_secs(config.db_idle_timeout_secs))
         .connect(&config.database_url)
         .await?;
@@ -69,6 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(patient_routes(patient_repo.clone()))
         .merge(observation_routes(observation_repo.clone()))
         .merge(bundle_routes(patient_repo, observation_repo))
+        .nest_service("/", ServeDir::new("static"))
         .layer(middleware::from_fn(add_request_id))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());

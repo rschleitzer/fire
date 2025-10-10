@@ -52,13 +52,41 @@ impl PatientRepository {
             version_id,
             last_updated,
             content,
-            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
-            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
-            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
-            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
-            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
-            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
-            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .family_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.family_name[..])),
+            params
+                .given_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.given_name[..])),
+            params
+                .prefix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.prefix[..])),
+            params
+                .suffix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.suffix[..])),
+            params
+                .name_text
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.name_text[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
             params.gender,
             params.active,
@@ -138,17 +166,49 @@ impl PatientRepository {
             old_patient.version_id,
             old_patient.last_updated,
             &old_patient.content,
-            old_params.family_name.is_empty().then_some(None).unwrap_or(Some(&old_params.family_name[..])),
-            old_params.given_name.is_empty().then_some(None).unwrap_or(Some(&old_params.given_name[..])),
-            old_params.prefix.is_empty().then_some(None).unwrap_or(Some(&old_params.prefix[..])),
-            old_params.suffix.is_empty().then_some(None).unwrap_or(Some(&old_params.suffix[..])),
-            old_params.name_text.is_empty().then_some(None).unwrap_or(Some(&old_params.name_text[..])),
-            old_params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_system[..])),
-            old_params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params
+                .family_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.family_name[..])),
+            old_params
+                .given_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.given_name[..])),
+            old_params
+                .prefix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.prefix[..])),
+            old_params
+                .suffix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.suffix[..])),
+            old_params
+                .name_text
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.name_text[..])),
+            old_params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_system[..])),
+            old_params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_value[..])),
             old_params.birthdate,
             old_params.gender,
             old_params.active,
-            if old_patient.version_id == 1 { "CREATE" } else { "UPDATE" },
+            if old_patient.version_id == 1 {
+                "CREATE"
+            } else {
+                "UPDATE"
+            },
             Utc::now(),
         )
         .execute(&mut *tx)
@@ -181,13 +241,41 @@ impl PatientRepository {
             new_version_id,
             last_updated,
             content,
-            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
-            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
-            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
-            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
-            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
-            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
-            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .family_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.family_name[..])),
+            params
+                .given_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.given_name[..])),
+            params
+                .prefix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.prefix[..])),
+            params
+                .suffix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.suffix[..])),
+            params
+                .name_text
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.name_text[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
             params.gender,
             params.active,
@@ -255,13 +343,41 @@ impl PatientRepository {
             new_version_id,
             last_updated,
             &patient.content,
-            params.family_name.is_empty().then_some(None).unwrap_or(Some(&params.family_name[..])),
-            params.given_name.is_empty().then_some(None).unwrap_or(Some(&params.given_name[..])),
-            params.prefix.is_empty().then_some(None).unwrap_or(Some(&params.prefix[..])),
-            params.suffix.is_empty().then_some(None).unwrap_or(Some(&params.suffix[..])),
-            params.name_text.is_empty().then_some(None).unwrap_or(Some(&params.name_text[..])),
-            params.identifier_system.is_empty().then_some(None).unwrap_or(Some(&params.identifier_system[..])),
-            params.identifier_value.is_empty().then_some(None).unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .family_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.family_name[..])),
+            params
+                .given_name
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.given_name[..])),
+            params
+                .prefix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.prefix[..])),
+            params
+                .suffix
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.suffix[..])),
+            params
+                .name_text
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.name_text[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
             params.birthdate,
             params.gender,
             params.active,
@@ -302,7 +418,11 @@ impl PatientRepository {
                 version_id: current.version_id,
                 last_updated: current.last_updated,
                 content: current.content,
-                history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                history_operation: if current.version_id == 1 {
+                    "CREATE".to_string()
+                } else {
+                    "UPDATE".to_string()
+                },
                 history_timestamp: current.last_updated,
             };
             history.insert(0, current_as_history);
@@ -326,7 +446,11 @@ impl PatientRepository {
                     version_id: current.version_id,
                     last_updated: current.last_updated,
                     content: current.content,
-                    history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                    history_operation: if current.version_id == 1 {
+                        "CREATE".to_string()
+                    } else {
+                        "UPDATE".to_string()
+                    },
                     history_timestamp: current.last_updated,
                 });
             }
@@ -354,7 +478,11 @@ impl PatientRepository {
     }
 
     /// Search for patients based on parameters
-    pub async fn search(&self, params: &HashMap<String, String>, include_total: bool) -> Result<(Vec<Patient>, Option<i64>)> {
+    pub async fn search(
+        &self,
+        params: &HashMap<String, String>,
+        include_total: bool,
+    ) -> Result<(Vec<Patient>, Option<i64>)> {
         let query = SearchQuery::from_params(params)?;
 
         let mut sql = String::from(
@@ -435,13 +563,18 @@ impl PatientRepository {
                             bind_values.push(search.value.clone());
                         }
                         crate::search::StringModifier::Missing => {
-                            sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                            sql.push_str(
+                                " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
+                            );
                         }
                     }
                 }
                 SearchCondition::Identifier(value) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})", bind_count));
+                    sql.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
+                        bind_count
+                    ));
                     bind_values.push(value.clone());
                 }
                 SearchCondition::Birthdate(comparison) => {
@@ -571,10 +704,15 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                     }
                     crate::search::StringModifier::Exact => {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})", bind_count));
+                        sql.push_str(&format!(
+                            " AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})",
+                            bind_count
+                        ));
                     }
                     crate::search::StringModifier::Missing => {
-                        sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                        sql.push_str(
+                            " AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)",
+                        );
                         bind_count -= 1;
                     }
                 }
@@ -586,17 +724,25 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                     }
                     crate::search::StringModifier::Exact => {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
+                        sql.push_str(&format!(
+                            " AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})",
+                            bind_count
+                        ));
                     }
                     crate::search::StringModifier::Missing => {
-                        sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                        sql.push_str(
+                            " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
+                        );
                         bind_count -= 1;
                     }
                 }
             }
             SearchCondition::Identifier(value) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})", bind_count));
+                sql.push_str(&format!(
+                    " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
+                    bind_count
+                ));
                 let _ = value; // Silence unused warning
             }
             SearchCondition::Birthdate(comparison) => {
@@ -627,7 +773,10 @@ fn build_count_sql(query: &SearchQuery) -> String {
 
 impl PatientRepository {
     /// Find observations that reference a specific patient (for _revinclude support)
-    pub async fn find_observations_by_patient(&self, patient_id: &Uuid) -> Result<Vec<Observation>> {
+    pub async fn find_observations_by_patient(
+        &self,
+        patient_id: &Uuid,
+    ) -> Result<Vec<Observation>> {
         let patient_ref = format!("Patient/{}", patient_id);
 
         let observations = sqlx::query_as!(

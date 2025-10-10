@@ -14,7 +14,9 @@ pub fn preferred_format(headers: &HeaderMap) -> ResponseFormat {
                 return ResponseFormat::Html;
             }
             // Check for explicit JSON request
-            if accept_str.contains("application/json") || accept_str.contains("application/fhir+json") {
+            if accept_str.contains("application/json")
+                || accept_str.contains("application/fhir+json")
+            {
                 return ResponseFormat::Json;
             }
         }
@@ -107,7 +109,8 @@ pub fn extract_patient_name(content: &Value) -> String {
                 .and_then(|f| f.as_str())
                 .unwrap_or("");
 
-            let given = if let Some(given_arr) = first_name.get("given").and_then(|g| g.as_array()) {
+            let given = if let Some(given_arr) = first_name.get("given").and_then(|g| g.as_array())
+            {
                 given_arr
                     .iter()
                     .filter_map(|g| g.as_str())
@@ -163,7 +166,11 @@ pub fn extract_observation_code(content: &Value) -> String {
         if let Some(text) = code.get("text").and_then(|t| t.as_str()) {
             return text.to_string();
         }
-        if let Some(coding) = code.get("coding").and_then(|c| c.as_array()).and_then(|c| c.first()) {
+        if let Some(coding) = code
+            .get("coding")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+        {
             if let Some(display) = coding.get("display").and_then(|d| d.as_str()) {
                 return display.to_string();
             }
@@ -178,7 +185,10 @@ pub fn extract_observation_code(content: &Value) -> String {
 /// Extract observation value as a display string
 pub fn extract_observation_value(content: &Value) -> String {
     if let Some(value_qty) = content.get("valueQuantity") {
-        let value = value_qty.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let value = value_qty
+            .get("value")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
         let unit = value_qty.get("unit").and_then(|u| u.as_str()).unwrap_or("");
         return format!("{} {}", value, unit);
     }

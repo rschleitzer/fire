@@ -12,7 +12,7 @@ pub struct Observation {
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
-    pub content: Value,  // Raw JSON stored as-is, returned without deserialization
+    pub content: Value, // Raw JSON stored as-is, returned without deserialization
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -21,7 +21,7 @@ pub struct ObservationHistory {
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
-    pub content: Value,  // Raw JSON stored as-is
+    pub content: Value, // Raw JSON stored as-is
 
     // History metadata
     pub history_operation: String,
@@ -128,7 +128,11 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     }
 
     // Extract subject
-    if let Some(subject) = content.get("subject").and_then(|s| s.get("reference")).and_then(|r| r.as_str()) {
+    if let Some(subject) = content
+        .get("subject")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
         params.subject_reference = Some(subject.to_string());
         if subject.starts_with("Patient/") {
             params.patient_reference = Some(subject.to_string());
@@ -136,7 +140,11 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     }
 
     // Extract encounter
-    if let Some(encounter) = content.get("encounter").and_then(|e| e.get("reference")).and_then(|r| r.as_str()) {
+    if let Some(encounter) = content
+        .get("encounter")
+        .and_then(|e| e.get("reference"))
+        .and_then(|r| r.as_str())
+    {
         params.encounter_reference = Some(encounter.to_string());
     }
 
@@ -209,7 +217,11 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     // R5: Extract triggeredBy
     if let Some(triggered_by) = content.get("triggeredBy").and_then(|t| t.as_array()) {
         for trigger in triggered_by {
-            if let Some(obs_ref) = trigger.get("observation").and_then(|o| o.get("reference")).and_then(|r| r.as_str()) {
+            if let Some(obs_ref) = trigger
+                .get("observation")
+                .and_then(|o| o.get("reference"))
+                .and_then(|r| r.as_str())
+            {
                 params.triggered_by_observation.push(obs_ref.to_string());
             }
             if let Some(trigger_type) = trigger.get("type").and_then(|t| t.as_str()) {
@@ -228,7 +240,11 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     }
 
     // R5: Extract bodyStructure
-    if let Some(body_structure) = content.get("bodyStructure").and_then(|b| b.get("reference")).and_then(|r| r.as_str()) {
+    if let Some(body_structure) = content
+        .get("bodyStructure")
+        .and_then(|b| b.get("reference"))
+        .and_then(|r| r.as_str())
+    {
         params.body_structure_reference = Some(body_structure.to_string());
     }
 

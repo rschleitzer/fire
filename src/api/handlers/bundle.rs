@@ -142,7 +142,10 @@ async fn process_put(
     // Parse URL like "Patient/{id}" or "Observation/{id}"
     let parts: Vec<&str> = url.split('/').collect();
     if parts.len() != 2 {
-        return Err(FhirError::BadRequest(format!("Invalid URL format: {}", url)));
+        return Err(FhirError::BadRequest(format!(
+            "Invalid URL format: {}",
+            url
+        )));
     }
 
     let resource_type = parts[0];
@@ -185,7 +188,10 @@ async fn process_get(state: &Arc<BundleState>, url: &str) -> Result<Value> {
     // Parse URL like "Patient/{id}" or "Observation/{id}"
     let parts: Vec<&str> = url.split('/').collect();
     if parts.len() != 2 {
-        return Err(FhirError::BadRequest(format!("Invalid URL format: {}", url)));
+        return Err(FhirError::BadRequest(format!(
+            "Invalid URL format: {}",
+            url
+        )));
     }
 
     let resource_type = parts[0];
@@ -226,7 +232,10 @@ async fn process_delete(state: &Arc<BundleState>, url: &str) -> Result<Value> {
     // Parse URL like "Patient/{id}" or "Observation/{id}"
     let parts: Vec<&str> = url.split('/').collect();
     if parts.len() != 2 {
-        return Err(FhirError::BadRequest(format!("Invalid URL format: {}", url)));
+        return Err(FhirError::BadRequest(format!(
+            "Invalid URL format: {}",
+            url
+        )));
     }
 
     let resource_type = parts[0];

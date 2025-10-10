@@ -146,9 +146,7 @@ fn is_valid_date_format(date_str: &str) -> bool {
     } else if date_str.len() == 7 {
         // Year-month
         let parts: Vec<&str> = date_str.split('-').collect();
-        parts.len() == 2
-            && parts[0].parse::<i32>().is_ok()
-            && parts[1].parse::<u32>().is_ok()
+        parts.len() == 2 && parts[0].parse::<i32>().is_ok() && parts[1].parse::<u32>().is_ok()
     } else {
         // Full date
         NaiveDate::parse_from_str(date_str, "%Y-%m-%d").is_ok()
@@ -259,9 +257,7 @@ pub fn validate_observation(content: &Value) -> Result<()> {
 
     // Code is required
     if content.get("code").is_none() {
-        return Err(FhirError::ValidationError(
-            "code is required".to_string(),
-        ));
+        return Err(FhirError::ValidationError("code is required".to_string()));
     }
 
     // Validate code structure
@@ -345,10 +341,9 @@ pub fn validate_observation(content: &Value) -> Result<()> {
             let trigger_type = trigger
                 .get("type")
                 .and_then(|t| t.as_str())
-                .ok_or_else(|| FhirError::ValidationError(format!(
-                    "triggeredBy[{}].type is required",
-                    i
-                )))?;
+                .ok_or_else(|| {
+                    FhirError::ValidationError(format!("triggeredBy[{}].type is required", i))
+                })?;
 
             let valid_types = ["reflex", "repeat", "re-run"];
             if !valid_types.contains(&trigger_type) {

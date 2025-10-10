@@ -29,9 +29,14 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
@@ -47,10 +52,9 @@ where
             let mut response = inner.call(req).await?;
 
             // Add request ID to response headers
-            response.headers_mut().insert(
-                "X-Request-ID",
-                request_id.parse().unwrap(),
-            );
+            response
+                .headers_mut()
+                .insert("X-Request-ID", request_id.parse().unwrap());
 
             Ok(response)
         })
@@ -58,10 +62,7 @@ where
 }
 
 /// Middleware function to add request ID
-pub async fn add_request_id(
-    mut req: Request<Body>,
-    next: Next,
-) -> Response<Body> {
+pub async fn add_request_id(mut req: Request<Body>, next: Next) -> Response<Body> {
     let request_id = Uuid::new_v4().to_string();
 
     // Add to extensions
@@ -78,10 +79,9 @@ pub async fn add_request_id(
     let mut response = next.run(req).await;
 
     // Add request ID to response headers
-    response.headers_mut().insert(
-        "X-Request-ID",
-        request_id.parse().unwrap(),
-    );
+    response
+        .headers_mut()
+        .insert("X-Request-ID", request_id.parse().unwrap());
 
     response
 }

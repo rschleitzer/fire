@@ -4,7 +4,9 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
-use crate::models::observation::{extract_observation_search_params, Observation, ObservationHistory};
+use crate::models::observation::{
+    extract_observation_search_params, Observation, ObservationHistory,
+};
 use crate::models::patient::Patient;
 use crate::services::validate_observation;
 
@@ -33,7 +35,8 @@ impl ObservationRepository {
 
         // Convert f64 to BigDecimal for database
         let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            sqlx::types::BigDecimal::try_from(v)
+                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
         });
 
         // Insert into current table (simplified - not using query_as! due to complexity)
@@ -121,7 +124,8 @@ impl ObservationRepository {
 
         // Convert f64 to BigDecimal
         let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            sqlx::types::BigDecimal::try_from(v)
+                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
         });
 
         // Delete from current table
@@ -206,7 +210,8 @@ impl ObservationRepository {
 
         // Convert f64 to BigDecimal for old params
         let old_value_qty_decimal = old_params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            sqlx::types::BigDecimal::try_from(v)
+                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
         });
 
         // Insert OLD version into history before updating
@@ -262,7 +267,8 @@ impl ObservationRepository {
 
         // Convert f64 to BigDecimal
         let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v).unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            sqlx::types::BigDecimal::try_from(v)
+                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
         });
 
         // Update current table with new version
@@ -302,8 +308,16 @@ impl ObservationRepository {
             last_updated,
             content,
             params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
             params.code_system,
             params.code_code,
             params.subject_reference,
@@ -316,12 +330,32 @@ impl ObservationRepository {
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
+            params
+                .value_codeable_concept_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.value_codeable_concept_code[..])),
             params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params
+                .triggered_by_observation
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.triggered_by_observation[..])),
+            params
+                .triggered_by_type
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.triggered_by_type[..])),
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
             params.body_structure_reference,
         )
         .execute(&mut *tx)
@@ -359,7 +393,11 @@ impl ObservationRepository {
                 version_id: current.version_id,
                 last_updated: current.last_updated,
                 content: current.content,
-                history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                history_operation: if current.version_id == 1 {
+                    "CREATE".to_string()
+                } else {
+                    "UPDATE".to_string()
+                },
                 history_timestamp: current.last_updated,
             };
             history.insert(0, current_as_history);
@@ -383,7 +421,11 @@ impl ObservationRepository {
                     version_id: current.version_id,
                     last_updated: current.last_updated,
                     content: current.content,
-                    history_operation: if current.version_id == 1 { "CREATE".to_string() } else { "UPDATE".to_string() },
+                    history_operation: if current.version_id == 1 {
+                        "CREATE".to_string()
+                    } else {
+                        "UPDATE".to_string()
+                    },
                     history_timestamp: current.last_updated,
                 });
             }
@@ -411,7 +453,11 @@ impl ObservationRepository {
     }
 
     /// Search observations with optional total count
-    pub async fn search(&self, params: &std::collections::HashMap<String, String>, include_total: bool) -> crate::error::Result<(Vec<Observation>, Option<i64>)> {
+    pub async fn search(
+        &self,
+        params: &std::collections::HashMap<String, String>,
+        include_total: bool,
+    ) -> crate::error::Result<(Vec<Observation>, Option<i64>)> {
         // Build WHERE clause manually for observation-specific parameters
         let mut where_conditions = vec!["1=1".to_string()];
         let mut bind_values: Vec<String> = Vec::new();
@@ -448,7 +494,10 @@ impl ObservationRepository {
         // Date parameters for effective dates (simplified - just eq comparison)
         if let Some(date) = params.get("date") {
             bind_values.push(date.clone());
-            where_conditions.push(format!("effective_datetime = ${}::timestamptz", bind_values.len()));
+            where_conditions.push(format!(
+                "effective_datetime = ${}::timestamptz",
+                bind_values.len()
+            ));
         }
 
         let where_clause = where_conditions.join(" AND ");
@@ -470,7 +519,10 @@ impl ObservationRepository {
 
         // Get total count if requested
         let total = if include_total {
-            let count_sql = format!("SELECT COUNT(*) as count FROM observation WHERE {}", where_clause);
+            let count_sql = format!(
+                "SELECT COUNT(*) as count FROM observation WHERE {}",
+                where_clause
+            );
             let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
             for value in &bind_values {
                 count_query = count_query.bind(value);
@@ -488,10 +540,7 @@ impl ObservationRepository {
              {}
              LIMIT {}
              OFFSET {}",
-            where_clause,
-            order_by,
-            limit,
-            offset
+            where_clause, order_by, limit, offset
         );
 
         // Execute query

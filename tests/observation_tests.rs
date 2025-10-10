@@ -214,7 +214,10 @@ async fn test_search_observation_by_status() {
     let mut params = std::collections::HashMap::new();
     params.insert("status".to_string(), "final".to_string());
 
-    let (results, _) = obs_repo.search(&params, false).await.expect("Failed to search");
+    let (results, _) = obs_repo
+        .search(&params, false)
+        .await
+        .expect("Failed to search");
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].content["status"], "final");
@@ -254,7 +257,10 @@ async fn test_search_observation_by_patient() {
     let mut params = std::collections::HashMap::new();
     params.insert("patient".to_string(), patient1.id.to_string());
 
-    let (results, _) = obs_repo.search(&params, false).await.expect("Failed to search");
+    let (results, _) = obs_repo
+        .search(&params, false)
+        .await
+        .expect("Failed to search");
 
     assert_eq!(results.len(), 1);
     assert_eq!(

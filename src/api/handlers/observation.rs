@@ -49,17 +49,20 @@ pub async fn read_observation(
         ResponseFormat::Html => {
             // Extract fields for HTML template
             let code = extract_observation_code(&fhir_json);
-            let status = fhir_json.get("status")
+            let status = fhir_json
+                .get("status")
                 .and_then(|s| s.as_str())
                 .unwrap_or("Unknown")
                 .to_string();
             let value = extract_observation_value(&fhir_json);
-            let subject = fhir_json.get("subject")
+            let subject = fhir_json
+                .get("subject")
                 .and_then(|s| s.get("reference"))
                 .and_then(|r| r.as_str())
                 .unwrap_or("Unknown")
                 .to_string();
-            let effective_date = fhir_json.get("effectiveDateTime")
+            let effective_date = fhir_json
+                .get("effectiveDateTime")
                 .and_then(|e| e.as_str())
                 .unwrap_or("Unknown")
                 .to_string();
@@ -175,7 +178,7 @@ pub async fn search_observations(
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<Response> {
-    let include_total = params.get("_total").map_or(false, |v| v == "accurate");
+    let include_total = params.get("_total").is_some_and(|v| v == "accurate");
     let (observations, total) = repo.search(&params, include_total).await?;
 
     // Build Bundle using efficient string concatenation
@@ -196,7 +199,9 @@ pub async fn search_observations(
             let mut patient_ids = std::collections::HashSet::new();
             for obs in &observations {
                 // Extract patient reference from content JSON
-                if let Some(patient_ref) = obs.content.get("subject")
+                if let Some(patient_ref) = obs
+                    .content
+                    .get("subject")
                     .and_then(|s| s.get("reference"))
                     .and_then(|r| r.as_str())
                 {
@@ -247,17 +252,20 @@ pub async fn search_observations(
                     ObservationRow {
                         id: obs.id.to_string(),
                         code: extract_observation_code(&fhir_json),
-                        status: fhir_json.get("status")
+                        status: fhir_json
+                            .get("status")
                             .and_then(|s| s.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
                         value: extract_observation_value(&fhir_json),
-                        subject: fhir_json.get("subject")
+                        subject: fhir_json
+                            .get("subject")
                             .and_then(|s| s.get("reference"))
                             .and_then(|r| r.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        effective_date: fhir_json.get("effectiveDateTime")
+                        effective_date: fhir_json
+                            .get("effectiveDateTime")
                             .and_then(|e| e.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),

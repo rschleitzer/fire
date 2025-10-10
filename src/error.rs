@@ -50,12 +50,9 @@ impl IntoResponse for FhirError {
                 "invalid",
                 self.to_string(),
             ),
-            FhirError::VersionConflict => (
-                StatusCode::CONFLICT,
-                "error",
-                "conflict",
-                self.to_string(),
-            ),
+            FhirError::VersionConflict => {
+                (StatusCode::CONFLICT, "error", "conflict", self.to_string())
+            }
             FhirError::BadRequest(_) => (
                 StatusCode::BAD_REQUEST,
                 "error",

@@ -150,7 +150,10 @@ async fn test_patient_search_params() {
     assert_eq!(params.family_name, vec!["TestFamily".to_string()]);
     assert_eq!(params.given_name, vec!["TestGiven".to_string()]);
     assert_eq!(params.gender, Some("male".to_string()));
-    assert_eq!(params.birthdate.map(|d| d.to_string()), Some("1990-01-01".to_string()));
+    assert_eq!(
+        params.birthdate.map(|d| d.to_string()),
+        Some("1990-01-01".to_string())
+    );
     assert_eq!(params.active, Some(true));
 }
 

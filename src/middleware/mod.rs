@@ -1,5 +1,5 @@
-pub mod request_id;
 pub mod logging;
+pub mod request_id;
 
-pub use request_id::RequestIdLayer;
 pub use logging::LoggingLayer;
+pub use request_id::RequestIdLayer;

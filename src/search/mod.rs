@@ -27,7 +27,7 @@ pub enum SortDirection {
 pub enum SearchCondition {
     FamilyName(StringSearch),
     GivenName(StringSearch),
-    Name(StringSearch),  // Searches both family and given with OR
+    Name(StringSearch), // Searches both family and given with OR
     Identifier(String),
     Birthdate(DateComparison),
     Gender(String),
@@ -42,9 +42,9 @@ pub struct StringSearch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StringModifier {
-    Contains,  // Default - partial match (ILIKE)
-    Exact,     // :exact - exact match
-    Missing,   // :missing - check if field is null/empty
+    Contains, // Default - partial match (ILIKE)
+    Exact,    // :exact - exact match
+    Missing,  // :missing - check if field is null/empty
 }
 
 #[derive(Debug, Clone)]
@@ -195,7 +195,12 @@ impl SearchQuery {
         })
     }
 
-    pub fn build_sql(&self) -> (String, Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>>) {
+    pub fn build_sql(
+        &self,
+    ) -> (
+        String,
+        Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>>,
+    ) {
         let mut sql = String::from("SELECT id, version_id, last_updated, deleted, content, family_name, given_name, prefix, suffix, name_text, identifier_system, identifier_value, birthdate, gender, active FROM patient WHERE deleted = FALSE");
         let mut bind_count = 0;
         let params: Vec<Box<dyn sqlx::Encode<'_, sqlx::Postgres> + Send + Sync>> = Vec::new();
@@ -261,14 +266,19 @@ impl SearchQuery {
                             sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
                         }
                         StringModifier::Missing => {
-                            sql.push_str(" AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)");
+                            sql.push_str(
+                                " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
+                            );
                             bind_count -= 1; // No bind parameter needed
                         }
                     }
                 }
                 SearchCondition::Identifier(_value) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})", bind_count));
+                    sql.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
+                        bind_count
+                    ));
                 }
                 SearchCondition::Birthdate(comparison) => {
                     bind_count += 1;
@@ -339,8 +349,8 @@ fn parse_sort_param(value: &str) -> Result<Vec<SortParam>> {
             continue;
         }
 
-        let (direction, field_name) = if field.starts_with('-') {
-            (SortDirection::Descending, &field[1..])
+        let (direction, field_name) = if let Some(stripped) = field.strip_prefix('-') {
+            (SortDirection::Descending, stripped)
         } else {
             (SortDirection::Ascending, field)
         };
@@ -354,9 +364,12 @@ fn parse_sort_param(value: &str) -> Result<Vec<SortParam>> {
             "gender" => "gender",
             "active" => "active",
             "_lastUpdated" | "last_updated" => "last_updated",
-            _ => return Err(FhirError::InvalidSearchParameter(
-                format!("Invalid sort field: {}", field_name)
-            )),
+            _ => {
+                return Err(FhirError::InvalidSearchParameter(format!(
+                    "Invalid sort field: {}",
+                    field_name
+                )))
+            }
         };
 
         sorts.push(SortParam {
@@ -377,18 +390,18 @@ fn parse_sort_param(value: &str) -> Result<Vec<SortParam>> {
 }
 
 fn parse_date_param(value: &str) -> Result<DateComparison> {
-    let (prefix, date_str) = if value.starts_with("eq") {
-        (DatePrefix::Eq, &value[2..])
-    } else if value.starts_with("ne") {
-        (DatePrefix::Ne, &value[2..])
-    } else if value.starts_with("gt") {
-        (DatePrefix::Gt, &value[2..])
-    } else if value.starts_with("ge") {
-        (DatePrefix::Ge, &value[2..])
-    } else if value.starts_with("lt") {
-        (DatePrefix::Lt, &value[2..])
-    } else if value.starts_with("le") {
-        (DatePrefix::Le, &value[2..])
+    let (prefix, date_str) = if let Some(stripped) = value.strip_prefix("eq") {
+        (DatePrefix::Eq, stripped)
+    } else if let Some(stripped) = value.strip_prefix("ne") {
+        (DatePrefix::Ne, stripped)
+    } else if let Some(stripped) = value.strip_prefix("gt") {
+        (DatePrefix::Gt, stripped)
+    } else if let Some(stripped) = value.strip_prefix("ge") {
+        (DatePrefix::Ge, stripped)
+    } else if let Some(stripped) = value.strip_prefix("lt") {
+        (DatePrefix::Lt, stripped)
+    } else if let Some(stripped) = value.strip_prefix("le") {
+        (DatePrefix::Le, stripped)
     } else {
         (DatePrefix::Eq, value)
     };
