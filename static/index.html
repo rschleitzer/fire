@@ -11,11 +11,18 @@
             box-sizing: border-box;
         }
 
+        html {
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             line-height: 1.6;
             color: #333;
             background: #f5f5f5;
+            margin: 0;
+            padding: 0;
         }
 
         .container {
@@ -24,40 +31,62 @@
             padding: 0 2rem;
         }
 
+        .navbar-inverse {
+            background-color: #222;
+            border-color: #080808;
+        }
+
         .navbar {
-            background: #2c3e50;
-            color: white;
-            padding: 1rem 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin: 0;
+            border-radius: 0;
+            padding: 0;
         }
 
         .navbar .container {
-            max-width: 1200px;
             margin: 0 auto;
-            padding: 0 2rem;
+            max-width: 1200px;
+        }
+
+        .nav {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar-nav {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            list-style: none;
+            margin: 0;
+            padding: 0;
         }
 
-        .navbar h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
+        .navbar-nav > li {
+            display: inline-block;
         }
 
-        .navbar h1 .fire {
-            color: #e74c3c;
-        }
-
-        .navbar nav a {
-            color: white;
+        .navbar-nav > li > a {
+            color: #9d9d9d;
             text-decoration: none;
-            margin-left: 2rem;
-            transition: color 0.2s;
+            padding: 15px;
+            display: block;
+            font-size: 14px;
         }
 
-        .navbar nav a:hover {
-            color: #3498db;
+        .navbar-nav > li > a:hover,
+        .navbar-nav > li > a:focus {
+            color: #fff;
+            background-color: transparent;
+        }
+
+        .navbar-brand {
+            color: #fff !important;
+            font-size: 18px;
+            padding: 15px;
+            text-decoration: none;
+        }
+
+        .fire {
+            color: #e74c3c;
         }
 
         .content {
@@ -198,137 +227,157 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        /* Diagram styles from FHIR */
+        #diagram { margin-bottom: 2em; max-width: 790px; padding: 0.75em 0.25em 0.25em; background-color: #ffffe6; border-radius: 6px; border: 2px solid #668cff; }
+        #diagram p { margin: 0; }
+        #diagram .box { margin: 0 0.5em 0.75em; border: 1px solid grey; border-radius: 3px; background-color: white; }
+        #diagram .box .head { height: 44px; padding: 6px; font-weight: bold; border-radius: inherit; background-color: white; }
+        #diagram .box .head a { display: inline-block; min-height: 32px; padding-left: 38px; line-height: 32px; background-repeat: no-repeat; background-position: left top; background-size: 32px 32px; }
+        #diagram .box .head a span { display: inline-block; line-height: 1.4em; }
+        #diagram .box .content { margin: 0; padding: 0.5em 0.75em; background-color: white; border-radius: 0 0 3px 3px; box-shadow: none; }
+        #diagram .box .content span { display: inline-block; line-height: 1.4em; }
+        #diagram .box_row { display: -webkit-box; display: -moz-box; display: box; display: -webkit-flex; display: -moz-flex; display: -ms-flexbox; display: flex; -webkit-box-lines: multiple; -moz-box-lines: multiple; box-lines: multiple; -webkit-flex-wrap: wrap; -moz-flex-wrap: wrap; -ms-flex-wrap: wrap; flex-wrap: wrap; }
+        #diagram .box_one > p { display: table-cell; min-width: 10em; -webkit-box-flex: 1; -moz-box-flex: 1; box-flex: 1; -webkit-flex: 1 1 10em; -moz-flex: 1 1 10em; -ms-flex: 1 1 10em; flex: 1 1 10em; }
+        #diagram .box_one .head { width: 25%; }
+        #diagram .box_one .content { -webkit-box-flex: 4; -moz-box-flex: 4; box-flex: 4; -webkit-flex: 4 1 10em; -moz-flex: 4 1 10em; -ms-flex: 4 1 10em; flex: 4 1 10em; line-height: 32px; border-left: 1px solid grey; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+        #diagram .box_more { border-spacing: 0.75em; border-collapse: separate; }
+        #diagram .box_more .box { display: table-cell; -webkit-box-flex: 1; -moz-box-flex: 1; box-flex: 1; -webkit-flex: 1 1 8em; -moz-flex: 1 1 8em; -ms-flex: 1 1 8em; flex: 1 1 8em; min-height: 9em; }
+        #diagram .box_more .box .head { border-bottom: 1px solid grey; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+
+        .level-text { padding-bottom: 0.5em; margin-bottom: 0.75em; }
+
+        /* Minimal Bootstrap grid */
+        .row { display: block; }
+        .col-12 { width: 100%; }
+
+        /* h1 styling to match FHIR */
+        h1.self-link-parent { font-family: verdana; font-size: 1.8rem; color: #333; margin: 1rem 0; }
     </style>
 </head>
 <body>
-    <div class="navbar">
+    <nav class="navbar navbar-inverse">
         <div class="container">
-            <h1><a href="/" style="color: inherit; text-decoration: none;"><span class="fire">🔥 Fire</span> Server</a></h1>
-            <nav>
-                <a href="/fhir/Patient">Patients</a>
-                <a href="/fhir/Observation">Observations</a>
-                <a href="/fhir/metadata">Metadata</a>
-                <a href="#resources">Resources</a>
-                <a href="#documentation">Documentation</a>
-            </nav>
+            <ul class="nav navbar-nav">
+                <li><a href="/" class="navbar-brand"><span class="fire">🔥 Fire</span> Server</a></li>
+                <li><a href="#documentation">TOC</a></li>
+                <li><a href="#resources">Next</a></li>
+                <li><a href="#resources"><span style="color: yellow">Resource Types</span></a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row">
+            <div class="col-12">
+                <p></p>
+
+<h1 class="self-link-parent">Fire Server</h1>
+
+<p>Fire is a high-performance FHIR R5 server implementation built with Rust, Axum, and PostgreSQL.</p>
+
+<div id="diagram">
+
+    <p class="level-text"><b>Part 1</b> <a href="#architecture">Server Architecture</a></p>
+    <div class="box_row box_more">
+        <div id="foundation" class="box">
+            <p class="head">
+                <a href="#foundation">
+                    <span>Foundation</span>
+                </a>
+            </p>
+            <p class="content">
+                <a href="https://www.rust-lang.org/">Rust</a>,<br>
+                <a href="https://docs.rs/axum/">Axum Framework</a>,<br>
+                <a href="https://www.postgresql.org/">PostgreSQL</a>
+            </p>
+        </div>
+        <div id="database" class="box">
+            <p class="head">
+                <a href="#database">
+                    <span>Database Design</span>
+                </a>
+            </p>
+            <p class="content">
+                Table-per-Resource,<br>
+                Current + History Tables,<br>
+                Search Parameter Extraction
+            </p>
         </div>
     </div>
 
-    <div class="container">
-        <div class="content">
-            <h2><span class="status-indicator"></span>Server Status</h2>
-            <p>The Fire server is running and ready to accept requests.</p>
-            <p>This is a stub documentation page. Detailed documentation will be added here.</p>
+    <p class="level-text"><b>Part 2</b> <a href="#fhir">FHIR R5 Compliance</a></p>
+    <div class="box_row box_more">
+        <div id="resources" class="box">
+            <p class="head">
+                <a href="/fhir/Patient">
+                    <span>Resources</span>
+                </a>
+            </p>
+            <p class="content">
+                <a href="/fhir/Patient">Patient</a>,<br>
+                <a href="/fhir/Observation">Observation</a>
+            </p>
         </div>
+        <div id="operations" class="box">
+            <p class="head">
+                <a href="/fhir/metadata">
+                    <span>Operations</span>
+                </a>
+            </p>
+            <p class="content">
+                Create, Read, Update,<br>
+                Delete, Search,<br>
+                History, Transactions
+            </p>
+        </div>
+        <div id="api" class="box">
+            <p class="head">
+                <a href="/fhir/metadata">
+                    <span>API</span>
+                </a>
+            </p>
+            <p class="content">
+                <a href="/fhir/metadata">Capability Statement</a>,<br>
+                <a href="/health">Health Check</a>,<br>
+                RESTful Endpoints
+            </p>
+        </div>
+    </div>
 
-        <div class="content" id="resources">
-            <h2>Resources & Endpoints</h2>
+    <p class="level-text"><b>Part 3</b> <a href="#search">Search & Query</a></p>
+    <div class="box_row box_more">
+        <div id="searchparams" class="box">
+            <p class="head">
+                <a href="#searchparams">
+                    <span>Search Parameters</span>
+                </a>
+            </p>
+            <p class="content">
+                String (name, family, given),<br>
+                Token (identifier, active),<br>
+                Date (birthdate),<br>
+                Reference (patient, subject)
+            </p>
+        </div>
+        <div id="results" class="box">
+            <p class="head">
+                <a href="#results">
+                    <span>Result Parameters</span>
+                </a>
+            </p>
+            <p class="content">
+                Pagination (_count, _offset),<br>
+                Sorting (_sort),<br>
+                Includes (_include),<br>
+                Total (_total=accurate)
+            </p>
+        </div>
+    </div>
 
-            <h3>Available Endpoints</h3>
-            <div class="endpoints">
-                <div class="endpoint">
-                    <span class="endpoint-method method-get">GET</span>
-                    <span class="endpoint-path">/health</span>
-                    <div class="endpoint-desc">Health check endpoint</div>
-                </div>
+</div>
 
-                <div class="endpoint">
-                    <span class="endpoint-method method-get">GET</span>
-                    <span class="endpoint-path">/fhir/metadata</span>
-                    <div class="endpoint-desc">FHIR Capability Statement</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-get">GET</span>
-                    <span class="endpoint-path">/fhir/Patient</span>
-                    <div class="endpoint-desc">Search for Patient resources</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-post">POST</span>
-                    <span class="endpoint-path">/fhir/Patient</span>
-                    <div class="endpoint-desc">Create a new Patient resource</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-get">GET</span>
-                    <span class="endpoint-path">/fhir/Patient/{id}</span>
-                    <div class="endpoint-desc">Read a specific Patient resource</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-put">PUT</span>
-                    <span class="endpoint-path">/fhir/Patient/{id}</span>
-                    <div class="endpoint-desc">Update a Patient resource</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-delete">DELETE</span>
-                    <span class="endpoint-path">/fhir/Patient/{id}</span>
-                    <div class="endpoint-desc">Delete a Patient resource</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-get">GET</span>
-                    <span class="endpoint-path">/fhir/Observation</span>
-                    <div class="endpoint-desc">Search for Observation resources</div>
-                </div>
-
-                <div class="endpoint">
-                    <span class="endpoint-method method-post">POST</span>
-                    <span class="endpoint-path">/fhir</span>
-                    <div class="endpoint-desc">Transaction/Batch bundle processing</div>
-                </div>
             </div>
-        </div>
-
-        <div class="content">
-            <h2>Features</h2>
-            <div class="feature-grid">
-                <div class="feature">
-                    <h4>FHIR R5 Compliant</h4>
-                    <p>Full support for FHIR R5 (5.0.0) specification with proper resource validation.</p>
-                </div>
-
-                <div class="feature">
-                    <h4>High Performance</h4>
-                    <p>Built with Rust and Axum for maximum performance and minimal latency.</p>
-                </div>
-
-                <div class="feature">
-                    <h4>Table-per-Resource</h4>
-                    <p>Optimized database design with separate current and history tables for each resource type.</p>
-                </div>
-
-                <div class="feature">
-                    <h4>ACID Transactions</h4>
-                    <p>PostgreSQL with full ACID compliance for reliable transaction bundles.</p>
-                </div>
-
-                <div class="feature">
-                    <h4>Search Parameters</h4>
-                    <p>Indexed search parameters for fast querying across resources.</p>
-                </div>
-
-                <div class="feature">
-                    <h4>Version History</h4>
-                    <p>Complete version history tracking with dedicated history tables.</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="content" id="documentation">
-            <h2>Documentation</h2>
-            <p><em>Comprehensive documentation will be added here, including:</em></p>
-            <ul style="margin-left: 2rem; color: #666;">
-                <li>API Reference</li>
-                <li>Resource Definitions</li>
-                <li>Search Parameter Guide</li>
-                <li>Transaction Bundles</li>
-                <li>Authentication & Authorization</li>
-                <li>Deployment Guide</li>
-                <li>Performance Tuning</li>
-            </ul>
         </div>
     </div>
 
