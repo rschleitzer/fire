@@ -8,7 +8,7 @@
 
 {% block content %}
 <div class="card">
-    <h2>Edit Observation</h2>
+    <h2>Observation</h2>
     <div id="observation-editor"></div>
 </div>
 
@@ -16,8 +16,8 @@
     // Observation resource data from server
     const resource = {{ resource_json|safe }};
 
-    // Mount the Svelte ObservationEditor component
-    const editor = new FHIRComponents.ObservationEditor({
+    // Mount the Svelte Observation component
+    const editor = new FHIRComponents.Observation({
         target: document.getElementById('observation-editor'),
         props: { resource }
     });

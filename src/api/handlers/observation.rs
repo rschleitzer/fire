@@ -47,36 +47,10 @@ pub async fn read_observation(
 
     match preferred_format(&headers) {
         ResponseFormat::Html => {
-            // Extract fields for HTML template
-            let code = extract_observation_code(&fhir_json);
-            let status = fhir_json
-                .get("status")
-                .and_then(|s| s.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            let value = extract_observation_value(&fhir_json);
-            let subject = fhir_json
-                .get("subject")
-                .and_then(|s| s.get("reference"))
-                .and_then(|r| r.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
-            let effective_date = fhir_json
-                .get("effectiveDateTime")
-                .and_then(|e| e.as_str())
-                .unwrap_or("Unknown")
-                .to_string();
-
-            let template = ObservationDetailTemplate {
+            // Use interactive edit template (all-in-one display/edit)
+            let template = ObservationEditTemplate {
                 id: id.to_string(),
-                version_id: observation.version_id.to_string(),
-                last_updated: observation.last_updated.to_rfc3339(),
-                code,
-                status,
-                value,
-                subject,
-                effective_date,
-                resource_json: serde_json::to_string_pretty(&fhir_json)?,
+                resource_json: serde_json::to_string(&fhir_json)?,
             };
 
             Ok(Html(template.render().unwrap()).into_response())
@@ -315,18 +289,3 @@ pub async fn search_observations(
     }
 }
 
-/// Show observation edit page
-pub async fn edit_observation_page(
-    State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
-) -> Result<Html<String>> {
-    let observation = repo.read(&id).await?;
-    let fhir_json = observation.to_fhir_json();
-
-    let template = ObservationEditTemplate {
-        id: id.to_string(),
-        resource_json: serde_json::to_string(&fhir_json)?,
-    };
-
-    Ok(Html(template.render().unwrap()))
-}

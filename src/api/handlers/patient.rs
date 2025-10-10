@@ -47,36 +47,10 @@ pub async fn read_patient(
 
     match preferred_format(&headers) {
         ResponseFormat::Html => {
-            // Extract fields for HTML template
-            let name = extract_patient_name(&fhir_json);
-            let family = extract_patient_family(&fhir_json);
-            let given = extract_patient_given(&fhir_json);
-            let gender = fhir_json
-                .get("gender")
-                .and_then(|g| g.as_str())
-                .unwrap_or("unknown")
-                .to_string();
-            let birth_date = fhir_json
-                .get("birthDate")
-                .and_then(|b| b.as_str())
-                .unwrap_or("")
-                .to_string();
-            let active = fhir_json
-                .get("active")
-                .and_then(|a| a.as_bool())
-                .unwrap_or(true);
-
-            let template = PatientDetailTemplate {
+            // Use interactive edit template (all-in-one display/edit)
+            let template = PatientEditTemplate {
                 id: id.to_string(),
-                version_id: patient.version_id.to_string(),
-                last_updated: patient.last_updated.to_rfc3339(),
-                name,
-                family,
-                given,
-                gender,
-                birth_date,
-                active,
-                resource_json: serde_json::to_string_pretty(&fhir_json)?,
+                resource_json: serde_json::to_string(&fhir_json)?,
             };
 
             Ok(Html(template.render().unwrap()).into_response())
@@ -298,18 +272,3 @@ pub async fn delete_patients(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Show patient edit page
-pub async fn edit_patient_page(
-    State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
-) -> Result<Html<String>> {
-    let patient = repo.read(&id).await?;
-    let fhir_json = patient.to_fhir_json();
-
-    let template = PatientEditTemplate {
-        id: id.to_string(),
-        resource_json: serde_json::to_string(&fhir_json)?,
-    };
-
-    Ok(Html(template.render().unwrap()))
-}

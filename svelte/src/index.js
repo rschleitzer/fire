@@ -1,6 +1,6 @@
-// Export resource editors
-export { default as PatientEditor } from './components/resources/PatientEditor.svelte';
-export { default as ObservationEditor } from './components/resources/ObservationEditor.svelte';
+// Export resource components (handle both display and editing)
+export { default as Patient } from './components/resources/Patient.svelte';
+export { default as Observation } from './components/resources/Observation.svelte';
 
 // Export data type components (for standalone use if needed)
 export { default as CodeableConcept } from './components/datatypes/CodeableConcept.svelte';

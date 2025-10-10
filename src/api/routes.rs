@@ -8,12 +8,12 @@ use super::handlers::bundle::{process_bundle, BundleState};
 use super::handlers::health::{health_check, liveness_check, readiness_check, SharedPool};
 use super::handlers::metadata::capability_statement;
 use super::handlers::observation::{
-    create_observation, delete_observation, delete_observations, edit_observation_page,
+    create_observation, delete_observation, delete_observations,
     get_observation_history, read_observation, read_observation_version, search_observations,
     update_observation, update_observation_form, SharedObservationRepo,
 };
 use super::handlers::patient::{
-    create_patient, delete_patient, delete_patients, edit_patient_page, get_patient_history,
+    create_patient, delete_patient, delete_patients, get_patient_history,
     read_patient, read_patient_version, search_patients, update_patient, update_patient_form,
     SharedPatientRepo,
 };
@@ -33,7 +33,6 @@ pub fn patient_routes(repo: SharedPatientRepo) -> Router {
                 .put(update_patient)
                 .delete(delete_patient),
         )
-        .route("/fhir/Patient/:id/edit", get(edit_patient_page))
         .route("/fhir/Patient/:id/_history", get(get_patient_history))
         .route(
             "/fhir/Patient/:id/_history/:version_id",
@@ -57,7 +56,6 @@ pub fn observation_routes(repo: SharedObservationRepo) -> Router {
                 .put(update_observation)
                 .delete(delete_observation),
         )
-        .route("/fhir/Observation/:id/edit", get(edit_observation_page))
         .route(
             "/fhir/Observation/:id/_history",
             get(get_observation_history),

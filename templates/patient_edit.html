@@ -8,7 +8,7 @@
 
 {% block content %}
 <div class="card">
-    <h2>Edit Patient</h2>
+    <h2>Patient</h2>
     <div id="patient-editor"></div>
 </div>
 
@@ -16,8 +16,8 @@
     // Patient resource data from server
     const resource = {{ resource_json|safe }};
 
-    // Mount the Svelte PatientEditor component
-    const editor = new FHIRComponents.PatientEditor({
+    // Mount the Svelte Patient component
+    const editor = new FHIRComponents.Patient({
         target: document.getElementById('patient-editor'),
         props: { resource }
     });
