@@ -102,6 +102,20 @@ pub struct ObservationDetailTemplate {
     pub resource_json: String,
 }
 
+#[derive(Template)]
+#[template(path = "patient_edit.html")]
+pub struct PatientEditTemplate {
+    pub id: String,
+    pub resource_json: String,
+}
+
+#[derive(Template)]
+#[template(path = "observation_edit.html")]
+pub struct ObservationEditTemplate {
+    pub id: String,
+    pub resource_json: String,
+}
+
 /// Extract a human-readable name from Patient FHIR JSON
 pub fn extract_patient_name(content: &Value) -> String {
     if let Some(names) = content.get("name").and_then(|n| n.as_array()) {

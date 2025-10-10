@@ -314,3 +314,19 @@ pub async fn search_observations(
         ResponseFormat::Json => Ok(Json(bundle).into_response()),
     }
 }
+
+/// Show observation edit page
+pub async fn edit_observation_page(
+    State(repo): State<SharedObservationRepo>,
+    Path(id): Path<Uuid>,
+) -> Result<Html<String>> {
+    let observation = repo.read(&id).await?;
+    let fhir_json = observation.to_fhir_json();
+
+    let template = ObservationEditTemplate {
+        id: id.to_string(),
+        resource_json: serde_json::to_string(&fhir_json)?,
+    };
+
+    Ok(Html(template.render().unwrap()))
+}

@@ -1,0 +1,18 @@
+{
+  "name": "fire-fhir-components",
+  "version": "1.0.0",
+  "description": "Svelte components for editing FHIR resources in Fire",
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "clean": "rm -rf build"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.9.6",
+    "rollup-plugin-svelte": "^7.2.0",
+    "svelte": "^4.2.8"
+  }
+}

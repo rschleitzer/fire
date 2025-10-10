@@ -297,3 +297,19 @@ pub async fn delete_patients(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Show patient edit page
+pub async fn edit_patient_page(
+    State(repo): State<SharedPatientRepo>,
+    Path(id): Path<Uuid>,
+) -> Result<Html<String>> {
+    let patient = repo.read(&id).await?;
+    let fhir_json = patient.to_fhir_json();
+
+    let template = PatientEditTemplate {
+        id: id.to_string(),
+        resource_json: serde_json::to_string(&fhir_json)?,
+    };
+
+    Ok(Html(template.render().unwrap()))
+}

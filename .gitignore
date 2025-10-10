@@ -2,3 +2,7 @@
 Cargo.lock
 .env
 .env.local
+
+# Node/NPM
+node_modules/
+svelte/build/

@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(patient_routes(patient_repo.clone()))
         .merge(observation_routes(observation_repo.clone()))
         .merge(bundle_routes(patient_repo, observation_repo))
-        .nest_service("/", ServeDir::new("static"))
+        .nest_service("/static", ServeDir::new("static"))
         .layer(middleware::from_fn(add_request_id))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());

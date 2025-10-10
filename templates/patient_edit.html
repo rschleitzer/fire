@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Patient - Fire Server{% endblock %}
+
+{% block extra_head %}
+<script src="/static/js/fhir-components.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Edit Patient</h2>
+    <div id="patient-editor"></div>
+</div>
+
+<script>
+    // Patient resource data from server
+    const resource = {{ resource_json|safe }};
+
+    // Mount the Svelte PatientEditor component
+    const editor = new FHIRComponents.PatientEditor({
+        target: document.getElementById('patient-editor'),
+        props: { resource }
+    });
+
+    // Listen for save event from the editor
+    window.addEventListener('save', async (event) => {
+        const updated = event.detail;
+
+        try {
+            const response = await fetch('/fhir/Patient/{{ id }}', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/fhir+json',
+                    'Accept': 'application/fhir+json'
+                },
+                body: JSON.stringify(updated)
+            });
+
+            if (response.ok) {
+                // Success - navigate to detail view
+                window.location.href = '/fhir/Patient/{{ id }}';
+            } else {
+                // Error - parse and display
+                const error = await response.json();
+                window.dispatchEvent(new CustomEvent('save-error', {
+                    detail: {
+                        message: error.issue?.[0]?.diagnostics ||
+                                error.diagnostics ||
+                                'Failed to save patient'
+                    }
+                }));
+            }
+        } catch (err) {
+            window.dispatchEvent(new CustomEvent('save-error', {
+                detail: { message: 'Network error: ' + err.message }
+            }));
+        }
+    });
+</script>
+{% endblock %}
