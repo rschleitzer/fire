@@ -285,6 +285,59 @@
                     <input type="text" bind:value={resource.meta.lastUpdated} placeholder="ISO 8601 timestamp" disabled />
                   </td>
                 </tr>
+                <tr>
+                  <td class="prop-name">source</td>
+                  <td class="control"></td>
+                  <td class="value">
+                    <input type="text" bind:value={resource.meta.source} placeholder="Source system URI" disabled={saving} />
+                  </td>
+                </tr>
+                <tr>
+                  <td class="prop-name">profile</td>
+                  <td class="control">
+                    <button class="btn-tiny" on:click={() => { if (!resource.meta.profile) resource.meta.profile = []; resource.meta.profile = [...resource.meta.profile, '']; }} disabled={saving} title="Add Profile">+</button>
+                  </td>
+                  <td class="value">
+                    {#each resource.meta.profile || [] as profile, pi}
+                      <div class="inline-array-item">
+                        <button class="btn-tiny" on:click={() => { resource.meta.profile = resource.meta.profile.filter((_, idx) => idx !== pi); }} disabled={saving}>-</button>
+                        <input type="text" bind:value={resource.meta.profile[pi]} placeholder="Profile URI" disabled={saving} />
+                      </div>
+                    {/each}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="prop-name">security</td>
+                  <td class="control">
+                    <button class="btn-tiny" on:click={() => { if (!resource.meta.security) resource.meta.security = []; resource.meta.security = [...resource.meta.security, { system: '', code: '', display: '' }]; }} disabled={saving} title="Add Security">+</button>
+                  </td>
+                  <td class="value">
+                    {#each resource.meta.security || [] as security, si}
+                      <div class="array-item">
+                        <button class="btn-tiny" on:click={() => { resource.meta.security = resource.meta.security.filter((_, idx) => idx !== si); }} disabled={saving}>-</button>
+                        <div class="nested">
+                          <input type="text" bind:value={security.display} placeholder="Security label (e.g., confidential)" disabled={saving} />
+                        </div>
+                      </div>
+                    {/each}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="prop-name">tag</td>
+                  <td class="control">
+                    <button class="btn-tiny" on:click={() => { if (!resource.meta.tag) resource.meta.tag = []; resource.meta.tag = [...resource.meta.tag, { system: '', code: '', display: '' }]; }} disabled={saving} title="Add Tag">+</button>
+                  </td>
+                  <td class="value">
+                    {#each resource.meta.tag || [] as tag, ti}
+                      <div class="array-item">
+                        <button class="btn-tiny" on:click={() => { resource.meta.tag = resource.meta.tag.filter((_, idx) => idx !== ti); }} disabled={saving}>-</button>
+                        <div class="nested">
+                          <input type="text" bind:value={tag.display} placeholder="Tag (e.g., workflow status)" disabled={saving} />
+                        </div>
+                      </div>
+                    {/each}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
