@@ -5,7 +5,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fire::api::{
-    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes,
+    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes, root_routes,
 };
 use fire::config::Config;
 use fire::middleware::request_id::add_request_id;
@@ -68,6 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build application routes
     let app = Router::new()
+        .merge(root_routes())
         .merge(health_routes(Arc::new(pool.clone())))
         .merge(metadata_routes())
         .merge(patient_routes(patient_repo.clone()))

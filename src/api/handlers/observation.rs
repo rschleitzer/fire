@@ -39,23 +39,51 @@ pub async fn create_observation(
 /// Read an observation by ID
 pub async fn read_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
+    Path(id_str): Path<String>,
     headers: HeaderMap,
 ) -> Result<Response> {
-    let observation = repo.read(&id).await?;
-    let fhir_json = observation.to_fhir_json();
+    let id = Uuid::parse_str(&id_str)
+        .map_err(|_| crate::error::FhirError::BadRequest(format!("Invalid observation ID: {}", id_str)))?;
 
-    match preferred_format(&headers) {
-        ResponseFormat::Html => {
-            // Use interactive edit template (all-in-one display/edit)
-            let template = ObservationEditTemplate {
-                id: id.to_string(),
-                resource_json: serde_json::to_string(&fhir_json)?,
-            };
+    // Try to read the observation - if it doesn't exist, return empty template for new resource
+    match repo.read(&id).await {
+        Ok(observation) => {
+            let fhir_json = observation.to_fhir_json();
 
-            Ok(Html(template.render().unwrap()).into_response())
+            match preferred_format(&headers) {
+                ResponseFormat::Html => {
+                    let template = ObservationEditTemplate {
+                        id: id.to_string(),
+                        resource_json: serde_json::to_string(&fhir_json)?,
+                    };
+                    Ok(Html(template.render().unwrap()).into_response())
+                }
+                ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+            }
         }
-        ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+        Err(crate::error::FhirError::NotFound) => {
+            // Resource doesn't exist - return empty template for new resource
+            let empty_observation = serde_json::json!({
+                "resourceType": "Observation",
+                "id": id.to_string(),
+                "status": "final",
+                "code": { "text": "", "coding": [] },
+                "subject": { "reference": "", "display": "" },
+                "valueQuantity": { "value": null, "unit": "", "system": "http://unitsofmeasure.org", "code": "" }
+            });
+
+            match preferred_format(&headers) {
+                ResponseFormat::Html => {
+                    let template = ObservationEditTemplate {
+                        id: id.to_string(),
+                        resource_json: serde_json::to_string(&empty_observation)?,
+                    };
+                    Ok(Html(template.render().unwrap()).into_response())
+                }
+                ResponseFormat::Json => Ok(Json(empty_observation).into_response()),
+            }
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -171,6 +199,15 @@ pub async fn delete_observations(
         }
     }
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Rollback an observation to a specific version (destructive operation for dev/test)
+pub async fn rollback_observation(
+    State(repo): State<SharedObservationRepo>,
+    Path((id, version)): Path<(Uuid, i32)>,
+) -> Result<StatusCode> {
+    repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

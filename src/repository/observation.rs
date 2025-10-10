@@ -573,4 +573,176 @@ impl ObservationRepository {
 
         Ok(patient)
     }
+
+    /// Rollback an observation to a specific version (deletes all versions >= rollback_to_version)
+    /// This is a destructive operation for dev/test purposes only
+    pub async fn rollback(&self, id: &Uuid, rollback_to_version: i32) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Get all version IDs for this observation from history
+        let version_ids: Vec<i32> = sqlx::query_scalar!(
+            r#"
+            SELECT version_id
+            FROM observation_history
+            WHERE id = $1
+            ORDER BY version_id ASC
+            "#,
+            id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // Check if current resource exists and add its version
+        let current_version = sqlx::query_scalar!(
+            r#"
+            SELECT version_id
+            FROM observation
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let mut all_versions = version_ids;
+        if let Some(cv) = current_version {
+            if !all_versions.contains(&cv) {
+                all_versions.push(cv);
+            }
+        }
+        all_versions.sort();
+
+        // Find versions to delete (>= rollback_to_version)
+        let versions_to_delete: Vec<i32> = all_versions
+            .iter()
+            .filter(|&&v| v >= rollback_to_version)
+            .copied()
+            .collect();
+
+        // Find highest version that remains (< rollback_to_version)
+        let new_current_version = all_versions
+            .iter()
+            .filter(|&&v| v < rollback_to_version)
+            .max()
+            .copied();
+
+        if versions_to_delete.is_empty() {
+            return Err(FhirError::BadRequest(format!(
+                "No versions to rollback for observation {}",
+                id
+            )));
+        }
+
+        tracing::info!(
+            observation_id = %id,
+            rollback_to = rollback_to_version,
+            deleting_versions = ?versions_to_delete,
+            new_current = ?new_current_version,
+            "Rolling back observation"
+        );
+
+        // Delete versions from history
+        for version in &versions_to_delete {
+            sqlx::query!(
+                r#"
+                DELETE FROM observation_history
+                WHERE id = $1 AND version_id = $2
+                "#,
+                id,
+                version
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Update or delete current resource
+        if let Some(new_version) = new_current_version {
+            // Restore the previous version as current
+            let restored = self.read_version(id, new_version).await?;
+
+            let params = extract_observation_search_params(&restored.content);
+
+            // Convert f64 to BigDecimal
+            let value_qty_decimal = params.value_quantity_value.map(|v| {
+                sqlx::types::BigDecimal::try_from(v)
+                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            });
+
+            sqlx::query!(
+                r#"
+                UPDATE observation
+                SET
+                    version_id = $2,
+                    last_updated = $3,
+                    content = $4,
+                    status = $5,
+                    category_system = $6,
+                    category_code = $7,
+                    code_system = $8,
+                    code_code = $9,
+                    subject_reference = $10,
+                    patient_reference = $11,
+                    encounter_reference = $12,
+                    effective_datetime = $13,
+                    effective_period_start = $14,
+                    effective_period_end = $15,
+                    issued = $16,
+                    value_quantity_value = $17,
+                    value_quantity_unit = $18,
+                    value_quantity_system = $19,
+                    value_codeable_concept_code = $20,
+                    value_string = $21,
+                    performer_reference = $22,
+                    triggered_by_observation = $23,
+                    triggered_by_type = $24,
+                    focus_reference = $25,
+                    body_structure_reference = $26
+                WHERE id = $1
+                "#,
+                id,
+                new_version,
+                restored.last_updated,
+                &restored.content,
+                params.status,
+                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+                params.code_system,
+                params.code_code,
+                params.subject_reference,
+                params.patient_reference,
+                params.encounter_reference,
+                params.effective_datetime,
+                params.effective_period_start,
+                params.effective_period_end,
+                params.issued,
+                value_qty_decimal,
+                params.value_quantity_unit,
+                params.value_quantity_system,
+                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
+                params.value_string,
+                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
+                params.body_structure_reference,
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            // No versions remain, delete current resource
+            sqlx::query!(
+                r#"
+                DELETE FROM observation
+                WHERE id = $1
+                "#,
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
 }

@@ -25,10 +25,14 @@
     // Listen for save event from the editor
     window.addEventListener('save', async (event) => {
         const updated = event.detail;
+        const isNew = !('{{ id }}') || '{{ id }}' === '';
 
         try {
-            const response = await fetch('/fhir/Patient/{{ id }}', {
-                method: 'PUT',
+            const url = isNew ? '/fhir/Patient' : '/fhir/Patient/{{ id }}';
+            const method = isNew ? 'POST' : 'PUT';
+
+            const response = await fetch(url, {
+                method: method,
                 headers: {
                     'Content-Type': 'application/fhir+json',
                     'Accept': 'application/fhir+json'
@@ -37,8 +41,11 @@
             });
 
             if (response.ok) {
+                const result = await response.json();
                 // Success - navigate to detail view
-                window.location.href = '/fhir/Patient/{{ id }}';
+                // For new resources, use the ID from the response
+                const resourceId = result.id || '{{ id }}';
+                window.location.href = '/fhir/Patient/' + resourceId;
             } else {
                 // Error - parse and display
                 const error = await response.json();

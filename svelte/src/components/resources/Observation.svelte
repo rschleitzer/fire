@@ -1,4 +1,6 @@
 <script>
+  import Meta from '../datatypes/Meta.svelte';
+
   export let resource = {
     resourceType: 'Observation',
     id: '',
@@ -221,13 +223,96 @@
     resource.triggeredBy = resource.triggeredBy.filter((_, i) => i !== index);
   }
 
+  function createNew() {
+    // Generate a new UUID and navigate to that page
+    const newId = crypto.randomUUID();
+    window.location.href = `/fhir/Observation/${newId}`;
+  }
+
+  function cleanResource(obj) {
+    // Remove empty/null/undefined fields and empty arrays/objects from resource before saving
+    if (obj === null || obj === undefined) return undefined;
+
+    if (Array.isArray(obj)) {
+      const cleaned = obj.map(cleanResource).filter(item => item !== undefined);
+      return cleaned.length > 0 ? cleaned : undefined;
+    }
+
+    if (typeof obj === 'object') {
+      const cleaned = {};
+      for (const [key, value] of Object.entries(obj)) {
+        const cleanedValue = cleanResource(value);
+        if (cleanedValue !== undefined && cleanedValue !== '' && cleanedValue !== null) {
+          // For objects, also check if they're empty after cleaning
+          if (typeof cleanedValue === 'object' && !Array.isArray(cleanedValue)) {
+            if (Object.keys(cleanedValue).length > 0) {
+              cleaned[key] = cleanedValue;
+            }
+          } else {
+            cleaned[key] = cleanedValue;
+          }
+        }
+      }
+      return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+    }
+
+    // Return primitive values (strings, numbers, booleans) as-is
+    return obj;
+  }
+
+  async function rollback() {
+    if (!resource.id || !resource.meta?.versionId) {
+      errorMessage = 'Cannot rollback: No previous version available';
+      return;
+    }
+
+    const currentVersionId = parseInt(resource.meta.versionId);
+    if (currentVersionId <= 1) {
+      errorMessage = 'Cannot rollback: Already at the first version';
+      return;
+    }
+
+    if (!window.confirm('This will permanently delete version ' + currentVersionId + ' and cannot be recovered! Continue?')) {
+      return;
+    }
+
+    saving = true;
+    errorMessage = '';
+
+    try {
+      // Call rollback endpoint (destructive - deletes current version)
+      const response = await fetch(`/fhir/Observation/${resource.id}/_rollback/${currentVersionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/fhir+json' }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to rollback to previous version');
+      }
+
+      // Reload the page to show the rolled back version
+      window.location.reload();
+    } catch (error) {
+      saving = false;
+      errorMessage = `Rollback failed: ${error.message}`;
+    }
+  }
+
   function save() {
     saving = true;
     errorMessage = '';
 
+    // Clean the resource before saving (remove empty fields)
+    const cleanedResource = cleanResource(resource);
+
+    // Remove id field if empty (for new resources - server will generate it)
+    if (cleanedResource && (!cleanedResource.id || cleanedResource.id === '')) {
+      delete cleanedResource.id;
+    }
+
     // Dispatch save event
     const event = new CustomEvent('save', {
-      detail: resource,
+      detail: cleanedResource,
       bubbles: true,
       composed: true
     });
@@ -252,6 +337,27 @@
 <svelte:window on:save-complete={handleSaveComplete} on:save-error={handleSaveError} />
 
 <div class="observation">
+  {#if errorMessage}
+    <div class="error-message">
+      <strong>Error:</strong> {errorMessage}
+    </div>
+  {/if}
+
+  <div class="button-group">
+    <button class="btn btn-success" on:click={createNew} disabled={saving}>
+      New
+    </button>
+    <button class="btn btn-primary" on:click={save} disabled={saving}>
+      {saving ? 'Saving...' : 'Save'}
+    </button>
+    <button class="btn btn-warning" on:click={rollback} disabled={saving || !resource.id || !resource.meta?.versionId || parseInt(resource.meta?.versionId || '0') <= 1}>
+      Rollback
+    </button>
+    <button class="btn btn-secondary" on:click={cancel} disabled={saving}>
+      Cancel
+    </button>
+  </div>
+
   <table class="grid">
     <tbody>
       <!-- ID (read-only) -->
@@ -268,79 +374,7 @@
         <td class="prop-name">meta</td>
         <td class="control"></td>
         <td class="value">
-          <div class="nested">
-            <table class="grid nested-table">
-              <tbody>
-                <tr>
-                  <td class="prop-name">versionId</td>
-                  <td class="control"></td>
-                  <td class="value">
-                    <input type="text" bind:value={resource.meta.versionId} placeholder="Version ID" disabled />
-                  </td>
-                </tr>
-                <tr>
-                  <td class="prop-name">lastUpdated</td>
-                  <td class="control"></td>
-                  <td class="value">
-                    <input type="text" bind:value={resource.meta.lastUpdated} placeholder="ISO 8601 timestamp" disabled />
-                  </td>
-                </tr>
-                <tr>
-                  <td class="prop-name">source</td>
-                  <td class="control"></td>
-                  <td class="value">
-                    <input type="text" bind:value={resource.meta.source} placeholder="Source system URI" disabled={saving} />
-                  </td>
-                </tr>
-                <tr>
-                  <td class="prop-name">profile</td>
-                  <td class="control">
-                    <button class="btn-tiny" on:click={() => { if (!resource.meta.profile) resource.meta.profile = []; resource.meta.profile = [...resource.meta.profile, '']; }} disabled={saving} title="Add Profile">+</button>
-                  </td>
-                  <td class="value">
-                    {#each resource.meta.profile || [] as profile, pi}
-                      <div class="inline-array-item">
-                        <button class="btn-tiny" on:click={() => { resource.meta.profile = resource.meta.profile.filter((_, idx) => idx !== pi); }} disabled={saving}>-</button>
-                        <input type="text" bind:value={resource.meta.profile[pi]} placeholder="Profile URI" disabled={saving} />
-                      </div>
-                    {/each}
-                  </td>
-                </tr>
-                <tr>
-                  <td class="prop-name">security</td>
-                  <td class="control">
-                    <button class="btn-tiny" on:click={() => { if (!resource.meta.security) resource.meta.security = []; resource.meta.security = [...resource.meta.security, { system: '', code: '', display: '' }]; }} disabled={saving} title="Add Security">+</button>
-                  </td>
-                  <td class="value">
-                    {#each resource.meta.security || [] as security, si}
-                      <div class="array-item">
-                        <button class="btn-tiny" on:click={() => { resource.meta.security = resource.meta.security.filter((_, idx) => idx !== si); }} disabled={saving}>-</button>
-                        <div class="nested">
-                          <input type="text" bind:value={security.display} placeholder="Security label (e.g., confidential)" disabled={saving} />
-                        </div>
-                      </div>
-                    {/each}
-                  </td>
-                </tr>
-                <tr>
-                  <td class="prop-name">tag</td>
-                  <td class="control">
-                    <button class="btn-tiny" on:click={() => { if (!resource.meta.tag) resource.meta.tag = []; resource.meta.tag = [...resource.meta.tag, { system: '', code: '', display: '' }]; }} disabled={saving} title="Add Tag">+</button>
-                  </td>
-                  <td class="value">
-                    {#each resource.meta.tag || [] as tag, ti}
-                      <div class="array-item">
-                        <button class="btn-tiny" on:click={() => { resource.meta.tag = resource.meta.tag.filter((_, idx) => idx !== ti); }} disabled={saving}>-</button>
-                        <div class="nested">
-                          <input type="text" bind:value={tag.display} placeholder="Tag (e.g., workflow status)" disabled={saving} />
-                        </div>
-                      </div>
-                    {/each}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <Meta bind:value={resource.meta} disabled={saving} />
         </td>
       </tr>
 
@@ -994,21 +1028,6 @@
       </tr>
     </tbody>
   </table>
-
-  {#if errorMessage}
-    <div class="error-message">
-      <strong>Error:</strong> {errorMessage}
-    </div>
-  {/if}
-
-  <div class="button-group">
-    <button class="btn btn-primary" on:click={save} disabled={saving}>
-      {saving ? 'Saving...' : 'Save'}
-    </button>
-    <button class="btn btn-secondary" on:click={cancel} disabled={saving}>
-      Cancel
-    </button>
-  </div>
 </div>
 
 <style>
@@ -1172,5 +1191,23 @@
 
   .btn-secondary:hover:not(:disabled) {
     background: #7f8c8d;
+  }
+
+  .btn-success {
+    background: #27ae60;
+    color: white;
+  }
+
+  .btn-success:hover:not(:disabled) {
+    background: #229954;
+  }
+
+  .btn-warning {
+    background: #f39c12;
+    color: white;
+  }
+
+  .btn-warning:hover:not(:disabled) {
+    background: #e67e22;
   }
 </style>

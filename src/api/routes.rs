@@ -1,4 +1,5 @@
 use axum::{
+    response::Html,
     routing::{get, post},
     Router,
 };
@@ -7,15 +8,19 @@ use std::sync::Arc;
 use super::handlers::bundle::{process_bundle, BundleState};
 use super::handlers::health::{health_check, liveness_check, readiness_check, SharedPool};
 use super::handlers::metadata::capability_statement;
+
+async fn index() -> Html<String> {
+    Html(std::fs::read_to_string("static/index.html").unwrap_or_else(|_| String::from("<h1>Fire FHIR Server</h1>")))
+}
 use super::handlers::observation::{
     create_observation, delete_observation, delete_observations,
-    get_observation_history, read_observation, read_observation_version, search_observations,
-    update_observation, update_observation_form, SharedObservationRepo,
+    get_observation_history, read_observation, read_observation_version, rollback_observation,
+    search_observations, update_observation, update_observation_form, SharedObservationRepo,
 };
 use super::handlers::patient::{
     create_patient, delete_patient, delete_patients, get_patient_history,
-    read_patient, read_patient_version, search_patients, update_patient, update_patient_form,
-    SharedPatientRepo,
+    read_patient, read_patient_version, rollback_patient, search_patients, update_patient,
+    update_patient_form, SharedPatientRepo,
 };
 
 pub fn patient_routes(repo: SharedPatientRepo) -> Router {
@@ -37,6 +42,10 @@ pub fn patient_routes(repo: SharedPatientRepo) -> Router {
         .route(
             "/fhir/Patient/:id/_history/:version_id",
             get(read_patient_version),
+        )
+        .route(
+            "/fhir/Patient/:id/_rollback/:version",
+            post(rollback_patient),
         )
         .with_state(repo)
 }
@@ -63,6 +72,10 @@ pub fn observation_routes(repo: SharedObservationRepo) -> Router {
         .route(
             "/fhir/Observation/:id/_history/:version_id",
             get(read_observation_version),
+        )
+        .route(
+            "/fhir/Observation/:id/_rollback/:version",
+            post(rollback_observation),
         )
         .with_state(repo)
 }
@@ -91,4 +104,8 @@ pub fn health_routes(pool: SharedPool) -> Router {
 
 pub fn metadata_routes() -> Router {
     Router::new().route("/fhir/metadata", get(capability_statement))
+}
+
+pub fn root_routes() -> Router {
+    Router::new().route("/", get(index))
 }

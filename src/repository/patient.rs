@@ -1038,4 +1038,174 @@ impl PatientRepository {
 
         Ok(observations)
     }
+
+    /// Rollback a patient to a specific version (deletes all versions >= rollback_to_version)
+    /// This is a destructive operation for dev/test purposes only
+    pub async fn rollback(&self, id: &Uuid, rollback_to_version: i32) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Get all version IDs for this patient from history
+        let version_ids: Vec<i32> = sqlx::query_scalar!(
+            r#"
+            SELECT version_id
+            FROM patient_history
+            WHERE id = $1
+            ORDER BY version_id ASC
+            "#,
+            id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // Check if current resource exists and add its version
+        let current_version = sqlx::query_scalar!(
+            r#"
+            SELECT version_id
+            FROM patient
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let mut all_versions = version_ids;
+        if let Some(cv) = current_version {
+            if !all_versions.contains(&cv) {
+                all_versions.push(cv);
+            }
+        }
+        all_versions.sort();
+
+        // Find versions to delete (>= rollback_to_version)
+        let versions_to_delete: Vec<i32> = all_versions
+            .iter()
+            .filter(|&&v| v >= rollback_to_version)
+            .copied()
+            .collect();
+
+        // Find highest version that remains (< rollback_to_version)
+        let new_current_version = all_versions
+            .iter()
+            .filter(|&&v| v < rollback_to_version)
+            .max()
+            .copied();
+
+        if versions_to_delete.is_empty() {
+            return Err(FhirError::BadRequest(format!(
+                "No versions to rollback for patient {}",
+                id
+            )));
+        }
+
+        tracing::info!(
+            patient_id = %id,
+            rollback_to = rollback_to_version,
+            deleting_versions = ?versions_to_delete,
+            new_current = ?new_current_version,
+            "Rolling back patient"
+        );
+
+        // Delete versions from history
+        for version in &versions_to_delete {
+            sqlx::query!(
+                r#"
+                DELETE FROM patient_history
+                WHERE id = $1 AND version_id = $2
+                "#,
+                id,
+                version
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // Update or delete current resource
+        if let Some(new_version) = new_current_version {
+            // Restore the previous version as current
+            let restored = self.read_version(id, new_version).await?;
+
+            let params = extract_patient_search_params(&restored.content);
+
+            sqlx::query!(
+                r#"
+                UPDATE patient
+                SET
+                    version_id = $2,
+                    last_updated = $3,
+                    content = $4,
+                    family_name = $5,
+                    given_name = $6,
+                    prefix = $7,
+                    suffix = $8,
+                    name_text = $9,
+                    identifier_system = $10,
+                    identifier_value = $11,
+                    birthdate = $12,
+                    gender = $13,
+                    active = $14
+                WHERE id = $1
+                "#,
+                id,
+                new_version,
+                restored.last_updated,
+                &restored.content,
+                params
+                    .family_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.family_name[..])),
+                params
+                    .given_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.given_name[..])),
+                params
+                    .prefix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.prefix[..])),
+                params
+                    .suffix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.suffix[..])),
+                params
+                    .name_text
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.name_text[..])),
+                params
+                    .identifier_system
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_system[..])),
+                params
+                    .identifier_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_value[..])),
+                params.birthdate,
+                params.gender,
+                params.active,
+            )
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            // No versions remain, delete current resource
+            sqlx::query!(
+                r#"
+                DELETE FROM patient
+                WHERE id = $1
+                "#,
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
 }

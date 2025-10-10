@@ -39,24 +39,53 @@ pub async fn create_patient(
 /// Read a patient by ID
 pub async fn read_patient(
     State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
+    Path(id_str): Path<String>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    let patient = repo.read(&id).await?;
-    let fhir_json = patient.to_fhir_json();
+    let id = Uuid::parse_str(&id_str)
+        .map_err(|_| crate::error::FhirError::BadRequest(format!("Invalid patient ID: {}", id_str)))?;
 
-    match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Html => {
-            // Use interactive edit template (all-in-one display/edit)
-            let template = PatientEditTemplate {
-                id: id.to_string(),
-                resource_json: serde_json::to_string(&fhir_json)?,
-            };
+    // Try to read the patient - if it doesn't exist, return empty template for new resource
+    match repo.read(&id).await {
+        Ok(patient) => {
+            let fhir_json = patient.to_fhir_json();
 
-            Ok(Html(template.render().unwrap()).into_response())
+            match preferred_format_with_query(&uri, &headers) {
+                ResponseFormat::Html => {
+                    let template = PatientEditTemplate {
+                        id: id.to_string(),
+                        resource_json: serde_json::to_string(&fhir_json)?,
+                    };
+                    Ok(Html(template.render().unwrap()).into_response())
+                }
+                ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+            }
         }
-        ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+        Err(crate::error::FhirError::NotFound) => {
+            // Resource doesn't exist - return empty template for new resource
+            let empty_patient = serde_json::json!({
+                "resourceType": "Patient",
+                "id": id.to_string(),
+                "active": true,
+                "name": [],
+                "telecom": [],
+                "address": [],
+                "identifier": []
+            });
+
+            match preferred_format_with_query(&uri, &headers) {
+                ResponseFormat::Html => {
+                    let template = PatientEditTemplate {
+                        id: id.to_string(),
+                        resource_json: serde_json::to_string(&empty_patient)?,
+                    };
+                    Ok(Html(template.render().unwrap()).into_response())
+                }
+                ResponseFormat::Json => Ok(Json(empty_patient).into_response()),
+            }
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -271,6 +300,15 @@ pub async fn delete_patients(
         }
     }
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Rollback a patient to a specific version (destructive operation for dev/test)
+pub async fn rollback_patient(
+    State(repo): State<SharedPatientRepo>,
+    Path((id, version)): Path<(Uuid, i32)>,
+) -> Result<StatusCode> {
+    repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
