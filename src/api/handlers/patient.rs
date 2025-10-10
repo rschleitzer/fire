@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::api::content_negotiation::*;
+use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::error::Result;
 use crate::repository::PatientRepository;
 use askama::Template;
@@ -41,11 +41,12 @@ pub async fn read_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Result<Response> {
     let patient = repo.read(&id).await?;
     let fhir_json = patient.to_fhir_json();
 
-    match preferred_format(&headers) {
+    match preferred_format_with_query(&uri, &headers) {
         ResponseFormat::Html => {
             // Use interactive edit template (all-in-one display/edit)
             let template = PatientEditTemplate {
@@ -59,17 +60,17 @@ pub async fn read_patient(
     }
 }
 
-/// Update a patient (JSON)
+/// Update a patient (JSON) - Uses upsert semantics per FHIR spec
 pub async fn update_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
     Json(content): Json<Value>,
 ) -> Result<Json<Value>> {
-    let patient = repo.update(&id, content).await?;
+    let patient = repo.upsert(&id, content).await?;
     Ok(Json(patient.to_fhir_json()))
 }
 
-/// Update a patient (HTML form)
+/// Update a patient (HTML form) - Uses upsert semantics per FHIR spec
 pub async fn update_patient_form(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
@@ -87,7 +88,7 @@ pub async fn update_patient_form(
         "active": form_data.active == "true"
     });
 
-    repo.update(&id, content).await?;
+    repo.upsert(&id, content).await?;
 
     // Redirect back to the patient detail page
     Ok(Redirect::to(&format!("/fhir/Patient/{}", id)))
@@ -107,6 +108,7 @@ pub async fn search_patients(
     State(repo): State<SharedPatientRepo>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Result<Response> {
     // Check if _total parameter is requested
     let include_total = params
@@ -160,7 +162,7 @@ pub async fn search_patients(
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
-    match preferred_format(&headers) {
+    match preferred_format_with_query(&uri, &headers) {
         ResponseFormat::Html => {
             // Convert patients to HTML table rows
             let patient_rows: Vec<PatientRow> = patients

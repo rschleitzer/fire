@@ -3,6 +3,8 @@
     resourceType: 'Patient',
     id: '',
     meta: {},
+    implicitRules: '',
+    language: '',
     identifier: [],
     active: true,
     name: [],
@@ -20,6 +22,8 @@
   $: {
     if (!resource.id) resource.id = '';
     if (!resource.meta) resource.meta = {};
+    if (!resource.implicitRules) resource.implicitRules = '';
+    if (!resource.language) resource.language = '';
     if (!resource.identifier) resource.identifier = [];
     if (!resource.name) resource.name = [];
     if (!resource.telecom) resource.telecom = [];
@@ -105,25 +109,29 @@
     resource.link = resource.link.filter((_, i) => i !== index);
   }
 
-  function addArrayItem(array, path) {
-    const keys = path.split('.');
-    let obj = resource;
-    for (let i = 0; i < keys.length - 1; i++) {
-      obj = obj[keys[i]];
+  function addMultipleBirth() {
+    if (!resource.multipleBirthInteger && !resource.multipleBirthBoolean) {
+      resource.multipleBirthType = 'boolean';
+      resource.multipleBirthBoolean = false;
     }
-    const lastKey = keys[keys.length - 1];
-    if (!Array.isArray(obj[lastKey])) obj[lastKey] = [];
-    obj[lastKey] = [...obj[lastKey], ''];
   }
 
-  function removeArrayItem(path, index) {
-    const keys = path.split('.');
-    let obj = resource;
-    for (let i = 0; i < keys.length - 1; i++) {
-      obj = obj[keys[i]];
-    }
-    const lastKey = keys[keys.length - 1];
-    obj[lastKey] = obj[lastKey].filter((_, i) => i !== index);
+  function addPhoto() {
+    if (!resource.photo) resource.photo = [];
+    resource.photo = [...resource.photo, { contentType: '', data: '', url: '' }];
+  }
+
+  function removePhoto(index) {
+    resource.photo = resource.photo.filter((_, i) => i !== index);
+  }
+
+  function addGeneralPractitioner() {
+    if (!resource.generalPractitioner) resource.generalPractitioner = [];
+    resource.generalPractitioner = [...resource.generalPractitioner, { reference: '', display: '' }];
+  }
+
+  function removeGeneralPractitioner(index) {
+    resource.generalPractitioner = resource.generalPractitioner.filter((_, i) => i !== index);
   }
 
   function save() {
@@ -187,12 +195,65 @@
                   <td class="prop-name">lastUpdated</td>
                   <td class="control"></td>
                   <td class="value">
-                    <input type="datetime-local" bind:value={resource.meta.lastUpdated} disabled={saving} />
+                    <input type="text" bind:value={resource.meta.lastUpdated} placeholder="ISO 8601 timestamp" disabled />
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </td>
+      </tr>
+
+      <!-- Implicit Rules -->
+      <tr>
+        <td class="prop-name">implicitRules</td>
+        <td class="control"></td>
+        <td class="value">
+          <input type="text" bind:value={resource.implicitRules} placeholder="Implicit rules URI" disabled={saving} />
+        </td>
+      </tr>
+
+      <!-- Language -->
+      <tr>
+        <td class="prop-name">language</td>
+        <td class="control"></td>
+        <td class="value">
+          <input type="text" bind:value={resource.language} placeholder="Language code (e.g., en-US)" disabled={saving} />
+        </td>
+      </tr>
+
+      <!-- Identifiers (array) -->
+      <tr>
+        <td class="prop-name">identifier</td>
+        <td class="control">
+          <button class="btn-tiny" on:click={addIdentifier} disabled={saving} title="Add Identifier">+</button>
+        </td>
+        <td class="value">
+          {#each resource.identifier as identifier, i}
+            <div class="array-item">
+              <button class="btn-tiny" on:click={() => removeIdentifier(i)} disabled={saving} title="Remove">-</button>
+              <div class="nested">
+                <table class="grid nested-table">
+                  <tbody>
+                    <tr>
+                      <td class="prop-name">system</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={identifier.system} placeholder="System URI" disabled={saving} />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="prop-name">value</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={identifier.value} placeholder="Identifier value" disabled={saving} />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {/each}
         </td>
       </tr>
 
@@ -202,30 +263,6 @@
         <td class="control"></td>
         <td class="value">
           <input type="checkbox" bind:checked={resource.active} disabled={saving} />
-        </td>
-      </tr>
-
-      <!-- Gender -->
-      <tr>
-        <td class="prop-name">gender</td>
-        <td class="control"></td>
-        <td class="value">
-          <select bind:value={resource.gender} disabled={saving}>
-            <option value="">-- Select --</option>
-            <option value="male">Male</option>
-            <option value="female">Female</option>
-            <option value="other">Other</option>
-            <option value="unknown">Unknown</option>
-          </select>
-        </td>
-      </tr>
-
-      <!-- Birth Date -->
-      <tr>
-        <td class="prop-name">birthDate</td>
-        <td class="control"></td>
-        <td class="value">
-          <input type="date" bind:value={resource.birthDate} disabled={saving} />
         </td>
       </tr>
 
@@ -294,41 +331,6 @@
         </td>
       </tr>
 
-      <!-- Identifiers (array) -->
-      <tr>
-        <td class="prop-name">identifier</td>
-        <td class="control">
-          <button class="btn-tiny" on:click={addIdentifier} disabled={saving} title="Add Identifier">+</button>
-        </td>
-        <td class="value">
-          {#each resource.identifier as identifier, i}
-            <div class="array-item">
-              <button class="btn-tiny" on:click={() => removeIdentifier(i)} disabled={saving} title="Remove">-</button>
-              <div class="nested">
-                <table class="grid nested-table">
-                  <tbody>
-                    <tr>
-                      <td class="prop-name">system</td>
-                      <td class="control"></td>
-                      <td class="value">
-                        <input type="text" bind:value={identifier.system} placeholder="System URI" disabled={saving} />
-                      </td>
-                    </tr>
-                    <tr>
-                      <td class="prop-name">value</td>
-                      <td class="control"></td>
-                      <td class="value">
-                        <input type="text" bind:value={identifier.value} placeholder="Identifier value" disabled={saving} />
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          {/each}
-        </td>
-      </tr>
-
       <!-- Telecom (array) -->
       <tr>
         <td class="prop-name">telecom</td>
@@ -370,6 +372,50 @@
               </div>
             </div>
           {/each}
+        </td>
+      </tr>
+
+      <!-- Gender -->
+      <tr>
+        <td class="prop-name">gender</td>
+        <td class="control"></td>
+        <td class="value">
+          <select bind:value={resource.gender} disabled={saving}>
+            <option value="">-- Select --</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </td>
+      </tr>
+
+      <!-- Birth Date -->
+      <tr>
+        <td class="prop-name">birthDate</td>
+        <td class="control"></td>
+        <td class="value">
+          <input type="date" bind:value={resource.birthDate} disabled={saving} />
+        </td>
+      </tr>
+
+      <!-- Deceased[x] -->
+      <tr>
+        <td class="prop-name">deceased[x]</td>
+        <td class="control"></td>
+        <td class="value">
+          <div class="deceased-choice">
+            <label>
+              <input type="radio" name="deceasedType" bind:group={resource.deceasedType} value="boolean" disabled={saving} />
+              Boolean:
+              <input type="checkbox" bind:checked={resource.deceasedBoolean} disabled={saving || resource.deceasedType !== 'boolean'} />
+            </label>
+            <label>
+              <input type="radio" name="deceasedType" bind:group={resource.deceasedType} value="dateTime" disabled={saving} />
+              DateTime:
+              <input type="datetime-local" bind:value={resource.deceasedDateTime} disabled={saving || resource.deceasedType !== 'dateTime'} />
+            </label>
+          </div>
         </td>
       </tr>
 
@@ -415,32 +461,67 @@
         </td>
       </tr>
 
-      <!-- Deceased -->
-      <tr>
-        <td class="prop-name">deceased[x]</td>
-        <td class="control"></td>
-        <td class="value">
-          <div class="deceased-choice">
-            <label>
-              <input type="radio" name="deceasedType" bind:group={resource.deceasedType} value="boolean" disabled={saving} />
-              Boolean:
-              <input type="checkbox" bind:checked={resource.deceasedBoolean} disabled={saving || resource.deceasedType !== 'boolean'} />
-            </label>
-            <label>
-              <input type="radio" name="deceasedType" bind:group={resource.deceasedType} value="dateTime" disabled={saving} />
-              DateTime:
-              <input type="datetime-local" bind:value={resource.deceasedDateTime} disabled={saving || resource.deceasedType !== 'dateTime'} />
-            </label>
-          </div>
-        </td>
-      </tr>
-
       <!-- Marital Status -->
       <tr>
         <td class="prop-name">maritalStatus</td>
         <td class="control"></td>
         <td class="value">
           <input type="text" bind:value={resource.maritalStatus.text} placeholder="Marital status (text)" disabled={saving} />
+        </td>
+      </tr>
+
+      <!-- MultipleBirth[x] -->
+      <tr>
+        <td class="prop-name">multipleBirth[x]</td>
+        <td class="control"></td>
+        <td class="value">
+          <div class="multiplebirth-choice">
+            <label>
+              <input type="radio" name="multipleBirthType" bind:group={resource.multipleBirthType} value="boolean" disabled={saving} />
+              Boolean:
+              <input type="checkbox" bind:checked={resource.multipleBirthBoolean} disabled={saving || resource.multipleBirthType !== 'boolean'} />
+            </label>
+            <label>
+              <input type="radio" name="multipleBirthType" bind:group={resource.multipleBirthType} value="integer" disabled={saving} />
+              Integer:
+              <input type="number" bind:value={resource.multipleBirthInteger} disabled={saving || resource.multipleBirthType !== 'integer'} placeholder="Birth order" />
+            </label>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Photo (array) -->
+      <tr>
+        <td class="prop-name">photo</td>
+        <td class="control">
+          <button class="btn-tiny" on:click={addPhoto} disabled={saving} title="Add Photo">+</button>
+        </td>
+        <td class="value">
+          {#each resource.photo || [] as photo, i}
+            <div class="array-item">
+              <button class="btn-tiny" on:click={() => removePhoto(i)} disabled={saving} title="Remove">-</button>
+              <div class="nested">
+                <table class="grid nested-table">
+                  <tbody>
+                    <tr>
+                      <td class="prop-name">contentType</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={photo.contentType} placeholder="e.g., image/jpeg" disabled={saving} />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="prop-name">url</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={photo.url} placeholder="Photo URL" disabled={saving} />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {/each}
         </td>
       </tr>
 
@@ -517,6 +598,75 @@
               </div>
             </div>
           {/each}
+        </td>
+      </tr>
+
+      <!-- General Practitioner (array) -->
+      <tr>
+        <td class="prop-name">generalPractitioner</td>
+        <td class="control">
+          <button class="btn-tiny" on:click={addGeneralPractitioner} disabled={saving} title="Add GP">+</button>
+        </td>
+        <td class="value">
+          {#each resource.generalPractitioner || [] as gp, i}
+            <div class="array-item">
+              <button class="btn-tiny" on:click={() => removeGeneralPractitioner(i)} disabled={saving} title="Remove">-</button>
+              <div class="nested">
+                <table class="grid nested-table">
+                  <tbody>
+                    <tr>
+                      <td class="prop-name">reference</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={gp.reference} placeholder="Practitioner/123" disabled={saving} />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="prop-name">display</td>
+                      <td class="control"></td>
+                      <td class="value">
+                        <input type="text" bind:value={gp.display} placeholder="Display name" disabled={saving} />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {/each}
+        </td>
+      </tr>
+
+      <!-- Managing Organization -->
+      <tr>
+        <td class="prop-name">managingOrganization</td>
+        <td class="control"></td>
+        <td class="value">
+          <div class="nested">
+            <table class="grid nested-table">
+              <tbody>
+                <tr>
+                  <td class="prop-name">reference</td>
+                  <td class="control"></td>
+                  <td class="value">
+                    <input type="text"
+                           value={resource.managingOrganization?.reference || ''}
+                           on:input={(e) => { if (!resource.managingOrganization) resource.managingOrganization = {}; resource.managingOrganization.reference = e.target.value; }}
+                           placeholder="Organization/123" disabled={saving} />
+                  </td>
+                </tr>
+                <tr>
+                  <td class="prop-name">display</td>
+                  <td class="control"></td>
+                  <td class="value">
+                    <input type="text"
+                           value={resource.managingOrganization?.display || ''}
+                           on:input={(e) => { if (!resource.managingOrganization) resource.managingOrganization = {}; resource.managingOrganization.display = e.target.value; }}
+                           placeholder="Display name" disabled={saving} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </td>
       </tr>
 
@@ -675,6 +825,8 @@
 
   input[type="text"],
   input[type="date"],
+  input[type="datetime-local"],
+  input[type="number"],
   select {
     width: 100%;
     padding: 0.5rem;
@@ -734,12 +886,14 @@
     background: #7f8c8d;
   }
 
-  .deceased-choice label {
+  .deceased-choice label,
+  .multiplebirth-choice label {
     display: block;
     margin-bottom: 0.5rem;
   }
 
-  .deceased-choice input[type="radio"] {
+  .deceased-choice input[type="radio"],
+  .multiplebirth-choice input[type="radio"] {
     margin-right: 0.5rem;
   }
 </style>

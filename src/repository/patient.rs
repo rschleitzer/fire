@@ -120,6 +120,249 @@ impl PatientRepository {
         Ok(patient)
     }
 
+    /// Upsert a patient resource with specific ID (FHIR-compliant PUT)
+    /// Creates with client-specified ID if doesn't exist, updates if exists
+    pub async fn upsert(&self, id: &Uuid, content: Value) -> Result<Patient> {
+        // Validate resource
+        validate_patient(&content)?;
+
+        let mut tx = self.pool.begin().await?;
+
+        // Check if resource exists
+        let existing = sqlx::query_as!(
+            Patient,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM patient
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(old_patient) = existing {
+            // Resource exists - perform update
+            let new_version_id = old_patient.version_id + 1;
+            let last_updated = Utc::now();
+
+            // Extract search params from OLD content for history
+            let old_params = extract_patient_search_params(&old_patient.content);
+
+            // Insert OLD version into history before updating
+            sqlx::query!(
+                r#"
+                INSERT INTO patient_history (
+                    id, version_id, last_updated, content,
+                    family_name, given_name, prefix, suffix, name_text,
+                    identifier_system, identifier_value,
+                    birthdate, gender, active,
+                    history_operation, history_timestamp
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                "#,
+                old_patient.id,
+                old_patient.version_id,
+                old_patient.last_updated,
+                &old_patient.content,
+                old_params
+                    .family_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.family_name[..])),
+                old_params
+                    .given_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.given_name[..])),
+                old_params
+                    .prefix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.prefix[..])),
+                old_params
+                    .suffix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.suffix[..])),
+                old_params
+                    .name_text
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.name_text[..])),
+                old_params
+                    .identifier_system
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.identifier_system[..])),
+                old_params
+                    .identifier_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.identifier_value[..])),
+                old_params.birthdate,
+                old_params.gender,
+                old_params.active,
+                if old_patient.version_id == 1 {
+                    "CREATE"
+                } else {
+                    "UPDATE"
+                },
+                Utc::now(),
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            // Extract search parameters for new content
+            let params = extract_patient_search_params(&content);
+
+            // Update current table with new version
+            sqlx::query!(
+                r#"
+                UPDATE patient
+                SET
+                    version_id = $2,
+                    last_updated = $3,
+                    content = $4,
+                    family_name = $5,
+                    given_name = $6,
+                    prefix = $7,
+                    suffix = $8,
+                    name_text = $9,
+                    identifier_system = $10,
+                    identifier_value = $11,
+                    birthdate = $12,
+                    gender = $13,
+                    active = $14
+                WHERE id = $1
+                "#,
+                id,
+                new_version_id,
+                last_updated,
+                content,
+                params
+                    .family_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.family_name[..])),
+                params
+                    .given_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.given_name[..])),
+                params
+                    .prefix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.prefix[..])),
+                params
+                    .suffix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.suffix[..])),
+                params
+                    .name_text
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.name_text[..])),
+                params
+                    .identifier_system
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_system[..])),
+                params
+                    .identifier_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_value[..])),
+                params.birthdate,
+                params.gender,
+                params.active,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            // Fetch and return updated patient
+            self.read(id).await
+        } else {
+            // Resource doesn't exist - perform create with specified ID
+            let version_id = 1;
+            let last_updated = Utc::now();
+
+            tracing::info!(patient_id = %id, "Creating patient with client-specified ID");
+
+            // Extract search parameters
+            let params = extract_patient_search_params(&content);
+
+            // Insert into current table
+            sqlx::query!(
+                r#"
+                INSERT INTO patient (
+                    id, version_id, last_updated, content,
+                    family_name, given_name, prefix, suffix, name_text,
+                    identifier_system, identifier_value,
+                    birthdate, gender, active
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                "#,
+                id,
+                version_id,
+                last_updated,
+                content,
+                params
+                    .family_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.family_name[..])),
+                params
+                    .given_name
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.given_name[..])),
+                params
+                    .prefix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.prefix[..])),
+                params
+                    .suffix
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.suffix[..])),
+                params
+                    .name_text
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.name_text[..])),
+                params
+                    .identifier_system
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_system[..])),
+                params
+                    .identifier_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.identifier_value[..])),
+                params.birthdate,
+                params.gender,
+                params.active,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            // Fetch and return the created patient
+            self.read(id).await
+        }
+    }
+
     /// Update a patient resource (increment version)
     pub async fn update(&self, id: &Uuid, content: Value) -> Result<Patient> {
         // Validate resource

@@ -1,11 +1,11 @@
 use askama::Template;
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, Uri};
 use serde_json::Value;
 
 // Re-export Template trait for use in handlers
 pub use askama::Template as AskamaTemplate;
 
-/// Determine the preferred response format based on Accept header
+/// Determine the preferred response format based on _format parameter or Accept header
 pub fn preferred_format(headers: &HeaderMap) -> ResponseFormat {
     if let Some(accept) = headers.get("accept") {
         if let Ok(accept_str) = accept.to_str() {
@@ -24,6 +24,23 @@ pub fn preferred_format(headers: &HeaderMap) -> ResponseFormat {
 
     // Default to JSON for API clients
     ResponseFormat::Json
+}
+
+/// Determine the preferred response format considering _format query parameter
+/// FHIR spec: _format parameter overrides Accept header
+pub fn preferred_format_with_query(uri: &Uri, headers: &HeaderMap) -> ResponseFormat {
+    // Check for _format query parameter first (FHIR spec says it overrides Accept header)
+    if let Some(query) = uri.query() {
+        if query.contains("_format=json") || query.contains("_format=application/json") || query.contains("_format=application/fhir+json") {
+            return ResponseFormat::Json;
+        }
+        if query.contains("_format=html") || query.contains("_format=text/html") {
+            return ResponseFormat::Html;
+        }
+    }
+
+    // Fall back to Accept header
+    preferred_format(headers)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
