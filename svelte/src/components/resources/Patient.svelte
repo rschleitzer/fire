@@ -269,6 +269,10 @@
     <button class="btn btn-secondary" on:click={cancel} disabled={saving}>
       Cancel
     </button>
+    {#if resource.id}
+      <a href="/fhir/Patient/{resource.id}/_history" class="link">History</a>
+      <a href="/fhir/Patient/{resource.id}?_format=json" download="patient-{resource.id}.json" class="link">JSON</a>
+    {/if}
   </div>
 
   <table class="grid">
@@ -924,6 +928,19 @@
     display: flex;
     gap: 1rem;
     margin-top: 1rem;
+    align-items: center;
+  }
+
+  .link {
+    color: #3498db;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .link:hover {
+    text-decoration: underline;
   }
 
   .btn {

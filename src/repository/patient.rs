@@ -653,22 +653,27 @@ impl PatientRepository {
         .fetch_all(&self.pool)
         .await?;
 
-        // Try to get current version and add it to history
+        // Try to get current version and add it to history if not already present
         if let Ok(current) = self.read(id).await {
-            // Convert current Patient to PatientHistory format (much simpler now!)
-            let current_as_history = PatientHistory {
-                id: current.id,
-                version_id: current.version_id,
-                last_updated: current.last_updated,
-                content: current.content,
-                history_operation: if current.version_id == 1 {
-                    "CREATE".to_string()
-                } else {
-                    "UPDATE".to_string()
-                },
-                history_timestamp: current.last_updated,
-            };
-            history.insert(0, current_as_history);
+            // Check if current version already exists in history
+            let current_version_exists = history.iter().any(|h| h.version_id == current.version_id);
+
+            if !current_version_exists {
+                // Convert current Patient to PatientHistory format
+                let current_as_history = PatientHistory {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    history_operation: if current.version_id == 1 {
+                        "CREATE".to_string()
+                    } else {
+                        "UPDATE".to_string()
+                    },
+                    history_timestamp: current.last_updated,
+                };
+                history.insert(0, current_as_history);
+            }
         }
 
         if history.is_empty() {

@@ -133,6 +133,30 @@ pub struct ObservationEditTemplate {
     pub resource_json: String,
 }
 
+#[derive(Template)]
+#[template(path = "patient_history.html")]
+pub struct PatientHistoryTemplate {
+    pub id: String,
+    pub history: Vec<HistoryRow>,
+    pub total: usize,
+}
+
+#[derive(Template)]
+#[template(path = "observation_history.html")]
+pub struct ObservationHistoryTemplate {
+    pub id: String,
+    pub history: Vec<HistoryRow>,
+    pub total: usize,
+}
+
+#[derive(Clone)]
+pub struct HistoryRow {
+    pub version_id: String,
+    pub operation: String,
+    pub last_updated: String,
+    pub summary: String,
+}
+
 /// Extract a human-readable name from Patient FHIR JSON
 pub fn extract_patient_name(content: &Value) -> String {
     if let Some(names) = content.get("name").and_then(|n| n.as_array()) {

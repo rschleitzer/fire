@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Observation History - Fire Server{% endblock %}
+
+{% block content %}
+<h2>Observation History: {{ id }}</h2>
+<p style="font-size: 12px; font-family: verdana; line-height: 1.4em; margin-bottom: 10px;">The query returned {{ total }} versions.</p>
+
+<table style="width: auto; margin: 0 0 10px 0;"><tbody><tr>
+<td style="padding: 0;"><a href="/fhir/Observation/{{ id }}">Back to Observation</a></td>
+</tr></tbody></table>
+
+{% if history.len() > 0 %}
+<table class="grid">
+    <colgroup>
+        <col style="width: 100px;">
+        <col style="width: 100px;">
+        <col style="width: 280px;">
+        <col style="width: 250px;">
+    </colgroup>
+    <thead>
+        <tr>
+            <th>Version</th>
+            <th>Operation</th>
+            <th>Summary</th>
+            <th>Last Updated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in history %}
+        <tr>
+            <td><a href="/fhir/Observation/{{ id }}/_history/{{ entry.version_id }}">{{ entry.version_id }}</a></td>
+            <td>{{ entry.operation }}</td>
+            <td>{{ entry.summary }}</td>
+            <td>{{ entry.last_updated }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No history found.</p>
+{% endif %}
+{% endblock %}

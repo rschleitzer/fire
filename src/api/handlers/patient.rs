@@ -237,13 +237,15 @@ pub async fn search_patients(
 pub async fn get_patient_history(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
-) -> Result<Json<Value>> {
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Result<Response> {
     let history = repo.history(&id).await?;
 
     // Build Bundle using efficient string concatenation
     let total = history.len();
     let entries: Vec<String> = history
-        .into_iter()
+        .iter()
         .map(|h| {
             format!(
                 r#"{{"resource":{},"request":{{"method":"{}","url":"Patient/{}"}},"response":{{"status":"200","lastModified":"{}"}}}}"#,
@@ -263,7 +265,33 @@ pub async fn get_patient_history(
 
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
-    Ok(Json(bundle))
+
+    match preferred_format_with_query(&uri, &headers) {
+        ResponseFormat::Html => {
+            // Convert history to HTML table rows
+            let history_rows: Vec<HistoryRow> = history
+                .iter()
+                .map(|h| {
+                    let fhir_json = &h.content;
+                    HistoryRow {
+                        version_id: h.version_id.to_string(),
+                        operation: h.history_operation.clone(),
+                        last_updated: h.last_updated.to_rfc3339(),
+                        summary: extract_patient_name(fhir_json),
+                    }
+                })
+                .collect();
+
+            let template = PatientHistoryTemplate {
+                id: id.to_string(),
+                history: history_rows,
+                total,
+            };
+
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+    }
 }
 
 /// Get specific version of a patient
