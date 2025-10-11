@@ -152,6 +152,25 @@ impl PatientRepository {
             let new_version_id = old_patient.version_id + 1;
             let last_updated = Utc::now();
 
+            tracing::info!(patient_id = %id, old_version = old_patient.version_id, new_version = new_version_id, "Updating existing patient");
+
+            // Clean up any orphaned history records that might conflict (from previous incomplete operations)
+            // This handles the case where a previous operation failed mid-transaction
+            let deleted_rows = sqlx::query!(
+                r#"
+                DELETE FROM patient_history
+                WHERE id = $1 AND version_id >= $2
+                "#,
+                id,
+                old_patient.version_id
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            if deleted_rows.rows_affected() > 0 {
+                tracing::warn!(patient_id = %id, deleted_versions = deleted_rows.rows_affected(), "Cleaned up orphaned history records before update");
+            }
+
             // Inject id and meta into content before storing
             content = crate::models::patient::inject_id_meta(&content, id, new_version_id, &last_updated);
 
@@ -301,6 +320,22 @@ impl PatientRepository {
             let last_updated = Utc::now();
 
             tracing::info!(patient_id = %id, "Creating patient with client-specified ID");
+
+            // Clean up any orphaned history records for this ID (from previous delete)
+            // This handles the case where a resource was deleted but history records remain
+            let deleted_rows = sqlx::query!(
+                r#"
+                DELETE FROM patient_history
+                WHERE id = $1
+                "#,
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            if deleted_rows.rows_affected() > 0 {
+                tracing::info!(patient_id = %id, orphaned_history_records = deleted_rows.rows_affected(), "Cleaned up orphaned history records before creating new resource");
+            }
 
             // Inject id and meta into content before storing
             content = crate::models::patient::inject_id_meta(&content, id, version_id, &last_updated);
