@@ -101,7 +101,7 @@
 
   .nested-table {
     margin: 0;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 
   .grid tbody tr {
@@ -114,37 +114,37 @@
 
   td.prop-name {
     width: 25%;
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     font-weight: 500;
     color: #555;
     vertical-align: top;
     border-right: 1px solid #eee;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 
   td.control {
-    width: 40px;
-    padding: 0.5rem 0.25rem;
+    width: 32px;
+    padding: 0.25rem;
     text-align: center;
     vertical-align: top;
     border-right: 1px solid #eee;
   }
 
   td.value {
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     vertical-align: top;
   }
 
   .btn-tiny {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: 1px solid #999;
     background: #f5f5f5;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     line-height: 1;
-    border-radius: 3px;
+    border-radius: 2px;
   }
 
   .btn-tiny:hover:not(:disabled) {
@@ -157,9 +157,9 @@
   }
 
   .array-item {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
     display: flex;
-    gap: 0.5rem;
+    gap: 0.25rem;
     align-items: flex-start;
   }
 
@@ -176,9 +176,9 @@
 
   input[type="text"] {
     width: 100%;
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     border: 1px solid #ddd;
     border-radius: 3px;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 </style>

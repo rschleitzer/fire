@@ -810,7 +810,7 @@
   .patient {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 1rem;
+    padding: 0;
   }
 
   table.grid {
@@ -818,7 +818,7 @@
     border-collapse: collapse;
     border: 1px solid #ddd;
     background: white;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
   }
 
   table.grid tbody tr {
@@ -831,37 +831,37 @@
 
   td.prop-name {
     width: 20%;
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     font-weight: 500;
     color: #555;
     vertical-align: top;
     border-right: 1px solid #eee;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 
   td.control {
-    width: 40px;
-    padding: 0.5rem 0.25rem;
+    width: 32px;
+    padding: 0.25rem;
     text-align: center;
     vertical-align: top;
     border-right: 1px solid #eee;
   }
 
   td.value {
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     vertical-align: top;
   }
 
   .btn-tiny {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
     padding: 0;
     border: 1px solid #999;
     background: #f5f5f5;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
     line-height: 1;
-    border-radius: 3px;
+    border-radius: 2px;
   }
 
   .btn-tiny:hover:not(:disabled) {
@@ -874,9 +874,9 @@
   }
 
   .array-item {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
     display: flex;
-    gap: 0.5rem;
+    gap: 0.25rem;
     align-items: flex-start;
   }
 
@@ -886,7 +886,7 @@
 
   .nested-table {
     margin: 0;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 
   .nested-table td.prop-name {
@@ -906,10 +906,10 @@
   input[type="number"],
   select {
     width: 100%;
-    padding: 0.5rem;
+    padding: 0.25rem 0.5rem;
     border: 1px solid #ddd;
     border-radius: 3px;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
   }
 
   input[type="checkbox"] {
@@ -917,27 +917,30 @@
   }
 
   .error-message {
-    padding: 1rem;
+    padding: 0.5rem;
     background: #fee;
     border: 1px solid #fcc;
-    border-radius: 4px;
+    border-radius: 3px;
     color: #c00;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.75rem;
   }
 
   .button-group {
     display: flex;
-    gap: 1rem;
-    margin-top: 1rem;
+    gap: 0.5rem;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
     align-items: center;
   }
 
   .link {
     color: #3498db;
     text-decoration: none;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+    border-radius: 3px;
     font-weight: 500;
+    font-size: 0.75rem;
   }
 
   .link:hover {
@@ -945,12 +948,12 @@
   }
 
   .btn {
-    padding: 0.75rem 1.5rem;
+    padding: 0.4rem 0.8rem;
     border: none;
-    border-radius: 4px;
+    border-radius: 3px;
     font-weight: 600;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.75rem;
   }
 
   .btn:disabled {
