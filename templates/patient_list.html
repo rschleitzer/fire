@@ -4,12 +4,12 @@
 
 {% block content %}
 <p style="font-size: 12px; font-family: verdana; line-height: 1.4em; margin-bottom: 10px;">The query returned {{ total }} resources.</p>
-<table style="width: auto; margin: 0 0 5px 0;"><tbody><tr>
-<td style="padding: 0;"><input type='button' style='color: red; padding: 3px 10px;' value='Delete selected' onclick='deleteSelected(event)'></input></td>
-<td style="padding: 0 0 0 5px;"><input type='button' style='color: red; padding: 3px 10px;' value='Delete all' onclick='deleteAll(event)'></input></td>
-</tr></tbody></table>
-<table style="width: auto; margin: 0;"><tbody><tr>
-<td style="padding: 0;"><a href="{{ current_url }}&_format=json" download="Bundle.json" style="font-size: 12px; font-family: verdana;">JSON</a></td><td style="padding: 0 0 0 5px;"><a href="{{ current_url }}&_format=xml" download="Bundle.xml" style="font-size: 12px; font-family: verdana;">XML</a></td></tr></tbody></table>
+<div class="button-group">
+    <button class="btn btn-warning" onclick="deleteSelected(event)">Delete selected</button>
+    <button class="btn btn-danger" onclick="deleteAll(event)">Delete all</button>
+    <a href="{{ current_url }}&_format=json" download="Bundle.json" class="link">JSON</a>
+    <a href="{{ current_url }}&_format=xml" download="Bundle.xml" class="link">XML</a>
+</div>
 
 {% if patients.len() > 0 %}
 <table class="grid">

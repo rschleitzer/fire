@@ -247,6 +247,59 @@
         table.grid td a:hover {
             text-decoration: underline;
         }
+
+        .button-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+            align-items: center;
+        }
+
+        .link {
+            color: #3498db;
+            text-decoration: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-weight: 500;
+            font-size: 0.75rem;
+        }
+
+        .link:hover {
+            text-decoration: underline;
+        }
+
+        .btn {
+            padding: 0.4rem 0.8rem;
+            border: none;
+            border-radius: 3px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #c0392b;
+        }
+
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+
+        .btn-warning:hover:not(:disabled) {
+            background: #e67e22;
+        }
     </style>
     {% block extra_head %}{% endblock %}
 </head>
