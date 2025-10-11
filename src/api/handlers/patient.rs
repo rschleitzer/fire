@@ -8,7 +8,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::api::xml_serializer::json_to_xml;
@@ -102,14 +101,10 @@ pub async fn create_patient(
 /// Read a patient by ID
 pub async fn read_patient(
     State(repo): State<SharedPatientRepo>,
-    Path(id_str): Path<String>,
+    Path(id): Path<String>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    // Invalid IDs should return 404 per FHIR spec, not 400
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::NotFound)?;
-
     // Try to read the patient - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(patient) => {
@@ -119,7 +114,7 @@ pub async fn read_patient(
             match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
                     let template = PatientEditTemplate {
-                        id: id.to_string(),
+                        id: id.clone(),
                         resource_json: serde_json::to_string(&patient.content)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
@@ -149,7 +144,7 @@ pub async fn read_patient(
                 ResponseFormat::Html => {
                     let empty_patient = serde_json::json!({
                         "resourceType": "Patient",
-                        "id": id.to_string(),
+                        "id": id.clone(),
                         "active": true,
                         "name": [],
                         "telecom": [],
@@ -157,7 +152,7 @@ pub async fn read_patient(
                         "identifier": []
                     });
                     let template = PatientEditTemplate {
-                        id: id.to_string(),
+                        id: id.clone(),
                         resource_json: serde_json::to_string(&empty_patient)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
@@ -172,51 +167,63 @@ pub async fn read_patient(
     }
 }
 
-/// Update a patient (JSON) - Uses update semantics with version checking
+/// Update a patient (JSON) - Uses upsert semantics per FHIR spec (create if not exists)
 pub async fn update_patient(
     State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     headers: HeaderMap,
     Json(content): Json<Value>,
-) -> Result<(StatusCode, Json<Value>)> {
-    // Check if resource exists first
+) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
+    // Check if resource exists first for If-Match version checking
     let existing = repo.read(&id).await;
 
-    if existing.is_err() {
-        // Resource doesn't exist - return 404 per FHIR spec
-        return Err(crate::error::FhirError::NotFound);
-    }
+    // Check If-Match header for version conflict (only if resource exists)
+    if let Ok(existing_patient) = &existing {
+        if let Some(if_match) = headers.get("if-match") {
+            let if_match_str = if_match.to_str()
+                .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-Match header".to_string()))?;
 
-    let existing_patient = existing.unwrap();
+            // Parse ETag format: W/"version" or just "version"
+            let requested_version = if_match_str
+                .trim_start_matches("W/")
+                .trim_matches('"')
+                .parse::<i32>()
+                .map_err(|_| crate::error::FhirError::BadRequest("Invalid version in If-Match header".to_string()))?;
 
-    // Check If-Match header for version conflict
-    if let Some(if_match) = headers.get("if-match") {
-        let if_match_str = if_match.to_str()
-            .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-Match header".to_string()))?;
-
-        // Parse ETag format: W/"version" or just "version"
-        let requested_version = if_match_str
-            .trim_start_matches("W/")
-            .trim_matches('"')
-            .parse::<i32>()
-            .map_err(|_| crate::error::FhirError::BadRequest("Invalid version in If-Match header".to_string()))?;
-
-        if requested_version != existing_patient.version_id {
-            // Version conflict - return 409
-            return Err(crate::error::FhirError::Conflict(
-                format!("Version conflict: expected {}, got {}", existing_patient.version_id, requested_version)
-            ));
+            if requested_version != existing_patient.version_id {
+                // Version conflict - return 409
+                return Err(crate::error::FhirError::Conflict(
+                    format!("Version conflict: expected {}, got {}", existing_patient.version_id, requested_version)
+                ));
+            }
         }
     }
 
-    let patient = repo.update(&id, content).await?;
-    Ok((StatusCode::OK, Json(patient.content)))
+    // Use upsert to handle both create and update cases per FHIR PUT semantics
+    let patient = repo.upsert(&id, content).await?;
+
+    // Return 201 if newly created, 200 if updated
+    let status = if existing.is_err() {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+
+    // Build Location header per FHIR spec
+    let location = format!("/fhir/Patient/{}", patient.id);
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
+        axum::http::header::LOCATION,
+        location.parse().unwrap()
+    );
+
+    Ok((status, response_headers, Json(patient.content)))
 }
 
 /// Update a patient (HTML form) - Uses upsert semantics per FHIR spec
 pub async fn update_patient_form(
     State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     Form(form_data): Form<PatientFormData>,
 ) -> Result<Redirect> {
     // Convert form data to FHIR JSON
@@ -240,7 +247,7 @@ pub async fn update_patient_form(
 /// Delete a patient
 pub async fn delete_patient(
     State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode> {
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -362,7 +369,7 @@ pub async fn search_patients(
                 .iter()
                 .map(|p| {
                     PatientRow {
-                        id: p.id.to_string(),
+                        id: p.id.clone(),
                         version_id: p.version_id.to_string(),
                         name: extract_patient_name(&p.content),
                         gender: p.content
@@ -407,7 +414,7 @@ pub async fn search_patients(
 /// Get patient history
 pub async fn get_patient_history(
     State(repo): State<SharedPatientRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     uri: axum::http::Uri,
@@ -460,7 +467,7 @@ pub async fn get_patient_history(
                 .collect();
 
             let template = PatientHistoryTemplate {
-                id: id.to_string(),
+                id: id.clone(),
                 history: history_rows,
                 total,
             };
@@ -537,7 +544,7 @@ pub async fn get_patient_type_history(
 /// Get specific version of a patient
 pub async fn read_patient_version(
     State(repo): State<SharedPatientRepo>,
-    Path((id, version_id)): Path<(Uuid, i32)>,
+    Path((id, version_id)): Path<(String, i32)>,
 ) -> Result<(HeaderMap, Json<Value>)> {
     let patient = repo.read_version(&id, version_id).await?;
 
@@ -561,9 +568,7 @@ pub async fn delete_patients(
 
         // Delete each patient
         for id_str in ids {
-            if let Ok(id) = Uuid::parse_str(id_str.trim()) {
-                repo.delete(&id).await?;
-            }
+            repo.delete(id_str.trim()).await?;
         }
     } else {
         // Delete all patients matching the search criteria
@@ -580,7 +585,7 @@ pub async fn delete_patients(
 /// Rollback a patient to a specific version (destructive operation for dev/test)
 pub async fn rollback_patient(
     State(repo): State<SharedPatientRepo>,
-    Path((id, version)): Path<(Uuid, i32)>,
+    Path((id, version)): Path<(String, i32)>,
 ) -> Result<StatusCode> {
     repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)

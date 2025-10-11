@@ -1,7 +1,6 @@
 use axum::{extract::State, Json};
 use serde_json::Value;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
 use crate::repository::{ObservationRepository, PatientRepository};
@@ -40,7 +39,6 @@ pub async fn process_bundle(
         .ok_or_else(|| FhirError::BadRequest("Bundle must have entries".to_string()))?;
 
     let mut response_entries = Vec::new();
-    let mut has_error = false;
 
     // Process each entry
     for entry in entries {
@@ -49,8 +47,6 @@ pub async fn process_bundle(
         let response = match process_entry(&state, entry).await {
             Ok(resp) => resp,
             Err(err) => {
-                has_error = true;
-
                 // For transactions, return error immediately
                 if bundle_type == "transaction" {
                     return Err(err);
@@ -239,12 +235,11 @@ async fn process_put(
     }
 
     let resource_type = parts[0];
-    let id = Uuid::parse_str(parts[1])
-        .map_err(|_| FhirError::BadRequest(format!("Invalid UUID: {}", parts[1])))?;
+    let id = parts[1];
 
     match resource_type {
         "Patient" => {
-            let patient = state.patient_repo.update(&id, resource.clone()).await?;
+            let patient = state.patient_repo.update(id, resource.clone()).await?;
             Ok(serde_json::json!({
                 "response": {
                     "status": "200 OK",
@@ -256,7 +251,7 @@ async fn process_put(
             }))
         }
         "Observation" => {
-            let observation = state.observation_repo.update(&id, resource.clone()).await?;
+            let observation = state.observation_repo.update(id, resource.clone()).await?;
             Ok(serde_json::json!({
                 "response": {
                     "status": "200 OK",
@@ -331,12 +326,11 @@ async fn process_get(state: &Arc<BundleState>, url: &str) -> Result<Value> {
         }
 
         let resource_type = parts[0];
-        let id = Uuid::parse_str(parts[1])
-            .map_err(|_| FhirError::NotFound)?;  // Treat invalid UUID as NotFound
+        let id = parts[1];
 
         match resource_type {
             "Patient" => {
-                let patient = state.patient_repo.read(&id).await?;
+                let patient = state.patient_repo.read(id).await?;
                 Ok(serde_json::json!({
                     "response": {
                         "status": "200 OK",
@@ -347,7 +341,7 @@ async fn process_get(state: &Arc<BundleState>, url: &str) -> Result<Value> {
                 }))
             }
             "Observation" => {
-                let observation = state.observation_repo.read(&id).await?;
+                let observation = state.observation_repo.read(id).await?;
                 Ok(serde_json::json!({
                     "response": {
                         "status": "200 OK",
@@ -376,12 +370,11 @@ async fn process_delete(state: &Arc<BundleState>, url: &str) -> Result<Value> {
     }
 
     let resource_type = parts[0];
-    let id = Uuid::parse_str(parts[1])
-        .map_err(|_| FhirError::BadRequest(format!("Invalid UUID: {}", parts[1])))?;
+    let id = parts[1];
 
     match resource_type {
         "Patient" => {
-            state.patient_repo.delete(&id).await?;
+            state.patient_repo.delete(id).await?;
             Ok(serde_json::json!({
                 "response": {
                     "status": "204 No Content"
@@ -389,7 +382,7 @@ async fn process_delete(state: &Arc<BundleState>, url: &str) -> Result<Value> {
             }))
         }
         "Observation" => {
-            state.observation_repo.delete(&id).await?;
+            state.observation_repo.delete(id).await?;
             Ok(serde_json::json!({
                 "response": {
                     "status": "204 No Content"

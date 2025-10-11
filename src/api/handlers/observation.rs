@@ -7,7 +7,6 @@ use axum::{
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 use crate::api::content_negotiation::*;
 use crate::api::xml_serializer::json_to_xml;
@@ -95,14 +94,10 @@ pub async fn create_observation(
 /// Read an observation by ID
 pub async fn read_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id_str): Path<String>,
+    Path(id): Path<String>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    // Invalid IDs should return 404 per FHIR spec, not 400
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::NotFound)?;
-
     // Try to read the observation - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(observation) => {
@@ -112,7 +107,7 @@ pub async fn read_observation(
             match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
                     let template = ObservationEditTemplate {
-                        id: id.to_string(),
+                        id: id.clone(),
                         resource_json: serde_json::to_string(&observation.content)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
@@ -142,14 +137,14 @@ pub async fn read_observation(
                 ResponseFormat::Html => {
                     let empty_observation = serde_json::json!({
                         "resourceType": "Observation",
-                        "id": id.to_string(),
+                        "id": id.clone(),
                         "status": "final",
                         "code": { "text": "", "coding": [] },
                         "subject": { "reference": "", "display": "" },
                         "valueQuantity": { "value": null, "unit": "", "system": "http://unitsofmeasure.org", "code": "" }
                     });
                     let template = ObservationEditTemplate {
-                        id: id.to_string(),
+                        id: id.clone(),
                         resource_json: serde_json::to_string(&empty_observation)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
@@ -167,14 +162,10 @@ pub async fn read_observation(
 /// Update an observation - Uses update semantics with version checking
 pub async fn update_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id_str): Path<String>,
+    Path(id): Path<String>,
     headers: HeaderMap,
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>)> {
-    // Invalid IDs should return 404 per FHIR spec, not 400
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::NotFound)?;
-
     // Check if resource exists first
     let existing = repo.read(&id).await;
 
@@ -212,7 +203,7 @@ pub async fn update_observation(
 /// Update an observation (HTML form)
 pub async fn update_observation_form(
     State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     Form(form_data): Form<ObservationFormData>,
 ) -> Result<Redirect> {
     // Convert form data to FHIR JSON
@@ -238,12 +229,8 @@ pub async fn update_observation_form(
 /// Delete an observation
 pub async fn delete_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id_str): Path<String>,
+    Path(id): Path<String>,
 ) -> Result<StatusCode> {
-    // Invalid IDs should return 404 per FHIR spec, not 400
-    let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::NotFound)?;
-
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -251,7 +238,7 @@ pub async fn delete_observation(
 /// Get observation history
 pub async fn get_observation_history(
     State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
@@ -298,7 +285,7 @@ pub async fn get_observation_history(
                 .collect();
 
             let template = ObservationHistoryTemplate {
-                id: id.to_string(),
+                id: id.clone(),
                 history: history_rows,
                 total,
             };
@@ -320,7 +307,7 @@ pub async fn get_observation_history(
 /// Get specific version of an observation
 pub async fn read_observation_version(
     State(repo): State<SharedObservationRepo>,
-    Path((id, version_id)): Path<(Uuid, i32)>,
+    Path((id, version_id)): Path<(String, i32)>,
 ) -> Result<(HeaderMap, Json<Value>)> {
     let observation = repo.read_version(&id, version_id).await?;
 
@@ -344,9 +331,7 @@ pub async fn delete_observations(
 
         // Delete each observation
         for id_str in ids {
-            if let Ok(id) = Uuid::parse_str(id_str.trim()) {
-                repo.delete(&id).await?;
-            }
+            repo.delete(id_str.trim()).await?;
         }
     } else {
         // Delete all observations matching the search criteria
@@ -363,7 +348,7 @@ pub async fn delete_observations(
 /// Rollback an observation to a specific version (destructive operation for dev/test)
 pub async fn rollback_observation(
     State(repo): State<SharedObservationRepo>,
-    Path((id, version)): Path<(Uuid, i32)>,
+    Path((id, version)): Path<(String, i32)>,
 ) -> Result<StatusCode> {
     repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -398,7 +383,7 @@ pub async fn search_observations(
     if let Some(include_param) = params.get("_include") {
         if include_param == "Observation:patient" || include_param == "Observation:subject" {
             // Collect unique patient IDs from observations
-            let mut patient_ids = std::collections::HashSet::new();
+            let mut patient_ids = std::collections::HashSet::<String>::new();
             for obs in &observations {
                 // Extract patient reference from content JSON
                 if let Some(patient_ref) = obs
@@ -408,9 +393,7 @@ pub async fn search_observations(
                     .and_then(|r| r.as_str())
                 {
                     if let Some(id_str) = patient_ref.strip_prefix("Patient/") {
-                        if let Ok(patient_id) = Uuid::parse_str(id_str) {
-                            patient_ids.insert(patient_id);
-                        }
+                        patient_ids.insert(id_str.to_string());
                     }
                 }
             }
@@ -500,7 +483,7 @@ pub async fn search_observations(
                 .iter()
                 .map(|obs| {
                     ObservationRow {
-                        id: obs.id.to_string(),
+                        id: obs.id.clone(),
                         version_id: obs.version_id.to_string(),
                         code: extract_observation_code(&obs.content),
                         status: obs.content

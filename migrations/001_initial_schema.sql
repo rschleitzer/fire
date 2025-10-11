@@ -1,6 +1,6 @@
 -- Create patient current table
 CREATE TABLE patient (
-    id UUID PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     version_id INTEGER NOT NULL DEFAULT 1,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     content JSONB NOT NULL,
@@ -35,7 +35,7 @@ CREATE INDEX idx_patient_content ON patient USING GIN (content);
 
 -- Create patient history table
 CREATE TABLE patient_history (
-    id UUID NOT NULL,
+    id TEXT NOT NULL,
     version_id INTEGER NOT NULL,
     last_updated TIMESTAMPTZ NOT NULL,
     content JSONB NOT NULL,
@@ -69,7 +69,7 @@ CREATE INDEX idx_patient_history_content ON patient_history USING GIN (content);
 
 -- Create observation current table
 CREATE TABLE observation (
-    id UUID PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     version_id INTEGER NOT NULL DEFAULT 1,
     last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     content JSONB NOT NULL,
@@ -120,7 +120,7 @@ CREATE INDEX idx_observation_content ON observation USING GIN (content);
 
 -- Create observation history table
 CREATE TABLE observation_history (
-    id UUID NOT NULL,
+    id TEXT NOT NULL,
     version_id INTEGER NOT NULL,
     last_updated TIMESTAMPTZ NOT NULL,
     content JSONB NOT NULL,

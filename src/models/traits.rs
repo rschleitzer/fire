@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use uuid::Uuid;
 
 /// Trait for FHIR resources that support versioning
 #[async_trait]
@@ -12,7 +11,7 @@ pub trait VersionedResource: Sized + Send + Sync {
     const TABLE_NAME: &'static str;
     const HISTORY_TABLE_NAME: &'static str;
 
-    fn get_id(&self) -> &Uuid;
+    fn get_id(&self) -> &String;
     fn get_version_id(&self) -> i32;
     fn get_last_updated(&self) -> &DateTime<Utc>;
     fn get_content(&self) -> &Value;

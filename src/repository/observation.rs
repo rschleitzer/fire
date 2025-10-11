@@ -24,7 +24,7 @@ impl ObservationRepository {
         // Validate resource
         validate_observation(&content)?;
 
-        let id = Uuid::new_v4();
+        let id = Uuid::new_v4().to_string();
         let version_id = 1;
         let last_updated = Utc::now();
 
@@ -94,7 +94,7 @@ impl ObservationRepository {
     }
 
     /// Read current version of an observation (returns raw JSON)
-    pub async fn read(&self, id: &Uuid) -> Result<Observation> {
+    pub async fn read(&self, id: &str) -> Result<Observation> {
         let observation = sqlx::query_as!(
             Observation,
             r#"
@@ -114,7 +114,7 @@ impl ObservationRepository {
     }
 
     /// Delete an observation (hard delete)
-    pub async fn delete(&self, id: &Uuid) -> Result<()> {
+    pub async fn delete(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Get current observation (to store in history)
@@ -196,7 +196,7 @@ impl ObservationRepository {
     }
 
     /// Update an observation resource (increment version)
-    pub async fn update(&self, id: &Uuid, mut content: Value) -> Result<Observation> {
+    pub async fn update(&self, id: &str, mut content: Value) -> Result<Observation> {
         // Validate resource
         validate_observation(&content)?;
 
@@ -374,7 +374,7 @@ impl ObservationRepository {
     }
 
     /// Get all versions of an observation from history (includes current version if exists)
-    pub async fn history(&self, id: &Uuid) -> Result<Vec<ObservationHistory>> {
+    pub async fn history(&self, id: &str) -> Result<Vec<ObservationHistory>> {
         let mut history = sqlx::query_as!(
             ObservationHistory,
             r#"
@@ -422,7 +422,7 @@ impl ObservationRepository {
     }
 
     /// Read a specific version from history (checks current version first)
-    pub async fn read_version(&self, id: &Uuid, version_id: i32) -> Result<ObservationHistory> {
+    pub async fn read_version(&self, id: &str, version_id: i32) -> Result<ObservationHistory> {
         // Check if requested version is the current version
         if let Ok(current) = self.read(id).await {
             if current.version_id == version_id {
@@ -580,7 +580,7 @@ impl ObservationRepository {
     }
 
     /// Read a patient by ID (for _include support)
-    pub async fn read_patient(&self, id: &Uuid) -> Result<Patient> {
+    pub async fn read_patient(&self, id: &str) -> Result<Patient> {
         let patient = sqlx::query_as!(
             Patient,
             r#"
@@ -601,7 +601,7 @@ impl ObservationRepository {
 
     /// Rollback an observation to a specific version (deletes all versions >= rollback_to_version)
     /// This is a destructive operation for dev/test purposes only
-    pub async fn rollback(&self, id: &Uuid, rollback_to_version: i32) -> Result<()> {
+    pub async fn rollback(&self, id: &str, rollback_to_version: i32) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Get all version IDs for this observation from history

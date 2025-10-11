@@ -26,7 +26,7 @@ impl PatientRepository {
         // Validate resource
         validate_patient(&content)?;
 
-        let id = Uuid::new_v4();
+        let id = Uuid::new_v4().to_string();
         let version_id = 1;
         let last_updated = Utc::now();
 
@@ -104,7 +104,7 @@ impl PatientRepository {
     }
 
     /// Read current version of a patient (returns raw JSON)
-    pub async fn read(&self, id: &Uuid) -> Result<Patient> {
+    pub async fn read(&self, id: &str) -> Result<Patient> {
         let patient = sqlx::query_as!(
             Patient,
             r#"
@@ -125,7 +125,7 @@ impl PatientRepository {
 
     /// Upsert a patient resource with specific ID (FHIR-compliant PUT)
     /// Creates with client-specified ID if doesn't exist, updates if exists
-    pub async fn upsert(&self, id: &Uuid, mut content: Value) -> Result<Patient> {
+    pub async fn upsert(&self, id: &str, mut content: Value) -> Result<Patient> {
         // Validate resource
         validate_patient(&content)?;
 
@@ -373,7 +373,7 @@ impl PatientRepository {
     }
 
     /// Update a patient resource (increment version)
-    pub async fn update(&self, id: &Uuid, mut content: Value) -> Result<Patient> {
+    pub async fn update(&self, id: &str, mut content: Value) -> Result<Patient> {
         // Validate resource
         validate_patient(&content)?;
 
@@ -545,7 +545,7 @@ impl PatientRepository {
     }
 
     /// Delete a patient resource (hard delete)
-    pub async fn delete(&self, id: &Uuid) -> Result<()> {
+    pub async fn delete(&self, id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Get current patient (to store in history)
@@ -648,7 +648,7 @@ impl PatientRepository {
     }
 
     /// Get all versions of a patient from history (includes current version if exists)
-    pub async fn history(&self, id: &Uuid, count: Option<i64>) -> Result<Vec<PatientHistory>> {
+    pub async fn history(&self, id: &str, count: Option<i64>) -> Result<Vec<PatientHistory>> {
         // Use LIMIT if count is provided, otherwise fetch all
         let mut history = if let Some(limit) = count {
             sqlx::query_as!(
@@ -723,7 +723,7 @@ impl PatientRepository {
     }
 
     /// Read a specific version from history (checks current version first)
-    pub async fn read_version(&self, id: &Uuid, version_id: i32) -> Result<PatientHistory> {
+    pub async fn read_version(&self, id: &str, version_id: i32) -> Result<PatientHistory> {
         // Check if requested version is the current version
         if let Ok(current) = self.read(id).await {
             if current.version_id == version_id {
@@ -1210,7 +1210,7 @@ impl PatientRepository {
     /// Find observations that reference a specific patient (for _revinclude support)
     pub async fn find_observations_by_patient(
         &self,
-        patient_id: &Uuid,
+        patient_id: &str,
     ) -> Result<Vec<Observation>> {
         let patient_ref = format!("Patient/{}", patient_id);
 
@@ -1233,7 +1233,7 @@ impl PatientRepository {
 
     /// Rollback a patient to a specific version (deletes all versions >= rollback_to_version)
     /// This is a destructive operation for dev/test purposes only
-    pub async fn rollback(&self, id: &Uuid, rollback_to_version: i32) -> Result<()> {
+    pub async fn rollback(&self, id: &str, rollback_to_version: i32) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
         // Get all version IDs for this patient from history

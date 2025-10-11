@@ -2,13 +2,12 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
-use uuid::Uuid;
 
 use super::traits::VersionedResource;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Patient {
-    pub id: Uuid,
+    pub id: String,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
@@ -17,7 +16,7 @@ pub struct Patient {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PatientHistory {
-    pub id: Uuid,
+    pub id: String,
     pub version_id: i32,
     pub last_updated: DateTime<Utc>,
     #[serde(flatten)]
@@ -35,7 +34,7 @@ impl VersionedResource for Patient {
     const TABLE_NAME: &'static str = "patient";
     const HISTORY_TABLE_NAME: &'static str = "patient_history";
 
-    fn get_id(&self) -> &Uuid {
+    fn get_id(&self) -> &String {
         &self.id
     }
 
@@ -54,7 +53,7 @@ impl VersionedResource for Patient {
 
 /// Inject id and meta fields into a FHIR resource
 /// This is used at storage time to ensure all stored resources have complete id/meta
-pub fn inject_id_meta(content: &Value, id: &Uuid, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
+pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
     if let Some(content_obj) = content.as_object() {
         // Create new object with fields in FHIR-standard order
         let mut resource = serde_json::Map::new();
@@ -65,7 +64,7 @@ pub fn inject_id_meta(content: &Value, id: &Uuid, version_id: i32, last_updated:
         }
 
         // 2. id (always inject)
-        resource.insert("id".to_string(), serde_json::json!(id.to_string()));
+        resource.insert("id".to_string(), serde_json::json!(id));
 
         // 3. meta (always inject)
         resource.insert("meta".to_string(), serde_json::json!({
