@@ -40,6 +40,14 @@ pub async fn process_bundle(
 
     let mut response_entries = Vec::new();
 
+    // For transactions, validate all entries first before executing any
+    // This allows proper rollback behavior
+    if bundle_type == "transaction" {
+        for entry in entries {
+            validate_entry(entry)?;
+        }
+    }
+
     // Process each entry
     for entry in entries {
         // For batch: continue on errors, wrapping them in response entries
@@ -68,6 +76,92 @@ pub async fn process_bundle(
     });
 
     Ok(Json(response_bundle))
+}
+
+/// Validate an entry without executing it (for transaction pre-validation)
+fn validate_entry(entry: &Value) -> Result<()> {
+    let request = entry
+        .get("request")
+        .ok_or_else(|| FhirError::BadRequest("Entry must have a request".to_string()))?;
+
+    let method = request
+        .get("method")
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| FhirError::BadRequest("Request must have a method".to_string()))?;
+
+    let url = request
+        .get("url")
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| FhirError::BadRequest("Request must have a url".to_string()))?;
+
+    let resource = entry.get("resource");
+
+    // Validate based on method
+    match method {
+        "POST" | "PUT" => {
+            let resource = resource
+                .ok_or_else(|| FhirError::BadRequest(format!("{} request must have a resource", method)))?;
+
+            let resource_type = resource
+                .get("resourceType")
+                .and_then(|r| r.as_str())
+                .ok_or_else(|| FhirError::BadRequest("Resource must have resourceType".to_string()))?;
+
+            // Validate the resource structure
+            match resource_type {
+                "Patient" => {
+                    crate::services::validate_patient(resource)?;
+                }
+                "Observation" => {
+                    crate::services::validate_observation(resource)?;
+                }
+                _ => {
+                    return Err(FhirError::BadRequest(format!(
+                        "Unsupported resource type: {}",
+                        resource_type
+                    )));
+                }
+            }
+
+            // For POST, validate URL matches resource type
+            if method == "POST" {
+                if url != resource_type {
+                    return Err(FhirError::BadRequest(format!(
+                        "URL '{}' does not match resource type '{}'",
+                        url, resource_type
+                    )));
+                }
+            }
+
+            // For PUT, validate URL format
+            if method == "PUT" {
+                let parts: Vec<&str> = url.split('/').collect();
+                if parts.len() != 2 {
+                    return Err(FhirError::BadRequest(format!(
+                        "Invalid URL format for PUT: {}",
+                        url
+                    )));
+                }
+                if parts[0] != resource_type {
+                    return Err(FhirError::BadRequest(format!(
+                        "URL resource type '{}' does not match resource type '{}'",
+                        parts[0], resource_type
+                    )));
+                }
+            }
+        }
+        "GET" | "DELETE" => {
+            // These don't need resource validation
+        }
+        _ => {
+            return Err(FhirError::BadRequest(format!(
+                "Unsupported method: {}",
+                method
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 async fn process_entry(state: &Arc<BundleState>, entry: &Value) -> Result<Value> {
