@@ -50,8 +50,6 @@ Each resource has: `create()`, `read()`, `read_version()`, `update()`, `delete()
 - FHIR R5 fields (triggeredBy, focus, bodyStructure)
 
 ### 🚧 Pending
-- Advanced search (modifiers, prefixes, chaining)
-- `_include`, `_revinclude`, `_summary`, `_elements`
 - Code generation for 140+ FHIR resources
 - Authentication/Authorization (SMART on FHIR)
 - Rate limiting, audit logging
