@@ -10,6 +10,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api::content_negotiation::*;
+use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::repository::ObservationRepository;
 use askama::Template;
@@ -41,6 +42,7 @@ pub async fn read_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id_str): Path<String>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Result<Response> {
     let id = Uuid::parse_str(&id_str)
         .map_err(|_| crate::error::FhirError::BadRequest(format!("Invalid observation ID: {}", id_str)))?;
@@ -50,7 +52,7 @@ pub async fn read_observation(
         Ok(observation) => {
             let fhir_json = observation.to_fhir_json();
 
-            match preferred_format(&headers) {
+            match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
                     let template = ObservationEditTemplate {
                         id: id.to_string(),
@@ -59,6 +61,14 @@ pub async fn read_observation(
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+                ResponseFormat::Xml => {
+                    let xml_string = json_to_xml(&fhir_json)
+                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+                    Ok((
+                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        xml_string
+                    ).into_response())
+                }
             }
         }
         Err(crate::error::FhirError::NotFound) => {
@@ -72,7 +82,7 @@ pub async fn read_observation(
                 "valueQuantity": { "value": null, "unit": "", "system": "http://unitsofmeasure.org", "code": "" }
             });
 
-            match preferred_format(&headers) {
+            match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
                     let template = ObservationEditTemplate {
                         id: id.to_string(),
@@ -81,6 +91,14 @@ pub async fn read_observation(
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => Ok(Json(empty_observation).into_response()),
+                ResponseFormat::Xml => {
+                    let xml_string = json_to_xml(&empty_observation)
+                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+                    Ok((
+                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        xml_string
+                    ).into_response())
+                }
             }
         }
         Err(e) => Err(e),
@@ -190,6 +208,14 @@ pub async fn get_observation_history(
             Ok(Html(template.render().unwrap()).into_response())
         }
         ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
     }
 }
 
@@ -244,6 +270,7 @@ pub async fn search_observations(
     State(repo): State<SharedObservationRepo>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
+    uri: axum::http::Uri,
 ) -> Result<Response> {
     let include_total = params.get("_total").is_some_and(|v| v == "accurate");
     let (observations, total) = repo.search(&params, include_total).await?;
@@ -309,7 +336,7 @@ pub async fn search_observations(
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
-    match preferred_format(&headers) {
+    match preferred_format_with_query(&uri, &headers) {
         ResponseFormat::Html => {
             // Convert observations to HTML table rows
             let observation_rows: Vec<ObservationRow> = observations
@@ -351,6 +378,14 @@ pub async fn search_observations(
             Ok(Html(template.render().unwrap()).into_response())
         }
         ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
     }
 }
 

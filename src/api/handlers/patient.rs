@@ -11,6 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::api::content_negotiation::{*, preferred_format_with_query};
+use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::repository::PatientRepository;
 use askama::Template;
@@ -60,6 +61,14 @@ pub async fn read_patient(
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+                ResponseFormat::Xml => {
+                    let xml_string = json_to_xml(&fhir_json)
+                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+                    Ok((
+                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        xml_string
+                    ).into_response())
+                }
             }
         }
         Err(crate::error::FhirError::NotFound) => {
@@ -83,6 +92,14 @@ pub async fn read_patient(
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => Ok(Json(empty_patient).into_response()),
+                ResponseFormat::Xml => {
+                    let xml_string = json_to_xml(&empty_patient)
+                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+                    Ok((
+                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        xml_string
+                    ).into_response())
+                }
             }
         }
         Err(e) => Err(e),
@@ -230,6 +247,14 @@ pub async fn search_patients(
             Ok(Html(template.render().unwrap()).into_response())
         }
         ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
     }
 }
 
@@ -291,6 +316,14 @@ pub async fn get_patient_history(
             Ok(Html(template.render().unwrap()).into_response())
         }
         ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
     }
 }
 

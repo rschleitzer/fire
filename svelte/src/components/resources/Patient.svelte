@@ -272,6 +272,7 @@
     {#if resource.id}
       <a href="/fhir/Patient/{resource.id}/_history" class="link">History</a>
       <a href="/fhir/Patient/{resource.id}?_format=json" download="patient-{resource.id}.json" class="link">JSON</a>
+      <a href="/fhir/Patient/{resource.id}?_format=xml" download="patient-{resource.id}.xml" class="link">XML</a>
     {/if}
   </div>
 

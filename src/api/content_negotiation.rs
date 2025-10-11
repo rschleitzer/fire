@@ -13,6 +13,13 @@ pub fn preferred_format(headers: &HeaderMap) -> ResponseFormat {
             if accept_str.contains("text/html") || accept_str.contains("text/*") {
                 return ResponseFormat::Html;
             }
+            // Check for XML request
+            if accept_str.contains("application/xml")
+                || accept_str.contains("application/fhir+xml")
+                || accept_str.contains("text/xml")
+            {
+                return ResponseFormat::Xml;
+            }
             // Check for explicit JSON request
             if accept_str.contains("application/json")
                 || accept_str.contains("application/fhir+json")
@@ -37,6 +44,9 @@ pub fn preferred_format_with_query(uri: &Uri, headers: &HeaderMap) -> ResponseFo
         if query.contains("_format=html") || query.contains("_format=text/html") {
             return ResponseFormat::Html;
         }
+        if query.contains("_format=xml") || query.contains("_format=application/xml") || query.contains("_format=application/fhir+xml") {
+            return ResponseFormat::Xml;
+        }
     }
 
     // Fall back to Accept header
@@ -47,6 +57,7 @@ pub fn preferred_format_with_query(uri: &Uri, headers: &HeaderMap) -> ResponseFo
 pub enum ResponseFormat {
     Html,
     Json,
+    Xml,
 }
 
 // Template structs for rendering HTML
