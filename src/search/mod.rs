@@ -37,6 +37,8 @@ pub enum SearchCondition {
     Active(bool),
     ActiveNot(bool), // :not modifier - NOT equal
     ActiveMissing(bool), // true = IS NULL, false = IS NOT NULL
+    GeneralPractitioner(String), // Reference search: Practitioner/id
+    GeneralPractitionerMissing(bool), // true = no GP, false = has GP
     // Multiple values with OR logic (comma-separated in FHIR)
     FamilyNameOr(Vec<StringSearch>),
     GivenNameOr(Vec<StringSearch>),
@@ -276,6 +278,20 @@ impl SearchQuery {
             }
         }
 
+        // Parse general-practitioner (reference search)
+        if let Some(gp) = params.get("general-practitioner") {
+            conditions.push(SearchCondition::GeneralPractitioner(gp.clone()));
+        }
+
+        // Parse general-practitioner:missing
+        if let Some(missing) = params.get("general-practitioner:missing") {
+            if missing == "true" {
+                conditions.push(SearchCondition::GeneralPractitionerMissing(true));
+            } else if missing == "false" {
+                conditions.push(SearchCondition::GeneralPractitionerMissing(false));
+            }
+        }
+
         // Parse pagination
         let limit = params
             .get("_count")
@@ -473,6 +489,22 @@ impl SearchQuery {
                         sql.push_str(" AND active IS NULL");
                     } else {
                         sql.push_str(" AND active IS NOT NULL");
+                    }
+                }
+                SearchCondition::GeneralPractitioner(_reference) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM unnest(general_practitioner_reference) AS gp WHERE gp = ${})",
+                        bind_count
+                    ));
+                }
+                SearchCondition::GeneralPractitionerMissing(is_missing) => {
+                    if *is_missing {
+                        // Field IS NULL or empty array
+                        sql.push_str(" AND (general_practitioner_reference IS NULL OR array_length(general_practitioner_reference, 1) IS NULL)");
+                    } else {
+                        // Field IS NOT NULL and has values
+                        sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
                     }
                 }
             }

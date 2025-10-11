@@ -161,6 +161,15 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
         params.active = Some(active);
     }
 
+    // Extract general practitioner references
+    if let Some(gps) = content.get("generalPractitioner").and_then(|g| g.as_array()) {
+        for gp in gps {
+            if let Some(reference) = gp.get("reference").and_then(|r| r.as_str()) {
+                params.general_practitioner_reference.push(reference.to_string());
+            }
+        }
+    }
+
     params
 }
 
@@ -176,4 +185,5 @@ pub struct PatientSearchParams {
     pub birthdate: Option<NaiveDate>,
     pub gender: Option<String>,
     pub active: Option<bool>,
+    pub general_practitioner_reference: Vec<String>,
 }

@@ -47,9 +47,9 @@ impl PatientRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
-                birthdate, gender, active
+                birthdate, gender, active, general_practitioner_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
             id,
             version_id,
@@ -93,6 +93,11 @@ impl PatientRepository {
             params.birthdate,
             params.gender,
             params.active,
+            params
+                .general_practitioner_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.general_practitioner_reference[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -184,10 +189,10 @@ impl PatientRepository {
                     id, version_id, last_updated, content,
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
-                    birthdate, gender, active,
+                    birthdate, gender, active, general_practitioner_reference,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                 "#,
                 old_patient.id,
                 old_patient.version_id,
@@ -231,6 +236,11 @@ impl PatientRepository {
                 old_params.birthdate,
                 old_params.gender,
                 old_params.active,
+                old_params
+                    .general_practitioner_reference
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.general_practitioner_reference[..])),
                 if old_patient.version_id == 1 {
                     "CREATE"
                 } else {
@@ -261,7 +271,8 @@ impl PatientRepository {
                     identifier_value = $11,
                     birthdate = $12,
                     gender = $13,
-                    active = $14
+                    active = $14,
+                    general_practitioner_reference = $15
                 WHERE id = $1
                 "#,
                 id,
@@ -306,6 +317,11 @@ impl PatientRepository {
                 params.birthdate,
                 params.gender,
                 params.active,
+                params
+                    .general_practitioner_reference
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.general_practitioner_reference[..])),
             )
             .execute(&mut *tx)
             .await?;
@@ -350,9 +366,9 @@ impl PatientRepository {
                     id, version_id, last_updated, content,
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
-                    birthdate, gender, active
+                    birthdate, gender, active, general_practitioner_reference
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 "#,
                 id,
                 version_id,
@@ -396,6 +412,11 @@ impl PatientRepository {
                 params.birthdate,
                 params.gender,
                 params.active,
+                params
+                    .general_practitioner_reference
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.general_practitioner_reference[..])),
             )
             .execute(&mut *tx)
             .await?;
@@ -447,10 +468,10 @@ impl PatientRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
-                birthdate, gender, active,
+                birthdate, gender, active, general_practitioner_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             "#,
             old_patient.id,
             old_patient.version_id,
@@ -494,6 +515,11 @@ impl PatientRepository {
             old_params.birthdate,
             old_params.gender,
             old_params.active,
+            old_params
+                .general_practitioner_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.general_practitioner_reference[..])),
             if old_patient.version_id == 1 {
                 "CREATE"
             } else {
@@ -524,7 +550,8 @@ impl PatientRepository {
                 identifier_value = $11,
                 birthdate = $12,
                 gender = $13,
-                active = $14
+                active = $14,
+                general_practitioner_reference = $15
             WHERE id = $1
             "#,
             id,
@@ -569,6 +596,11 @@ impl PatientRepository {
             params.birthdate,
             params.gender,
             params.active,
+            params
+                .general_practitioner_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.general_practitioner_reference[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -624,10 +656,10 @@ impl PatientRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
-                birthdate, gender, active,
+                birthdate, gender, active, general_practitioner_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
             "#,
             id,
             new_version_id,
@@ -671,6 +703,11 @@ impl PatientRepository {
             params.birthdate,
             params.gender,
             params.active,
+            params
+                .general_practitioner_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.general_practitioner_reference[..])),
             "DELETE",
             Utc::now(),
         )
@@ -1053,6 +1090,23 @@ impl PatientRepository {
                         sql.push_str(" AND active IS NOT NULL");
                     }
                 }
+                SearchCondition::GeneralPractitioner(reference) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(
+                        " AND EXISTS (SELECT 1 FROM unnest(general_practitioner_reference) AS gp WHERE gp = ${})",
+                        bind_count
+                    ));
+                    bind_values.push(reference.clone());
+                }
+                SearchCondition::GeneralPractitionerMissing(is_missing) => {
+                    if *is_missing {
+                        // Field IS NULL or empty array
+                        sql.push_str(" AND (general_practitioner_reference IS NULL OR array_length(general_practitioner_reference, 1) IS NULL)");
+                    } else {
+                        // Field IS NOT NULL and has values
+                        sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
+                    }
+                }
             }
         }
 
@@ -1324,6 +1378,22 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     sql.push_str(" AND active IS NOT NULL");
                 }
             }
+            SearchCondition::GeneralPractitioner(_reference) => {
+                bind_count += 1;
+                sql.push_str(&format!(
+                    " AND EXISTS (SELECT 1 FROM unnest(general_practitioner_reference) AS gp WHERE gp = ${})",
+                    bind_count
+                ));
+            }
+            SearchCondition::GeneralPractitionerMissing(is_missing) => {
+                if *is_missing {
+                    // Field IS NULL or empty array
+                    sql.push_str(" AND (general_practitioner_reference IS NULL OR array_length(general_practitioner_reference, 1) IS NULL)");
+                } else {
+                    // Field IS NOT NULL and has values
+                    sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
+                }
+            }
         }
     }
 
@@ -1459,7 +1529,8 @@ impl PatientRepository {
                     identifier_value = $11,
                     birthdate = $12,
                     gender = $13,
-                    active = $14
+                    active = $14,
+                    general_practitioner_reference = $15
                 WHERE id = $1
                 "#,
                 id,
@@ -1504,6 +1575,11 @@ impl PatientRepository {
                 params.birthdate,
                 params.gender,
                 params.active,
+                params
+                    .general_practitioner_reference
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.general_practitioner_reference[..])),
             )
             .execute(&mut *tx)
             .await?;
