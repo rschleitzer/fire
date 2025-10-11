@@ -473,10 +473,24 @@ impl ObservationRepository {
             where_conditions.push(format!("status = ${}", bind_values.len()));
         }
 
-        // Code parameter (code_code)
+        // Code parameter - handle system|value format
         if let Some(code) = params.get("code") {
-            bind_values.push(code.clone());
-            where_conditions.push(format!("code_code = ${}", bind_values.len()));
+            if code.contains('|') {
+                // Format: system|value
+                if let Some((system, value)) = code.split_once('|') {
+                    bind_values.push(system.to_string());
+                    bind_values.push(value.to_string());
+                    where_conditions.push(format!(
+                        "code_system = ${} AND code_code = ${}",
+                        bind_values.len() - 1,
+                        bind_values.len()
+                    ));
+                }
+            } else {
+                // Just the code value
+                bind_values.push(code.clone());
+                where_conditions.push(format!("code_code = ${}", bind_values.len()));
+            }
         }
 
         // Category parameter (category_code array)
