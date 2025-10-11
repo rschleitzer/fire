@@ -99,13 +99,17 @@ pub async fn read_observation(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Invalid IDs should return 404 per FHIR spec, not 400
     let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::BadRequest(format!("Invalid observation ID: {}", id_str)))?;
+        .map_err(|_| crate::error::FhirError::NotFound)?;
 
     // Try to read the observation - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(observation) => {
             let fhir_json = observation.to_fhir_json();
+
+            // Build ETag header with version
+            let etag = format!("W/\"{}\"", observation.version_id);
 
             match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
@@ -115,12 +119,19 @@ pub async fn read_observation(
                     };
                     Ok(Html(template.render().unwrap()).into_response())
                 }
-                ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+                ResponseFormat::Json => {
+                    let mut response_headers = HeaderMap::new();
+                    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+                    Ok((response_headers, Json(fhir_json)).into_response())
+                }
                 ResponseFormat::Xml => {
                     let xml_string = json_to_xml(&fhir_json)
                         .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
                     Ok((
-                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        [
+                            (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
+                            (axum::http::header::ETAG, &etag),
+                        ],
                         xml_string
                     ).into_response())
                 }
@@ -158,10 +169,14 @@ pub async fn read_observation(
 /// Update an observation - Uses update semantics with version checking
 pub async fn update_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
+    Path(id_str): Path<String>,
     headers: HeaderMap,
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    // Invalid IDs should return 404 per FHIR spec, not 400
+    let id = Uuid::parse_str(&id_str)
+        .map_err(|_| crate::error::FhirError::NotFound)?;
+
     // Check if resource exists first
     let existing = repo.read(&id).await;
 
@@ -225,8 +240,12 @@ pub async fn update_observation_form(
 /// Delete an observation
 pub async fn delete_observation(
     State(repo): State<SharedObservationRepo>,
-    Path(id): Path<Uuid>,
+    Path(id_str): Path<String>,
 ) -> Result<StatusCode> {
+    // Invalid IDs should return 404 per FHIR spec, not 400
+    let id = Uuid::parse_str(&id_str)
+        .map_err(|_| crate::error::FhirError::NotFound)?;
+
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -304,9 +323,15 @@ pub async fn get_observation_history(
 pub async fn read_observation_version(
     State(repo): State<SharedObservationRepo>,
     Path((id, version_id)): Path<(Uuid, i32)>,
-) -> Result<Json<Value>> {
+) -> Result<(HeaderMap, Json<Value>)> {
     let observation = repo.read_version(&id, version_id).await?;
-    Ok(Json(observation.content))
+
+    // Build ETag header with version
+    let etag = format!("W/\"{}\"", observation.version_id);
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+
+    Ok((response_headers, Json(observation.content)))
 }
 
 /// Delete observations (batch delete)

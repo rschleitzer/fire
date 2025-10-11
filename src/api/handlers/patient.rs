@@ -99,13 +99,17 @@ pub async fn read_patient(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Invalid IDs should return 404 per FHIR spec, not 400
     let id = Uuid::parse_str(&id_str)
-        .map_err(|_| crate::error::FhirError::BadRequest(format!("Invalid patient ID: {}", id_str)))?;
+        .map_err(|_| crate::error::FhirError::NotFound)?;
 
     // Try to read the patient - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(patient) => {
             let fhir_json = patient.to_fhir_json();
+
+            // Build ETag header with version
+            let etag = format!("W/\"{}\"", patient.version_id);
 
             match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
@@ -115,12 +119,19 @@ pub async fn read_patient(
                     };
                     Ok(Html(template.render().unwrap()).into_response())
                 }
-                ResponseFormat::Json => Ok(Json(fhir_json).into_response()),
+                ResponseFormat::Json => {
+                    let mut response_headers = HeaderMap::new();
+                    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+                    Ok((response_headers, Json(fhir_json)).into_response())
+                }
                 ResponseFormat::Xml => {
                     let xml_string = json_to_xml(&fhir_json)
                         .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
                     Ok((
-                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                        [
+                            (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
+                            (axum::http::header::ETAG, &etag),
+                        ],
                         xml_string
                     ).into_response())
                 }
@@ -413,9 +424,15 @@ pub async fn get_patient_history(
 pub async fn read_patient_version(
     State(repo): State<SharedPatientRepo>,
     Path((id, version_id)): Path<(Uuid, i32)>,
-) -> Result<Json<Value>> {
+) -> Result<(HeaderMap, Json<Value>)> {
     let patient = repo.read_version(&id, version_id).await?;
-    Ok(Json(patient.content))
+
+    // Build ETag header with version
+    let etag = format!("W/\"{}\"", patient.version_id);
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+
+    Ok((response_headers, Json(patient.content)))
 }
 
 /// Delete patients (batch delete)
