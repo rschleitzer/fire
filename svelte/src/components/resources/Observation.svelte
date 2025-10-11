@@ -358,8 +358,8 @@
     </button>
     {#if resource.id}
       <a href="/fhir/Observation/{resource.id}/_history" class="link">History</a>
-      <a href="/fhir/Observation/{resource.id}?_format=json" download="observation-{resource.id}.json" class="link">JSON</a>
-      <a href="/fhir/Observation/{resource.id}?_format=xml" download="observation-{resource.id}.xml" class="link">XML</a>
+      <a href="/fhir/Observation/{resource.id}?_format=json" download="Observation_{resource.id}.json" class="link">JSON</a>
+      <a href="/fhir/Observation/{resource.id}?_format=xml" download="Observation_{resource.id}.xml" class="link">XML</a>
     {/if}
   </div>
 

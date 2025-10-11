@@ -7,8 +7,8 @@
 <div class="button-group">
     <button class="btn btn-warning" onclick="deleteSelected(event)">Delete selected</button>
     <button class="btn btn-danger" onclick="deleteAll(event)">Delete all</button>
-    <a href="{{ current_url }}&_format=json" download="Bundle.json" class="link">JSON</a>
-    <a href="{{ current_url }}&_format=xml" download="Bundle.xml" class="link">XML</a>
+    <a href="{{ current_url }}&_format=json" download="Bundle_Patient.json" class="link">JSON</a>
+    <a href="{{ current_url }}&_format=xml" download="Bundle_Patient.xml" class="link">XML</a>
 </div>
 
 {% if patients.len() > 0 %}
