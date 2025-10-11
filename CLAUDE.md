@@ -907,6 +907,132 @@ git commit -m "Generate code for FHIR resources"
 - Add handwritten optimizations
 - Profile and improve hot paths
 
+## Testing with pyrtest
+
+**Fire uses [pyrtest](https://github.com/rschleitzer/pyrtest)** - a comprehensive Python-based black-box HTTP API test suite for validating FHIR R5 server implementations.
+
+### Why pyrtest?
+
+- **Separation of concerns** - Tests are decoupled from implementation
+- **Language-agnostic** - Tests HTTP API, works with any FHIR server
+- **Comprehensive** - Covers CRUD, search, bundles, history, pagination, conditional operations
+- **Black-box testing** - Validates external behavior, not internal implementation
+- **Reusable** - Same test suite can validate multiple FHIR server implementations
+
+### Running pyrtest against Fire
+
+1. **Start the Fire FHIR server**:
+```bash
+# Terminal 1 - Start Fire
+cd ~/repos/fire
+cargo run
+```
+
+2. **Run pyrtest in a separate terminal**:
+```bash
+# Terminal 2 - Run tests
+cd ~/repos/pyrtest
+export FHIR_BASE_URL=http://localhost:3000/fhir
+pytest -v
+```
+
+3. **Run specific test categories**:
+```bash
+# Patient CRUD tests
+pytest tests/test_patient_crud.py -v
+
+# Search tests
+pytest tests/test_patient_search.py tests/test_patient_search_advanced.py -v
+
+# Bundle/transaction tests
+pytest tests/test_bundles.py -v
+
+# All tests matching a pattern
+pytest -k "search" -v
+```
+
+### Test Coverage
+
+pyrtest validates:
+- ✅ **CRUD Operations** - Create, Read, Update, Delete
+- ✅ **Search** - String, token, date, reference parameters
+- ✅ **Search Modifiers** - `:exact`, `:contains`, `:missing`
+- ✅ **Search Prefixes** - Date/number comparisons (gt, lt, ge, le)
+- ✅ **Result Parameters** - `_count`, `_sort`, `_total`, `_include`, `_revinclude`
+- ✅ **Bundles** - Transaction and batch bundles
+- ✅ **History** - Resource versioning and history retrieval
+- ✅ **Conditional Operations** - Conditional create, update, delete
+- ✅ **Pagination** - Next/previous links, page navigation
+- ✅ **Error Handling** - Validation and proper error responses
+
+### Integration with CI/CD
+
+Add pyrtest to your CI pipeline:
+
+```yaml
+# .github/workflows/test.yml
+name: Fire FHIR Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fhir_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v3
+
+      # Checkout pyrtest
+      - name: Checkout pyrtest
+        uses: actions/checkout@v3
+        with:
+          repository: rschleitzer/pyrtest
+          path: pyrtest
+
+      # Build and start Fire
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Build Fire
+        run: cargo build --release
+      - name: Start Fire in background
+        run: |
+          export DATABASE_URL=postgres://postgres:postgres@localhost/fhir_test
+          cargo run --release &
+          sleep 5  # Wait for server to start
+
+      # Run pyrtest
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install pyrtest dependencies
+        run: |
+          cd pyrtest
+          pip install -r requirements.txt
+      - name: Run pyrtest
+        run: |
+          cd pyrtest
+          export FHIR_BASE_URL=http://localhost:3000/fhir
+          pytest -v
+```
+
+### Development Workflow
+
+1. **Implement feature in Fire** (Rust)
+2. **Run pyrtest** to validate compliance
+3. **Fix issues** until tests pass
+4. **Commit** when all tests green
+
+This ensures Fire maintains FHIR R5 compliance throughout development.
+
 ## Notes for Claude Code
 
 - Always use `sqlx::query!` or `sqlx::query_as!` for type-safe queries
@@ -917,6 +1043,7 @@ git commit -m "Generate code for FHIR resources"
 - FHIR search is complex - embrace it, don't oversimplify
 - Performance matters - this is healthcare data at scale
 - Type safety is critical - leverage Rust's type system
+- **Test with pyrtest** - Run black-box HTTP tests to validate FHIR compliance
 
 ## Open Questions (For Future Phases)
 
