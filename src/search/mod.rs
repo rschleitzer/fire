@@ -34,6 +34,10 @@ pub enum SearchCondition {
     Gender(String),
     Active(bool),
     ActiveMissing(bool), // true = IS NULL, false = IS NOT NULL
+    // Multiple values with OR logic (comma-separated in FHIR)
+    FamilyNameOr(Vec<StringSearch>),
+    GivenNameOr(Vec<StringSearch>),
+    GenderOr(Vec<String>),
 }
 
 #[derive(Debug, Clone)]
@@ -71,8 +75,20 @@ impl SearchQuery {
 
         // Parse family name with modifiers
         if let Some(family) = params.get("family") {
-            let search = parse_string_param("family", family, params)?;
-            conditions.push(SearchCondition::FamilyName(search));
+            // Check for comma-separated values (OR logic)
+            if family.contains(',') {
+                let values: Vec<StringSearch> = family
+                    .split(',')
+                    .map(|v| StringSearch {
+                        value: v.trim().to_string(),
+                        modifier: StringModifier::Contains,
+                    })
+                    .collect();
+                conditions.push(SearchCondition::FamilyNameOr(values));
+            } else {
+                let search = parse_string_param("family", family, params)?;
+                conditions.push(SearchCondition::FamilyName(search));
+            }
         }
 
         // Parse family:exact
@@ -106,8 +122,20 @@ impl SearchQuery {
 
         // Parse given name with modifiers
         if let Some(given) = params.get("given") {
-            let search = parse_string_param("given", given, params)?;
-            conditions.push(SearchCondition::GivenName(search));
+            // Check for comma-separated values (OR logic)
+            if given.contains(',') {
+                let values: Vec<StringSearch> = given
+                    .split(',')
+                    .map(|v| StringSearch {
+                        value: v.trim().to_string(),
+                        modifier: StringModifier::Contains,
+                    })
+                    .collect();
+                conditions.push(SearchCondition::GivenNameOr(values));
+            } else {
+                let search = parse_string_param("given", given, params)?;
+                conditions.push(SearchCondition::GivenName(search));
+            }
         }
 
         // Parse given:exact
@@ -177,7 +205,16 @@ impl SearchQuery {
 
         // Parse gender
         if let Some(gender) = params.get("gender") {
-            conditions.push(SearchCondition::Gender(gender.clone()));
+            // Check for comma-separated values (OR logic)
+            if gender.contains(',') {
+                let values: Vec<String> = gender
+                    .split(',')
+                    .map(|v| v.trim().to_string())
+                    .collect();
+                conditions.push(SearchCondition::GenderOr(values));
+            } else {
+                conditions.push(SearchCondition::Gender(gender.clone()));
+            }
         }
 
         // Parse active
@@ -289,6 +326,10 @@ impl SearchQuery {
                         }
                     }
                 }
+                SearchCondition::FamilyNameOr(searches) => {
+                    // OR logic handled by patient repository, not this method
+                    bind_count += searches.len();
+                }
                 SearchCondition::GivenName(search) => {
                     bind_count += 1;
                     match search.modifier {
@@ -305,6 +346,10 @@ impl SearchQuery {
                             bind_count -= 1; // No bind parameter needed
                         }
                     }
+                }
+                SearchCondition::GivenNameOr(searches) => {
+                    // OR logic handled by patient repository, not this method
+                    bind_count += searches.len();
                 }
                 SearchCondition::Identifier(_value) => {
                     bind_count += 1;
@@ -339,6 +384,10 @@ impl SearchQuery {
                 SearchCondition::Gender(_gender) => {
                     bind_count += 1;
                     sql.push_str(&format!(" AND gender = ${}", bind_count));
+                }
+                SearchCondition::GenderOr(genders) => {
+                    // OR logic handled by patient repository, not this method
+                    bind_count += genders.len();
                 }
                 SearchCondition::Active(_active) => {
                     bind_count += 1;

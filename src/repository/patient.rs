@@ -837,6 +837,30 @@ impl PatientRepository {
                         }
                     }
                 }
+                SearchCondition::FamilyNameOr(searches) => {
+                    // Multiple family names with OR logic: (fn ILIKE value1 OR fn ILIKE value2 OR ...)
+                    let mut or_conditions = Vec::new();
+                    for search in searches {
+                        bind_count += 1;
+                        match search.modifier {
+                            crate::search::StringModifier::Contains => {
+                                or_conditions.push(format!("fn ILIKE ${}", bind_count));
+                                bind_values.push(format!("%{}%", search.value));
+                            }
+                            crate::search::StringModifier::Exact => {
+                                or_conditions.push(format!("fn = ${}", bind_count));
+                                bind_values.push(search.value.clone());
+                            }
+                            crate::search::StringModifier::Missing => {
+                                // Missing doesn't make sense with multiple values, skip
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                    if !or_conditions.is_empty() {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
+                    }
+                }
                 SearchCondition::GivenName(search) => {
                     match search.modifier {
                         crate::search::StringModifier::Contains => {
@@ -854,6 +878,28 @@ impl PatientRepository {
                                 " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
                             );
                         }
+                    }
+                }
+                SearchCondition::GivenNameOr(searches) => {
+                    let mut or_conditions = Vec::new();
+                    for search in searches {
+                        bind_count += 1;
+                        match search.modifier {
+                            crate::search::StringModifier::Contains => {
+                                or_conditions.push(format!("gn ILIKE ${}", bind_count));
+                                bind_values.push(format!("%{}%", search.value));
+                            }
+                            crate::search::StringModifier::Exact => {
+                                or_conditions.push(format!("gn = ${}", bind_count));
+                                bind_values.push(search.value.clone());
+                            }
+                            crate::search::StringModifier::Missing => {
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                    if !or_conditions.is_empty() {
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
                     }
                 }
                 SearchCondition::Identifier(value) => {
@@ -895,6 +941,18 @@ impl PatientRepository {
                     bind_count += 1;
                     sql.push_str(&format!(" AND gender = ${}", bind_count));
                     bind_values.push(gender.clone());
+                }
+                SearchCondition::GenderOr(genders) => {
+                    // Multiple genders with OR logic: (gender = value1 OR gender = value2 OR ...)
+                    let mut or_conditions = Vec::new();
+                    for gender in genders {
+                        bind_count += 1;
+                        or_conditions.push(format!("gender = ${}", bind_count));
+                        bind_values.push(gender.clone());
+                    }
+                    if !or_conditions.is_empty() {
+                        sql.push_str(&format!(" AND ({})", or_conditions.join(" OR ")));
+                    }
                 }
                 SearchCondition::Active(active) => {
                     bind_count += 1;
@@ -1027,6 +1085,26 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     }
                 }
             }
+            SearchCondition::FamilyNameOr(searches) => {
+                let mut or_conditions = Vec::new();
+                for search in searches {
+                    bind_count += 1;
+                    match search.modifier {
+                        crate::search::StringModifier::Contains => {
+                            or_conditions.push(format!("fn ILIKE ${}", bind_count));
+                        }
+                        crate::search::StringModifier::Exact => {
+                            or_conditions.push(format!("fn = ${}", bind_count));
+                        }
+                        crate::search::StringModifier::Missing => {
+                            bind_count -= 1;
+                        }
+                    }
+                }
+                if !or_conditions.is_empty() {
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
+                }
+            }
             SearchCondition::GivenName(search) => {
                 bind_count += 1;
                 match search.modifier {
@@ -1045,6 +1123,26 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         );
                         bind_count -= 1;
                     }
+                }
+            }
+            SearchCondition::GivenNameOr(searches) => {
+                let mut or_conditions = Vec::new();
+                for search in searches {
+                    bind_count += 1;
+                    match search.modifier {
+                        crate::search::StringModifier::Contains => {
+                            or_conditions.push(format!("gn ILIKE ${}", bind_count));
+                        }
+                        crate::search::StringModifier::Exact => {
+                            or_conditions.push(format!("gn = ${}", bind_count));
+                        }
+                        crate::search::StringModifier::Missing => {
+                            bind_count -= 1;
+                        }
+                    }
+                }
+                if !or_conditions.is_empty() {
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
                 }
             }
             SearchCondition::Identifier(value) => {
@@ -1080,6 +1178,16 @@ fn build_count_sql(query: &SearchQuery) -> String {
             SearchCondition::Gender(_gender) => {
                 bind_count += 1;
                 sql.push_str(&format!(" AND gender = ${}", bind_count));
+            }
+            SearchCondition::GenderOr(genders) => {
+                let mut or_conditions = Vec::new();
+                for _gender in genders {
+                    bind_count += 1;
+                    or_conditions.push(format!("gender = ${}", bind_count));
+                }
+                if !or_conditions.is_empty() {
+                    sql.push_str(&format!(" AND ({})", or_conditions.join(" OR ")));
+                }
             }
             SearchCondition::Active(_active) => {
                 bind_count += 1;
