@@ -4,7 +4,7 @@
 
 **Generated Svelte components** for editing FHIR R5 resources. Svelte compiles to vanilla JS with no runtime overhead, giving us the best of both worlds:
 
-1. **Component-based architecture** - Like Synios's nested approach, but maintainable
+1. **Component-based architecture** - Like Vanilla's nested approach, but maintainable
 2. **Reactive by default** - Bidirectional data binding is built-in
 3. **No runtime framework** - Svelte compiles away, resulting in small, fast vanilla JS
 4. **Generated code** - But from clean, readable Svelte templates, not repetitive JS
@@ -205,9 +205,9 @@ fn main() {
 
 ## Advantages
 
-### vs. Synios (Vanilla JS Generation)
+### vs. Vanilla JS Generation
 
-| Aspect | Synios | Fire (Svelte) |
+| Aspect | Vanilla | Fire (Svelte) |
 |--------|--------|---------------|
 | **Code size** | 7,200 lines | ~500 lines (generated Svelte) |
 | **Maintainability** | Manual DOM manipulation | Declarative components |
@@ -249,7 +249,7 @@ fn main() {
 - 140 resources × ~4KB = ~560KB
 - **Total: ~830KB unminified → ~200-300KB minified+gzipped**
 
-**Compare to Synios:**
+**Compare to Vanilla:**
 - Elements.js: 5,775 lines (~300KB)
 - Observation.js: 1,430 lines (~75KB)
 - **Total for 2 resources: ~375KB unminified**
@@ -337,4 +337,4 @@ All with automatic 2-way binding - edit any field, and the resource object updat
 
 ---
 
-**This approach gives us Synios's comprehensive FHIR coverage with modern, maintainable code.**
+**This approach gives us Vanillas's comprehensive FHIR coverage with modern, maintainable code.**

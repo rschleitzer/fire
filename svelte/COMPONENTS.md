@@ -258,4 +258,4 @@ Once built and integrated with Fire:
 
 After Svelte compilation and minification: **~15-20KB**
 
-Much smaller and more maintainable than Synios's 7,200+ lines for just 2 resources!
+Much smaller and more maintainable than Vanilla's 7,200+ lines for just 2 resources!

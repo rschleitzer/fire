@@ -85,7 +85,7 @@ FHIR StructureDefinitions (XML/JSON)
 </style>
 ```
 
-**Compiles to:** `~3KB` of vanilla JS (vs 200+ lines of manual JS in Synios)
+**Compiles to:** `~3KB` of vanilla JS (vs 200+ lines of manual JS)
 
 ### Generated Observation Component
 
@@ -551,7 +551,7 @@ fn main() {
 
 ## Advantages
 
-### vs. Synios Approach
+### vs. Vanilla Approach
 - **7,200 lines** → **~500 lines** (generated Svelte is much more concise)
 - **Repetitive vanilla JS** → **Composable Svelte components**
 - **Manual DOM manipulation** → **Reactive bindings**
@@ -583,6 +583,6 @@ fn main() {
 - **Svelte runtime**: 0KB (compiles away)
 - **Per component**: ~1-2KB (primitives) to ~5KB (complex resources)
 - **Total for all FHIR**: ~200-300KB minified+gzipped
-- **Compare to**: Synios ~300KB unminified vanilla JS for just 2 resources
+- **Compare to**: Vanilla ~300KB unminified vanilla JS for just 2 resources
 
 Much better, and infinitely more maintainable.
