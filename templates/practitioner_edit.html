@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Practitioner - Fire Server{% endblock %}
+
+{% block extra_head %}
+<script src="/static/js/fhir-components.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Practitioner</h2>
+    <div id="practitioner-editor"></div>
+</div>
+
+<script>
+    // Practitioner resource data from server
+    const resource = {{ resource_json|safe }};
+
+    // Mount the Svelte Practitioner component
+    const editor = new FHIRComponents.Practitioner({
+        target: document.getElementById('practitioner-editor'),
+        props: { resource }
+    });
+
+    // Listen for save event from the editor
+    window.addEventListener('save', async (event) => {
+        const updated = event.detail;
+        const isNew = !('{{ id }}') || '{{ id }}' === '';
+
+        try {
+            const url = isNew ? '/fhir/Practitioner' : '/fhir/Practitioner/{{ id }}';
+            const method = isNew ? 'POST' : 'PUT';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/fhir+json',
+                    'Accept': 'application/fhir+json'
+                },
+                body: JSON.stringify(updated)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                // Success - navigate to detail view
+                // For new resources, use the ID from the response
+                const resourceId = result.id || '{{ id }}';
+                window.location.href = '/fhir/Practitioner/' + resourceId;
+            } else {
+                // Error - parse and display
+                const error = await response.json();
+                window.dispatchEvent(new CustomEvent('save-error', {
+                    detail: {
+                        message: error.issue?.[0]?.diagnostics ||
+                                error.diagnostics ||
+                                'Failed to save practitioner'
+                    }
+                }));
+            }
+        } catch (err) {
+            window.dispatchEvent(new CustomEvent('save-error', {
+                detail: { message: 'Network error: ' + err.message }
+            }));
+        }
+    });
+</script>
+{% endblock %}

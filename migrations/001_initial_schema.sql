@@ -163,3 +163,63 @@ CREATE INDEX idx_observation_history_last_updated ON observation_history (last_u
 
 -- Create GIN index for JSONB content in history
 CREATE INDEX idx_observation_history_content ON observation_history USING GIN (content);
+
+-- Create practitioner current table
+CREATE TABLE practitioner (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
+
+    -- Extracted search parameters (indexed)
+    family_name TEXT[],
+    given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
+    identifier_system TEXT[],
+    identifier_value TEXT[],
+    active BOOLEAN
+);
+
+-- Create indexes for current table
+CREATE INDEX idx_practitioner_last_updated ON practitioner(last_updated);
+CREATE INDEX idx_practitioner_family_name ON practitioner USING GIN(family_name);
+CREATE INDEX idx_practitioner_given_name ON practitioner USING GIN(given_name);
+CREATE INDEX idx_practitioner_identifier_value ON practitioner USING GIN(identifier_value);
+CREATE INDEX idx_practitioner_active ON practitioner(active);
+
+-- Create GIN index for JSONB content
+CREATE INDEX idx_practitioner_content ON practitioner USING GIN (content);
+
+-- Create practitioner history table
+CREATE TABLE practitioner_history (
+    id TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL,
+    content JSONB NOT NULL,
+
+    -- Same search parameters as current
+    family_name TEXT[],
+    given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
+    identifier_system TEXT[],
+    identifier_value TEXT[],
+    active BOOLEAN,
+
+    -- History metadata
+    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
+    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, version_id)
+);
+
+-- Create indexes for history table
+CREATE INDEX idx_practitioner_history_id ON practitioner_history (id);
+CREATE INDEX idx_practitioner_history_timestamp ON practitioner_history(history_timestamp);
+CREATE INDEX idx_practitioner_history_last_updated ON practitioner_history (last_updated);
+
+-- Create GIN index for JSONB content in history
+CREATE INDEX idx_practitioner_history_content ON practitioner_history USING GIN (content);

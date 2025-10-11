@@ -6,3 +6,4 @@ Cargo.lock
 # Node/NPM
 node_modules/
 svelte/build/
+/.sqlx/

@@ -23,6 +23,11 @@ use super::handlers::patient::{
     read_patient, read_patient_version, rollback_patient, search_patients, update_patient,
     update_patient_form, SharedPatientRepo,
 };
+use super::handlers::practitioner::{
+    create_practitioner, delete_practitioner, get_practitioner_history,
+    read_practitioner, read_practitioner_version, search_practitioners,
+    update_practitioner, SharedPractitionerRepo,
+};
 
 pub fn patient_routes(repo: SharedPatientRepo) -> Router {
     Router::new()
@@ -79,6 +84,29 @@ pub fn observation_routes(repo: SharedObservationRepo) -> Router {
         .route(
             "/fhir/Observation/:id/_rollback/:version",
             post(rollback_observation),
+        )
+        .with_state(repo)
+}
+
+pub fn practitioner_routes(repo: SharedPractitionerRepo) -> Router {
+    Router::new()
+        .route(
+            "/fhir/Practitioner",
+            get(search_practitioners).post(create_practitioner),
+        )
+        .route(
+            "/fhir/Practitioner/:id",
+            get(read_practitioner)
+                .put(update_practitioner)
+                .delete(delete_practitioner),
+        )
+        .route(
+            "/fhir/Practitioner/:id/_history",
+            get(get_practitioner_history),
+        )
+        .route(
+            "/fhir/Practitioner/:id/_history/:version_id",
+            get(read_practitioner_version),
         )
         .with_state(repo)
 }

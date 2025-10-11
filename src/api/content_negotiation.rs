@@ -270,3 +270,91 @@ pub fn extract_observation_value(content: &Value) -> String {
     }
     "N/A".to_string()
 }
+
+/// Extract a human-readable name from Practitioner FHIR JSON
+pub fn extract_practitioner_name(content: &Value) -> String {
+    if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
+        if let Some(first_name) = names.first() {
+            // Extract prefix (e.g., "Dr.", "Prof.")
+            let prefix = if let Some(prefix_arr) = first_name.get("prefix").and_then(|p| p.as_array()) {
+                prefix_arr
+                    .iter()
+                    .filter_map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            };
+
+            let family = first_name
+                .get("family")
+                .and_then(|f| f.as_str())
+                .unwrap_or("");
+
+            let given = if let Some(given_arr) = first_name.get("given").and_then(|g| g.as_array()) {
+                given_arr
+                    .iter()
+                    .filter_map(|g| g.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            };
+
+            // Extract suffix (e.g., "MD", "PhD")
+            let suffix = if let Some(suffix_arr) = first_name.get("suffix").and_then(|s| s.as_array()) {
+                suffix_arr
+                    .iter()
+                    .filter_map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                String::new()
+            };
+
+            // Build full name: Prefix Given Family Suffix
+            let mut parts = Vec::new();
+            if !prefix.is_empty() {
+                parts.push(prefix);
+            }
+            if !given.is_empty() {
+                parts.push(given);
+            }
+            if !family.is_empty() {
+                parts.push(family.to_string());
+            }
+            if !suffix.is_empty() {
+                parts.push(suffix);
+            }
+
+            if !parts.is_empty() {
+                return parts.join(" ");
+            }
+        }
+    }
+    "Unknown".to_string()
+}
+
+#[derive(Template)]
+#[template(path = "practitioner_list.html")]
+pub struct PractitionerListTemplate {
+    pub practitioners: Vec<PractitionerRow>,
+    pub total: usize,
+    pub current_url: String,
+}
+
+#[derive(Clone)]
+pub struct PractitionerRow {
+    pub id: String,
+    pub version_id: String,
+    pub name: String,
+    pub active: bool,
+    pub last_updated: String,
+}
+
+#[derive(Template)]
+#[template(path = "practitioner_edit.html")]
+pub struct PractitionerEditTemplate {
+    pub id: String,
+    pub resource_json: String,
+}

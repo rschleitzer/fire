@@ -5,12 +5,12 @@ use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fire::api::{
-    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes, purge_routes,
+    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes, practitioner_routes, purge_routes,
     root_routes,
 };
 use fire::config::Config;
 use fire::middleware::request_id::add_request_id;
-use fire::repository::{ObservationRepository, PatientRepository};
+use fire::repository::{ObservationRepository, PatientRepository, PractitionerRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create repositories
     let patient_repo = Arc::new(PatientRepository::new(pool.clone()));
     let observation_repo = Arc::new(ObservationRepository::new(pool.clone()));
+    let practitioner_repo = Arc::new(PractitionerRepository::new(pool.clone()));
 
     // Build application routes
     let app = Router::new()
@@ -74,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(metadata_routes())
         .merge(patient_routes(patient_repo.clone()))
         .merge(observation_routes(observation_repo.clone()))
+        .merge(practitioner_routes(practitioner_repo.clone()))
         .merge(bundle_routes(patient_repo.clone(), observation_repo.clone()))
         .merge(purge_routes(patient_repo, observation_repo))
         .nest_service("/static", ServeDir::new("static"))
