@@ -14,6 +14,7 @@ use crate::api::content_negotiation::{
 };
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
+use crate::extractors::FhirJson;
 use crate::repository::PractitionerRepository;
 use crate::validation::validate_fhir_id;
 use askama::Template;
@@ -149,7 +150,7 @@ pub async fn search_practitioners(
 /// Create a new practitioner
 pub async fn create_practitioner(
     State(repo): State<SharedPractitionerRepo>,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     let practitioner = repo.create(content).await?;
 
@@ -242,7 +243,7 @@ pub async fn update_practitioner(
     State(repo): State<SharedPractitionerRepo>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Validate FHIR ID format
     validate_fhir_id(&id)?;

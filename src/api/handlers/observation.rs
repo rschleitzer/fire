@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::api::content_negotiation::*;
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
+use crate::extractors::FhirJson;
 use crate::repository::ObservationRepository;
 use crate::validation::validate_fhir_id;
 use percent_encoding::percent_decode_str;
@@ -33,7 +34,7 @@ pub type SharedObservationRepo = Arc<ObservationRepository>;
 pub async fn create_observation(
     State(repo): State<SharedObservationRepo>,
     headers: HeaderMap,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Check for If-None-Exist header (conditional create)
     if let Some(if_none_exist) = headers.get("if-none-exist") {
@@ -168,7 +169,7 @@ pub async fn update_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Validate FHIR ID format
     validate_fhir_id(&id)?;

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
+use crate::extractors::FhirJson;
 use crate::repository::PatientRepository;
 use crate::validation::validate_fhir_id;
 use askama::Template;
@@ -33,7 +34,7 @@ pub type SharedPatientRepo = Arc<PatientRepository>;
 pub async fn create_patient(
     State(repo): State<SharedPatientRepo>,
     headers: HeaderMap,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Check for If-None-Exist header (conditional create)
     if let Some(if_none_exist) = headers.get("if-none-exist") {
@@ -176,7 +177,7 @@ pub async fn update_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    Json(content): Json<Value>,
+    FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Validate FHIR ID format
     validate_fhir_id(&id)?;

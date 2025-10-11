@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use crate::error::{FhirError, Result};
+use crate::extractors::FhirJson;
 use crate::repository::{ObservationRepository, PatientRepository};
 
 pub struct BundleState {
@@ -13,7 +14,7 @@ pub struct BundleState {
 /// Process a transaction bundle
 pub async fn process_bundle(
     State(state): State<Arc<BundleState>>,
-    Json(bundle): Json<Value>,
+    FhirJson(bundle): FhirJson<Value>,
 ) -> Result<Json<Value>> {
     // Validate bundle structure
     if bundle.get("resourceType").and_then(|r| r.as_str()) != Some("Bundle") {

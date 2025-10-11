@@ -3,6 +3,7 @@
 pub mod api;
 pub mod config;
 pub mod error;
+pub mod extractors;
 pub mod middleware;
 pub mod models;
 pub mod repository;
