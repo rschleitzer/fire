@@ -784,11 +784,27 @@ impl ObservationRepository {
             where_conditions.push(format!("subject_reference = ${}", bind_values.len()));
         }
 
-        // Date parameters for effective dates (simplified - just eq comparison)
+        // Date parameters for effective dates with prefix support (ge, le, gt, lt, eq)
         if let Some(date) = params.get("date") {
-            bind_values.push(date.clone());
+            // Parse the date with prefix
+            let (op, date_str) = if let Some(stripped) = date.strip_prefix("ge") {
+                (">=", stripped)
+            } else if let Some(stripped) = date.strip_prefix("le") {
+                ("<=", stripped)
+            } else if let Some(stripped) = date.strip_prefix("gt") {
+                (">", stripped)
+            } else if let Some(stripped) = date.strip_prefix("lt") {
+                ("<", stripped)
+            } else if let Some(stripped) = date.strip_prefix("eq") {
+                ("=", stripped)
+            } else {
+                ("=", date.as_str())
+            };
+
+            bind_values.push(date_str.to_string());
             where_conditions.push(format!(
-                "effective_datetime = ${}::timestamptz",
+                "effective_datetime {} ${}::timestamptz",
+                op,
                 bind_values.len()
             ));
         }
