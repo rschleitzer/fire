@@ -15,7 +15,8 @@ CREATE TABLE patient (
     identifier_value TEXT[],
     birthdate DATE,
     gender TEXT,
-    active BOOLEAN
+    active BOOLEAN,
+    general_practitioner_reference TEXT[] DEFAULT '{}'
 );
 
 -- Create indexes for current table
@@ -29,6 +30,7 @@ CREATE INDEX idx_patient_birthdate ON patient (birthdate);
 CREATE INDEX idx_patient_gender ON patient (gender);
 CREATE INDEX idx_patient_active ON patient (active);
 CREATE INDEX idx_patient_last_updated ON patient (last_updated);
+CREATE INDEX idx_patient_general_practitioner ON patient USING GIN (general_practitioner_reference);
 
 -- Create GIN index for JSONB content (for advanced queries)
 CREATE INDEX idx_patient_content ON patient USING GIN (content);
@@ -51,6 +53,7 @@ CREATE TABLE patient_history (
     birthdate DATE,
     gender TEXT,
     active BOOLEAN,
+    general_practitioner_reference TEXT[] DEFAULT '{}',
 
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
