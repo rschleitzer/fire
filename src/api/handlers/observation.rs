@@ -13,6 +13,7 @@ use crate::api::content_negotiation::*;
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::repository::ObservationRepository;
+use percent_encoding::percent_decode_str;
 use askama::Template;
 use serde::Deserialize;
 
@@ -43,8 +44,11 @@ pub async fn create_observation(
         let mut search_params = HashMap::new();
         for pair in query_string.split('&') {
             if let Some((key, value)) = pair.split_once('=') {
-                // Basic URL decoding - replace %XX with actual characters
-                let decoded = value.replace("%7C", "|").replace("%7c", "|").replace("+", " ");
+                // URL decode the value - handle all percent-encoded characters
+                let with_spaces = value.replace('+', " ");
+                let decoded = percent_decode_str(&with_spaces)
+                    .decode_utf8_lossy()
+                    .into_owned();
 
                 // Special handling for identifier parameter: system|value format
                 if key == "identifier" && decoded.contains('|') {

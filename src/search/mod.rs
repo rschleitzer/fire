@@ -29,6 +29,7 @@ pub enum SearchCondition {
     GivenName(StringSearch),
     Name(StringSearch), // Searches both family and given with OR
     Identifier(String),
+    IdentifierSystemValue { system: String, value: String }, // system|value search
     Birthdate(DateComparison),
     Gender(String),
     Active(bool),
@@ -143,6 +144,14 @@ impl SearchQuery {
         // Parse identifier
         if let Some(identifier) = params.get("identifier") {
             conditions.push(SearchCondition::Identifier(identifier.clone()));
+        }
+
+        // Parse identifier_system and identifier_value (both must be present)
+        if let (Some(system), Some(value)) = (params.get("identifier_system"), params.get("identifier_value")) {
+            conditions.push(SearchCondition::IdentifierSystemValue {
+                system: system.clone(),
+                value: value.clone(),
+            });
         }
 
         // Parse birthdate
@@ -278,6 +287,17 @@ impl SearchQuery {
                     sql.push_str(&format!(
                         " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
                         bind_count
+                    ));
+                }
+                SearchCondition::IdentifierSystemValue { system: _system, value: _value } => {
+                    // Match both system AND value in arrays at the same index
+                    bind_count += 2; // Need two parameters
+                    sql.push_str(&format!(
+                        " AND EXISTS (
+                            SELECT 1 FROM unnest(identifier_system, identifier_value) AS ident(sys, val)
+                            WHERE ident.sys = ${} AND ident.val = ${}
+                        )",
+                        bind_count - 1, bind_count
                     ));
                 }
                 SearchCondition::Birthdate(comparison) => {

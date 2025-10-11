@@ -825,6 +825,18 @@ impl PatientRepository {
                     ));
                     bind_values.push(value.clone());
                 }
+                SearchCondition::IdentifierSystemValue { system, value } => {
+                    bind_count += 2;
+                    sql.push_str(&format!(
+                        " AND EXISTS (
+                            SELECT 1 FROM unnest(identifier_system, identifier_value) AS ident(sys, val)
+                            WHERE ident.sys = ${} AND ident.val = ${}
+                        )",
+                        bind_count - 1, bind_count
+                    ));
+                    bind_values.push(system.clone());
+                    bind_values.push(value.clone());
+                }
                 SearchCondition::Birthdate(comparison) => {
                     bind_count += 1;
                     let op = match comparison.prefix {
@@ -992,6 +1004,16 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     bind_count
                 ));
                 let _ = value; // Silence unused warning
+            }
+            SearchCondition::IdentifierSystemValue { system: _, value: _ } => {
+                bind_count += 2;
+                sql.push_str(&format!(
+                    " AND EXISTS (
+                        SELECT 1 FROM unnest(identifier_system, identifier_value) AS ident(sys, val)
+                        WHERE ident.sys = ${} AND ident.val = ${}
+                    )",
+                    bind_count - 1, bind_count
+                ));
             }
             SearchCondition::Birthdate(comparison) => {
                 bind_count += 1;
