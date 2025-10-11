@@ -281,7 +281,11 @@ pub async fn search_observations(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    let include_total = params.get("_total").is_some_and(|v| v == "accurate");
+    // Always include total in search results per FHIR R5 spec
+    let include_total = params
+        .get("_total")
+        .map(|t| t != "none")
+        .unwrap_or(true);
     let (observations, total) = repo.search(&params, include_total).await?;
 
     // Build Bundle using efficient string concatenation

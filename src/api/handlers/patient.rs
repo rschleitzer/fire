@@ -165,11 +165,12 @@ pub async fn search_patients(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    // Check if _total parameter is requested
+    // Always include total in search results per FHIR R5 spec
+    // (can be disabled with _total=none in the future if needed)
     let include_total = params
         .get("_total")
-        .map(|t| t == "accurate")
-        .unwrap_or(false);
+        .map(|t| t != "none")
+        .unwrap_or(true);
 
     let (patients, total) = repo.search(&params, include_total).await?;
 
