@@ -163,28 +163,22 @@ pub async fn read_observation(
     }
 }
 
-/// Update an observation - Uses update semantics with version checking
+/// Update an observation - Uses upsert semantics per FHIR spec
 pub async fn update_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<String>,
     headers: HeaderMap,
     Json(content): Json<Value>,
-) -> Result<(StatusCode, Json<Value>)> {
+) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     // Validate FHIR ID format
     validate_fhir_id(&id)?;
 
-    // Check if resource exists first
-    let existing = repo.read(&id).await;
+    // Check if resource exists for If-Match version checking
+    let existing = repo.read(&id).await.ok();
+    let is_new_resource = existing.is_none();
 
-    if existing.is_err() {
-        // Resource doesn't exist - return 404 per FHIR spec
-        return Err(crate::error::FhirError::NotFound);
-    }
-
-    let existing_observation = existing.unwrap();
-
-    // Check If-Match header for version conflict
-    if let Some(if_match) = headers.get("if-match") {
+    // Check If-Match header for version conflict (only if resource exists)
+    if let (Some(if_match), Some(existing_observation)) = (headers.get("if-match"), &existing) {
         let if_match_str = if_match.to_str()
             .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-Match header".to_string()))?;
 
@@ -203,8 +197,28 @@ pub async fn update_observation(
         }
     }
 
-    let observation = repo.update(&id, content).await?;
-    Ok((StatusCode::OK, Json(observation.content)))}
+    // Use upsert to create or update
+    let observation = repo.upsert(&id, content).await?;
+
+    // Return 201 Created if new resource, 200 OK if updated
+    let status = if is_new_resource {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+
+    // Add Location header for newly created resources
+    let mut response_headers = HeaderMap::new();
+    if is_new_resource {
+        let location = format!("/fhir/Observation/{}", observation.id);
+        response_headers.insert(
+            axum::http::header::LOCATION,
+            location.parse().unwrap()
+        );
+    }
+
+    Ok((status, response_headers, Json(observation.content)))
+}
 
 
 /// Update an observation (HTML form)
@@ -250,7 +264,7 @@ pub async fn update_observation_form(
         "valueString": form_data.value
     });
 
-    repo.update(&id, content).await?;
+    repo.upsert(&id, content).await?;
 
     // Redirect back to the observation detail page
     Ok(Redirect::to(&format!("/fhir/Observation/{}", id)))

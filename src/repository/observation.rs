@@ -93,6 +93,241 @@ impl ObservationRepository {
         self.read(&id).await
     }
 
+    /// Upsert an observation resource with specific ID (FHIR-compliant PUT)
+    /// Creates with client-specified ID if doesn't exist, updates if exists
+    pub async fn upsert(&self, id: &str, mut content: Value) -> Result<Observation> {
+        // Validate resource
+        validate_observation(&content)?;
+
+        let mut tx = self.pool.begin().await?;
+
+        // Check if resource exists
+        let existing = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM observation
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if let Some(old_observation) = existing {
+            // Resource exists - perform update
+            let new_version_id = old_observation.version_id + 1;
+            let last_updated = Utc::now();
+
+            // Inject id and meta into content before storing
+            content = crate::models::observation::inject_id_meta(&content, id, new_version_id, &last_updated);
+
+            // Extract search params from OLD content for history
+            let old_params = extract_observation_search_params(&old_observation.content);
+
+            // Convert f64 to BigDecimal for old params
+            let old_value_qty_decimal = old_params.value_quantity_value.map(|v| {
+                sqlx::types::BigDecimal::try_from(v)
+                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            });
+
+            // Insert OLD version into history before updating
+            sqlx::query!(
+                r#"
+                INSERT INTO observation_history (
+                    id, version_id, last_updated, content,
+                    status, category_system, category_code,
+                    code_system, code_code,
+                    subject_reference, patient_reference, encounter_reference,
+                    effective_datetime, effective_period_start, effective_period_end,
+                    issued, value_quantity_value, value_quantity_unit, value_quantity_system,
+                    value_codeable_concept_code, value_string, performer_reference,
+                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
+                    history_operation, history_timestamp
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                "#,
+                old_observation.id,
+                old_observation.version_id,
+                old_observation.last_updated,
+                &old_observation.content,
+                old_params.status,
+                old_params.category_system.is_empty().then_some(None).unwrap_or(Some(&old_params.category_system[..])),
+                old_params.category_code.is_empty().then_some(None).unwrap_or(Some(&old_params.category_code[..])),
+                old_params.code_system,
+                old_params.code_code,
+                old_params.subject_reference,
+                old_params.patient_reference,
+                old_params.encounter_reference,
+                old_params.effective_datetime,
+                old_params.effective_period_start,
+                old_params.effective_period_end,
+                old_params.issued,
+                old_value_qty_decimal,
+                old_params.value_quantity_unit,
+                old_params.value_quantity_system,
+                old_params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&old_params.value_codeable_concept_code[..])),
+                old_params.value_string,
+                old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
+                old_params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_observation[..])),
+                old_params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_type[..])),
+                old_params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.focus_reference[..])),
+                old_params.body_structure_reference,
+                if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
+                Utc::now(),
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            // Extract search parameters for new content
+            let params = extract_observation_search_params(&content);
+
+            // Convert f64 to BigDecimal
+            let value_qty_decimal = params.value_quantity_value.map(|v| {
+                sqlx::types::BigDecimal::try_from(v)
+                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            });
+
+            // Update current table with new version
+            sqlx::query!(
+                r#"
+                UPDATE observation
+                SET
+                    version_id = $2,
+                    last_updated = $3,
+                    content = $4,
+                    status = $5,
+                    category_system = $6,
+                    category_code = $7,
+                    code_system = $8,
+                    code_code = $9,
+                    subject_reference = $10,
+                    patient_reference = $11,
+                    encounter_reference = $12,
+                    effective_datetime = $13,
+                    effective_period_start = $14,
+                    effective_period_end = $15,
+                    issued = $16,
+                    value_quantity_value = $17,
+                    value_quantity_unit = $18,
+                    value_quantity_system = $19,
+                    value_codeable_concept_code = $20,
+                    value_string = $21,
+                    performer_reference = $22,
+                    triggered_by_observation = $23,
+                    triggered_by_type = $24,
+                    focus_reference = $25,
+                    body_structure_reference = $26
+                WHERE id = $1
+                "#,
+                id,
+                new_version_id,
+                last_updated,
+                content,
+                params.status,
+                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+                params.code_system,
+                params.code_code,
+                params.subject_reference,
+                params.patient_reference,
+                params.encounter_reference,
+                params.effective_datetime,
+                params.effective_period_start,
+                params.effective_period_end,
+                params.issued,
+                value_qty_decimal,
+                params.value_quantity_unit,
+                params.value_quantity_system,
+                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
+                params.value_string,
+                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
+                params.body_structure_reference,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            // Fetch and return updated observation
+            self.read(id).await
+        } else {
+            // Resource doesn't exist - perform create with specified ID
+            let version_id = 1;
+            let last_updated = Utc::now();
+
+            tracing::info!(observation_id = %id, "Creating observation with client-specified ID");
+
+            // Inject id and meta into content before storing
+            content = crate::models::observation::inject_id_meta(&content, id, version_id, &last_updated);
+
+            // Extract search parameters
+            let params = extract_observation_search_params(&content);
+
+            // Convert f64 to BigDecimal
+            let value_qty_decimal = params.value_quantity_value.map(|v| {
+                sqlx::types::BigDecimal::try_from(v)
+                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
+            });
+
+            // Insert into current table
+            sqlx::query!(
+                r#"
+                INSERT INTO observation (
+                    id, version_id, last_updated, content,
+                    status, category_system, category_code,
+                    code_system, code_code,
+                    subject_reference, patient_reference, encounter_reference,
+                    effective_datetime, effective_period_start, effective_period_end,
+                    issued, value_quantity_value, value_quantity_unit, value_quantity_system,
+                    value_codeable_concept_code, value_string, performer_reference,
+                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                "#,
+                id,
+                version_id,
+                last_updated,
+                content,
+                params.status,
+                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+                params.code_system,
+                params.code_code,
+                params.subject_reference,
+                params.patient_reference,
+                params.encounter_reference,
+                params.effective_datetime,
+                params.effective_period_start,
+                params.effective_period_end,
+                params.issued,
+                value_qty_decimal,
+                params.value_quantity_unit,
+                params.value_quantity_system,
+                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
+                params.value_string,
+                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
+                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
+                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
+                params.body_structure_reference,
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            // Fetch and return the created observation
+            self.read(id).await
+        }
+    }
+
     /// Read current version of an observation (returns raw JSON)
     pub async fn read(&self, id: &str) -> Result<Observation> {
         let observation = sqlx::query_as!(
