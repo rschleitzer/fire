@@ -282,17 +282,66 @@ pub async fn search_patients(
         }
     }
 
+    // Build pagination links
+    let base_url = format!("http://localhost:3000{}", uri.path());
+    let query_params = uri.query().unwrap_or("");
+
+    // Parse _count and _offset from params
+    let count = params
+        .get("_count")
+        .and_then(|c| c.parse::<i64>().ok())
+        .unwrap_or(50);
+    let offset = params
+        .get("_offset")
+        .and_then(|o| o.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    // Build self link
+    let self_link = if query_params.is_empty() {
+        base_url.clone()
+    } else {
+        format!("{}?{}", base_url, query_params)
+    };
+
+    // Build next link if there are more results
+    let next_link = if let Some(total_count) = total {
+        if offset + count < total_count {
+            // Build next URL with updated offset
+            let next_offset = offset + count;
+            let mut next_params: Vec<String> = params
+                .iter()
+                .filter(|(k, _)| k.as_str() != "_offset")
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            next_params.push(format!("_offset={}", next_offset));
+            Some(format!("{}?{}", base_url, next_params.join("&")))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build links array
+    let mut links = vec![
+        format!(r#"{{"relation":"self","url":"{}"}}"#, self_link)
+    ];
+    if let Some(next_url) = next_link {
+        links.push(format!(r#"{{"relation":"next","url":"{}"}}"#, next_url));
+    }
+    let links_str = links.join(",");
+
     // Build final Bundle JSON string
     let entries_str = entries.join(",");
     let bundle_str = if let Some(total_count) = total {
         format!(
-            r#"{{"resourceType":"Bundle","type":"searchset","total":{},"entry":[{}]}}"#,
-            total_count, entries_str
+            r#"{{"resourceType":"Bundle","type":"searchset","total":{},"link":[{}],"entry":[{}]}}"#,
+            total_count, links_str, entries_str
         )
     } else {
         format!(
-            r#"{{"resourceType":"Bundle","type":"searchset","entry":[{}]}}"#,
-            entries_str
+            r#"{{"resourceType":"Bundle","type":"searchset","link":[{}],"entry":[{}]}}"#,
+            links_str, entries_str
         )
     };
 

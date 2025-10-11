@@ -886,8 +886,10 @@ impl PatientRepository {
                         crate::search::DatePrefix::Ge => ">=",
                         crate::search::DatePrefix::Le => "<=",
                     };
-                    sql.push_str(&format!(" AND birthdate {} ${}", op, bind_count));
-                    bind_values.push(comparison.value.to_string());
+                    // Cast the string parameter to DATE in SQL
+                    sql.push_str(&format!(" AND birthdate {} ${}::date", op, bind_count));
+                    // Format as YYYY-MM-DD which PostgreSQL expects
+                    bind_values.push(comparison.value.format("%Y-%m-%d").to_string());
                 }
                 SearchCondition::Gender(gender) => {
                     bind_count += 1;
@@ -1064,7 +1066,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     crate::search::DatePrefix::Ge => ">=",
                     crate::search::DatePrefix::Le => "<=",
                 };
-                sql.push_str(&format!(" AND birthdate {} ${}", op, bind_count));
+                sql.push_str(&format!(" AND birthdate {} ${}::date", op, bind_count));
             }
             SearchCondition::Gender(_gender) => {
                 bind_count += 1;
