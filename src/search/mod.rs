@@ -141,9 +141,23 @@ impl SearchQuery {
             conditions.push(SearchCondition::Name(search));
         }
 
-        // Parse identifier
+        // Parse identifier (supports system|value format)
         if let Some(identifier) = params.get("identifier") {
-            conditions.push(SearchCondition::Identifier(identifier.clone()));
+            // Check if identifier contains system|value format
+            if identifier.contains('|') {
+                if let Some((system, value)) = identifier.split_once('|') {
+                    conditions.push(SearchCondition::IdentifierSystemValue {
+                        system: system.to_string(),
+                        value: value.to_string(),
+                    });
+                } else {
+                    // Malformed system|value, treat as simple identifier
+                    conditions.push(SearchCondition::Identifier(identifier.clone()));
+                }
+            } else {
+                // No pipe - simple value-only search
+                conditions.push(SearchCondition::Identifier(identifier.clone()));
+            }
         }
 
         // Parse identifier_system and identifier_value (both must be present)
