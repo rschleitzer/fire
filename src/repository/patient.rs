@@ -1489,4 +1489,17 @@ impl PatientRepository {
 
         Ok(history)
     }
+
+    /// Purge all patient history records - FOR TESTING ONLY
+    /// This removes ALL history records to ensure test isolation
+    /// Note: This does NOT delete current (non-deleted) patient records
+    pub async fn purge(&self) -> Result<()> {
+        // Delete all history records for test isolation
+        // This ensures no constraint violations on repeated test runs
+        sqlx::query!("DELETE FROM patient_history")
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
 }

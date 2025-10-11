@@ -8,6 +8,7 @@ use std::sync::Arc;
 use super::handlers::bundle::{process_bundle, BundleState};
 use super::handlers::health::{health_check, liveness_check, readiness_check, SharedPool};
 use super::handlers::metadata::capability_statement;
+use super::handlers::purge::{purge_schema, PurgeState};
 
 async fn index() -> Html<String> {
     Html(std::fs::read_to_string("static/index.html").unwrap_or_else(|_| String::from("<h1>Fire FHIR Server</h1>")))
@@ -110,4 +111,18 @@ pub fn metadata_routes() -> Router {
 
 pub fn root_routes() -> Router {
     Router::new().route("/", get(index))
+}
+
+pub fn purge_routes(
+    patient_repo: SharedPatientRepo,
+    observation_repo: SharedObservationRepo,
+) -> Router {
+    let state = Arc::new(PurgeState {
+        patient_repo,
+        observation_repo,
+    });
+
+    Router::new()
+        .route("/purgeschema/:resource_type/:key", get(purge_schema))
+        .with_state(state)
 }

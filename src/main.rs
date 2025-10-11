@@ -5,7 +5,8 @@ use tower_http::{cors::CorsLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use fire::api::{
-    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes, root_routes,
+    bundle_routes, health_routes, metadata_routes, observation_routes, patient_routes, purge_routes,
+    root_routes,
 };
 use fire::config::Config;
 use fire::middleware::request_id::add_request_id;
@@ -73,7 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(metadata_routes())
         .merge(patient_routes(patient_repo.clone()))
         .merge(observation_routes(observation_repo.clone()))
-        .merge(bundle_routes(patient_repo, observation_repo))
+        .merge(bundle_routes(patient_repo.clone(), observation_repo.clone()))
+        .merge(purge_routes(patient_repo, observation_repo))
         .nest_service("/static", ServeDir::new("static"))
         .layer(middleware::from_fn(add_request_id))
         .layer(CorsLayer::permissive())
