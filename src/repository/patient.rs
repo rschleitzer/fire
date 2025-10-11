@@ -20,7 +20,7 @@ impl PatientRepository {
     }
 
     /// Create a new patient resource (version 1)
-    pub async fn create(&self, content: Value) -> Result<Patient> {
+    pub async fn create(&self, mut content: Value) -> Result<Patient> {
         tracing::debug!("Creating new patient resource");
 
         // Validate resource
@@ -32,7 +32,10 @@ impl PatientRepository {
 
         tracing::info!(patient_id = %id, "Creating patient");
 
-        // Extract search parameters
+        // Inject id and meta fields into content before storing
+        content = crate::models::patient::inject_id_meta(&content, &id, version_id, &last_updated);
+
+        // Extract search parameters from complete content
         let params = extract_patient_search_params(&content);
 
         let mut tx = self.pool.begin().await?;
@@ -122,7 +125,7 @@ impl PatientRepository {
 
     /// Upsert a patient resource with specific ID (FHIR-compliant PUT)
     /// Creates with client-specified ID if doesn't exist, updates if exists
-    pub async fn upsert(&self, id: &Uuid, content: Value) -> Result<Patient> {
+    pub async fn upsert(&self, id: &Uuid, mut content: Value) -> Result<Patient> {
         // Validate resource
         validate_patient(&content)?;
 
@@ -148,6 +151,9 @@ impl PatientRepository {
             // Resource exists - perform update
             let new_version_id = old_patient.version_id + 1;
             let last_updated = Utc::now();
+
+            // Inject id and meta into content before storing
+            content = crate::models::patient::inject_id_meta(&content, id, new_version_id, &last_updated);
 
             // Extract search params from OLD content for history
             let old_params = extract_patient_search_params(&old_patient.content);
@@ -296,6 +302,9 @@ impl PatientRepository {
 
             tracing::info!(patient_id = %id, "Creating patient with client-specified ID");
 
+            // Inject id and meta into content before storing
+            content = crate::models::patient::inject_id_meta(&content, id, version_id, &last_updated);
+
             // Extract search parameters
             let params = extract_patient_search_params(&content);
 
@@ -364,7 +373,7 @@ impl PatientRepository {
     }
 
     /// Update a patient resource (increment version)
-    pub async fn update(&self, id: &Uuid, content: Value) -> Result<Patient> {
+    pub async fn update(&self, id: &Uuid, mut content: Value) -> Result<Patient> {
         // Validate resource
         validate_patient(&content)?;
 
@@ -389,6 +398,9 @@ impl PatientRepository {
 
         let new_version_id = old_patient.version_id + 1;
         let last_updated = Utc::now();
+
+        // Inject id and meta into new content before storing
+        content = crate::models::patient::inject_id_meta(&content, id, new_version_id, &last_updated);
 
         // Extract search params from OLD content for history
         let old_params = extract_patient_search_params(&old_patient.content);

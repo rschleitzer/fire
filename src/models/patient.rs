@@ -52,39 +52,38 @@ impl VersionedResource for Patient {
     }
 }
 
-impl Patient {
-    /// Returns the FHIR resource with id and meta fields injected
-    pub fn to_fhir_json(&self) -> Value {
-        if let Some(content_obj) = self.content.as_object() {
-            // Create new object with fields in FHIR-standard order
-            let mut resource = serde_json::Map::new();
+/// Inject id and meta fields into a FHIR resource
+/// This is used at storage time to ensure all stored resources have complete id/meta
+pub fn inject_id_meta(content: &Value, id: &Uuid, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
+    if let Some(content_obj) = content.as_object() {
+        // Create new object with fields in FHIR-standard order
+        let mut resource = serde_json::Map::new();
 
-            // 1. resourceType (if present in content)
-            if let Some(resource_type) = content_obj.get("resourceType") {
-                resource.insert("resourceType".to_string(), resource_type.clone());
-            }
-
-            // 2. id
-            resource.insert("id".to_string(), serde_json::json!(self.id.to_string()));
-
-            // 3. meta
-            resource.insert("meta".to_string(), serde_json::json!({
-                "versionId": self.version_id.to_string(),
-                "lastUpdated": self.last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            }));
-
-            // 4. All other fields from content (except resourceType which we already added)
-            for (key, value) in content_obj {
-                if key != "resourceType" && key != "id" && key != "meta" {
-                    resource.insert(key.clone(), value.clone());
-                }
-            }
-
-            Value::Object(resource)
-        } else {
-            // Fallback if content is not an object
-            self.content.clone()
+        // 1. resourceType (if present in content)
+        if let Some(resource_type) = content_obj.get("resourceType") {
+            resource.insert("resourceType".to_string(), resource_type.clone());
         }
+
+        // 2. id (always inject)
+        resource.insert("id".to_string(), serde_json::json!(id.to_string()));
+
+        // 3. meta (always inject)
+        resource.insert("meta".to_string(), serde_json::json!({
+            "versionId": version_id.to_string(),
+            "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        }));
+
+        // 4. All other fields from content (skip resourceType, id, meta if client sent them)
+        for (key, value) in content_obj {
+            if key != "resourceType" && key != "id" && key != "meta" {
+                resource.insert(key.clone(), value.clone());
+            }
+        }
+
+        Value::Object(resource)
+    } else {
+        // Fallback if content is not an object - just return as-is
+        content.clone()
     }
 }
 

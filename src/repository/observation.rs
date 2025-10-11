@@ -20,7 +20,7 @@ impl ObservationRepository {
     }
 
     /// Create a new observation resource (version 1)
-    pub async fn create(&self, content: Value) -> Result<Observation> {
+    pub async fn create(&self, mut content: Value) -> Result<Observation> {
         // Validate resource
         validate_observation(&content)?;
 
@@ -28,7 +28,10 @@ impl ObservationRepository {
         let version_id = 1;
         let last_updated = Utc::now();
 
-        // Extract search parameters
+        // Inject id and meta fields into content before storing
+        content = crate::models::observation::inject_id_meta(&content, &id, version_id, &last_updated);
+
+        // Extract search parameters from complete content
         let params = extract_observation_search_params(&content);
 
         let mut tx = self.pool.begin().await?;
@@ -193,7 +196,7 @@ impl ObservationRepository {
     }
 
     /// Update an observation resource (increment version)
-    pub async fn update(&self, id: &Uuid, content: Value) -> Result<Observation> {
+    pub async fn update(&self, id: &Uuid, mut content: Value) -> Result<Observation> {
         // Validate resource
         validate_observation(&content)?;
 
@@ -204,6 +207,9 @@ impl ObservationRepository {
 
         let new_version_id = old_observation.version_id + 1;
         let last_updated = Utc::now();
+
+        // Inject id and meta into new content before storing
+        content = crate::models::observation::inject_id_meta(&content, id, new_version_id, &last_updated);
 
         // Extract search parameters from OLD content for history
         let old_params = extract_observation_search_params(&old_observation.content);

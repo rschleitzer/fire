@@ -74,7 +74,7 @@ pub async fn create_observation(
                 axum::http::header::LOCATION,
                 format!("/fhir/Observation/{}", existing_observation.id).parse().unwrap()
             );
-            return Ok((StatusCode::OK, response_headers, Json(existing_observation.to_fhir_json())));
+            return Ok((StatusCode::OK, response_headers, Json(existing_observation.content.clone())));
         }
         // No match found - continue with create
     }
@@ -89,7 +89,7 @@ pub async fn create_observation(
         location.parse().unwrap()
     );
 
-    Ok((StatusCode::CREATED, response_headers, Json(observation.to_fhir_json())))
+    Ok((StatusCode::CREATED, response_headers, Json(observation.content)))
 }
 
 /// Read an observation by ID
@@ -106,8 +106,6 @@ pub async fn read_observation(
     // Try to read the observation - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(observation) => {
-            let fhir_json = observation.to_fhir_json();
-
             // Build ETag header with version
             let etag = format!("W/\"{}\"", observation.version_id);
 
@@ -115,17 +113,17 @@ pub async fn read_observation(
                 ResponseFormat::Html => {
                     let template = ObservationEditTemplate {
                         id: id.to_string(),
-                        resource_json: serde_json::to_string(&fhir_json)?,
+                        resource_json: serde_json::to_string(&observation.content)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => {
                     let mut response_headers = HeaderMap::new();
                     response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
-                    Ok((response_headers, Json(fhir_json)).into_response())
+                    Ok((response_headers, Json(observation.content)).into_response())
                 }
                 ResponseFormat::Xml => {
-                    let xml_string = json_to_xml(&fhir_json)
+                    let xml_string = json_to_xml(&observation.content)
                         .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
                     Ok((
                         [
@@ -208,7 +206,7 @@ pub async fn update_observation(
     }
 
     let observation = repo.update(&id, content).await?;
-    Ok((StatusCode::OK, Json(observation.to_fhir_json())))}
+    Ok((StatusCode::OK, Json(observation.content)))}
 
 
 /// Update an observation (HTML form)
@@ -392,7 +390,7 @@ pub async fn search_observations(
     for obs in &observations {
         entries.push(format!(
             r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&obs.to_fhir_json())?
+            serde_json::to_string(&obs.content)?
         ));
     }
 
@@ -422,7 +420,7 @@ pub async fn search_observations(
                 if let Ok(patient) = repo.read_patient(&patient_id).await {
                     entries.push(format!(
                         r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&patient.to_fhir_json())?
+                        serde_json::to_string(&patient.content)?
                     ));
                 }
             }
@@ -452,24 +450,23 @@ pub async fn search_observations(
             let observation_rows: Vec<ObservationRow> = observations
                 .iter()
                 .map(|obs| {
-                    let fhir_json = obs.to_fhir_json();
                     ObservationRow {
                         id: obs.id.to_string(),
                         version_id: obs.version_id.to_string(),
-                        code: extract_observation_code(&fhir_json),
-                        status: fhir_json
+                        code: extract_observation_code(&obs.content),
+                        status: obs.content
                             .get("status")
                             .and_then(|s| s.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        value: extract_observation_value(&fhir_json),
-                        subject: fhir_json
+                        value: extract_observation_value(&obs.content),
+                        subject: obs.content
                             .get("subject")
                             .and_then(|s| s.get("reference"))
                             .and_then(|r| r.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        effective_date: fhir_json
+                        effective_date: obs.content
                             .get("effectiveDateTime")
                             .and_then(|e| e.as_str())
                             .unwrap_or("Unknown")

@@ -74,7 +74,7 @@ pub async fn create_patient(
                 axum::http::header::LOCATION,
                 format!("/fhir/Patient/{}", existing_patient.id).parse().unwrap()
             );
-            return Ok((StatusCode::OK, response_headers, Json(existing_patient.to_fhir_json())));
+            return Ok((StatusCode::OK, response_headers, Json(existing_patient.content.clone())));
         }
         // No match found - continue with create
     }
@@ -89,7 +89,7 @@ pub async fn create_patient(
         location.parse().unwrap()
     );
 
-    Ok((StatusCode::CREATED, response_headers, Json(patient.to_fhir_json())))
+    Ok((StatusCode::CREATED, response_headers, Json(patient.content)))
 }
 
 /// Read a patient by ID
@@ -106,8 +106,6 @@ pub async fn read_patient(
     // Try to read the patient - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(patient) => {
-            let fhir_json = patient.to_fhir_json();
-
             // Build ETag header with version
             let etag = format!("W/\"{}\"", patient.version_id);
 
@@ -115,17 +113,17 @@ pub async fn read_patient(
                 ResponseFormat::Html => {
                     let template = PatientEditTemplate {
                         id: id.to_string(),
-                        resource_json: serde_json::to_string(&fhir_json)?,
+                        resource_json: serde_json::to_string(&patient.content)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
                 }
                 ResponseFormat::Json => {
                     let mut response_headers = HeaderMap::new();
                     response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
-                    Ok((response_headers, Json(fhir_json)).into_response())
+                    Ok((response_headers, Json(patient.content)).into_response())
                 }
                 ResponseFormat::Xml => {
-                    let xml_string = json_to_xml(&fhir_json)
+                    let xml_string = json_to_xml(&patient.content)
                         .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
                     Ok((
                         [
@@ -205,7 +203,7 @@ pub async fn update_patient(
     }
 
     let patient = repo.update(&id, content).await?;
-    Ok((StatusCode::OK, Json(patient.to_fhir_json())))
+    Ok((StatusCode::OK, Json(patient.content)))
 }
 
 /// Update a patient (HTML form) - Uses upsert semantics per FHIR spec
@@ -264,7 +262,7 @@ pub async fn search_patients(
     for p in &patients {
         entries.push(format!(
             r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&p.to_fhir_json())?
+            serde_json::to_string(&p.content)?
         ));
     }
 
@@ -277,7 +275,7 @@ pub async fn search_patients(
                 for obs in observations {
                     entries.push(format!(
                         r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&obs.to_fhir_json())?
+                        serde_json::to_string(&obs.content)?
                     ));
                 }
             }
@@ -307,22 +305,21 @@ pub async fn search_patients(
             let patient_rows: Vec<PatientRow> = patients
                 .iter()
                 .map(|p| {
-                    let fhir_json = p.to_fhir_json();
                     PatientRow {
                         id: p.id.to_string(),
                         version_id: p.version_id.to_string(),
-                        name: extract_patient_name(&fhir_json),
-                        gender: fhir_json
+                        name: extract_patient_name(&p.content),
+                        gender: p.content
                             .get("gender")
                             .and_then(|g| g.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        birth_date: fhir_json
+                        birth_date: p.content
                             .get("birthDate")
                             .and_then(|b| b.as_str())
                             .unwrap_or("Unknown")
                             .to_string(),
-                        active: fhir_json
+                        active: p.content
                             .get("active")
                             .and_then(|a| a.as_bool())
                             .unwrap_or(true),
