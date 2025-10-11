@@ -818,6 +818,19 @@ impl PatientRepository {
                                          AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
                                          AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
                         }
+                        crate::search::StringModifier::Not => {
+                            bind_count += 1;
+                            let param_num = bind_count;
+                            sql.push_str(&format!(
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                param_num
+                            ));
+                            bind_values.push(format!("%{}%", search.value));
+                        }
                     }
                 }
                 SearchCondition::FamilyName(search) => {
@@ -834,6 +847,11 @@ impl PatientRepository {
                         }
                         crate::search::StringModifier::Missing => {
                             sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                        }
+                        crate::search::StringModifier::Not => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                            bind_values.push(format!("%{}%", search.value));
                         }
                     }
                 }
@@ -853,6 +871,10 @@ impl PatientRepository {
                             }
                             crate::search::StringModifier::Missing => {
                                 // Missing doesn't make sense with multiple values, skip
+                                bind_count -= 1;
+                            }
+                            crate::search::StringModifier::Not => {
+                                // Not doesn't make sense with multiple values in OR, skip
                                 bind_count -= 1;
                             }
                         }
@@ -878,6 +900,11 @@ impl PatientRepository {
                                 " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
                             );
                         }
+                        crate::search::StringModifier::Not => {
+                            bind_count += 1;
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                            bind_values.push(format!("%{}%", search.value));
+                        }
                     }
                 }
                 SearchCondition::GivenNameOr(searches) => {
@@ -894,6 +921,10 @@ impl PatientRepository {
                                 bind_values.push(search.value.clone());
                             }
                             crate::search::StringModifier::Missing => {
+                                bind_count -= 1;
+                            }
+                            crate::search::StringModifier::Not => {
+                                // Not doesn't make sense with multiple values in OR, skip
                                 bind_count -= 1;
                             }
                         }
@@ -922,6 +953,15 @@ impl PatientRepository {
                     bind_values.push(system.clone());
                     bind_values.push(value.clone());
                 }
+                SearchCondition::IdentifierMissing(is_missing) => {
+                    if *is_missing {
+                        // Field IS NULL or empty array
+                        sql.push_str(" AND (identifier_value IS NULL OR array_length(identifier_value, 1) IS NULL)");
+                    } else {
+                        // Field IS NOT NULL and has values
+                        sql.push_str(" AND (identifier_value IS NOT NULL AND array_length(identifier_value, 1) > 0)");
+                    }
+                }
                 SearchCondition::Birthdate(comparison) => {
                     bind_count += 1;
                     let op = match comparison.prefix {
@@ -942,6 +982,11 @@ impl PatientRepository {
                     sql.push_str(&format!(" AND gender = ${}", bind_count));
                     bind_values.push(gender.clone());
                 }
+                SearchCondition::GenderNot(gender) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND (gender IS NULL OR gender != ${})", bind_count));
+                    bind_values.push(gender.clone());
+                }
                 SearchCondition::GenderOr(genders) => {
                     // Multiple genders with OR logic: (gender = value1 OR gender = value2 OR ...)
                     let mut or_conditions = Vec::new();
@@ -957,6 +1002,11 @@ impl PatientRepository {
                 SearchCondition::Active(active) => {
                     bind_count += 1;
                     sql.push_str(&format!(" AND active = ${}::boolean", bind_count));
+                    bind_values.push(active.to_string());
+                }
+                SearchCondition::ActiveNot(active) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND (active IS NULL OR active != ${}::boolean)", bind_count));
                     bind_values.push(active.to_string());
                 }
                 SearchCondition::ActiveMissing(is_missing) => {
@@ -1063,6 +1113,16 @@ fn build_count_sql(query: &SearchQuery) -> String {
                                      AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
                         bind_count -= 1;
                     }
+                    crate::search::StringModifier::Not => {
+                        sql.push_str(&format!(
+                            " AND NOT (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                            param_num
+                        ));
+                    }
                 }
             }
             SearchCondition::FamilyName(search) => {
@@ -1083,6 +1143,9 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         );
                         bind_count -= 1;
                     }
+                    crate::search::StringModifier::Not => {
+                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                    }
                 }
             }
             SearchCondition::FamilyNameOr(searches) => {
@@ -1097,6 +1160,9 @@ fn build_count_sql(query: &SearchQuery) -> String {
                             or_conditions.push(format!("fn = ${}", bind_count));
                         }
                         crate::search::StringModifier::Missing => {
+                            bind_count -= 1;
+                        }
+                        crate::search::StringModifier::Not => {
                             bind_count -= 1;
                         }
                     }
@@ -1123,6 +1189,9 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         );
                         bind_count -= 1;
                     }
+                    crate::search::StringModifier::Not => {
+                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                    }
                 }
             }
             SearchCondition::GivenNameOr(searches) => {
@@ -1137,6 +1206,9 @@ fn build_count_sql(query: &SearchQuery) -> String {
                             or_conditions.push(format!("gn = ${}", bind_count));
                         }
                         crate::search::StringModifier::Missing => {
+                            bind_count -= 1;
+                        }
+                        crate::search::StringModifier::Not => {
                             bind_count -= 1;
                         }
                     }
@@ -1163,6 +1235,15 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     bind_count - 1, bind_count
                 ));
             }
+            SearchCondition::IdentifierMissing(is_missing) => {
+                if *is_missing {
+                    // Field IS NULL or empty array
+                    sql.push_str(" AND (identifier_value IS NULL OR array_length(identifier_value, 1) IS NULL)");
+                } else {
+                    // Field IS NOT NULL and has values
+                    sql.push_str(" AND (identifier_value IS NOT NULL AND array_length(identifier_value, 1) > 0)");
+                }
+            }
             SearchCondition::Birthdate(comparison) => {
                 bind_count += 1;
                 let op = match comparison.prefix {
@@ -1179,6 +1260,10 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 bind_count += 1;
                 sql.push_str(&format!(" AND gender = ${}", bind_count));
             }
+            SearchCondition::GenderNot(_gender) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND (gender IS NULL OR gender != ${})", bind_count));
+            }
             SearchCondition::GenderOr(genders) => {
                 let mut or_conditions = Vec::new();
                 for _gender in genders {
@@ -1192,6 +1277,10 @@ fn build_count_sql(query: &SearchQuery) -> String {
             SearchCondition::Active(_active) => {
                 bind_count += 1;
                 sql.push_str(&format!(" AND active = ${}::boolean", bind_count));
+            }
+            SearchCondition::ActiveNot(_active) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND (active IS NULL OR active != ${}::boolean)", bind_count));
             }
             SearchCondition::ActiveMissing(is_missing) => {
                 if *is_missing {

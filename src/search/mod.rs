@@ -30,9 +30,12 @@ pub enum SearchCondition {
     Name(StringSearch), // Searches both family and given with OR
     Identifier(String),
     IdentifierSystemValue { system: String, value: String }, // system|value search
+    IdentifierMissing(bool), // true = IS NULL, false = IS NOT NULL
     Birthdate(DateComparison),
     Gender(String),
+    GenderNot(String), // :not modifier - NOT equal
     Active(bool),
+    ActiveNot(bool), // :not modifier - NOT equal
     ActiveMissing(bool), // true = IS NULL, false = IS NOT NULL
     // Multiple values with OR logic (comma-separated in FHIR)
     FamilyNameOr(Vec<StringSearch>),
@@ -51,6 +54,7 @@ pub enum StringModifier {
     Contains, // Default - partial match (ILIKE)
     Exact,    // :exact - exact match
     Missing,  // :missing - check if field is null/empty
+    Not,      // :not - NOT match (negation)
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +124,14 @@ impl SearchQuery {
             }
         }
 
+        // Parse family:not
+        if let Some(family) = params.get("family:not") {
+            conditions.push(SearchCondition::FamilyName(StringSearch {
+                value: family.clone(),
+                modifier: StringModifier::Not,
+            }));
+        }
+
         // Parse given name with modifiers
         if let Some(given) = params.get("given") {
             // Check for comma-separated values (OR logic)
@@ -164,6 +176,14 @@ impl SearchQuery {
             }
         }
 
+        // Parse given:not
+        if let Some(given) = params.get("given:not") {
+            conditions.push(SearchCondition::GivenName(StringSearch {
+                value: given.clone(),
+                modifier: StringModifier::Not,
+            }));
+        }
+
         // Parse name (searches both family and given with OR)
         if let Some(name) = params.get("name") {
             let search = parse_string_param("name", name, params)?;
@@ -186,6 +206,15 @@ impl SearchQuery {
             } else {
                 // No pipe - simple value-only search
                 conditions.push(SearchCondition::Identifier(identifier.clone()));
+            }
+        }
+
+        // Parse identifier:missing
+        if let Some(missing) = params.get("identifier:missing") {
+            if missing == "true" {
+                conditions.push(SearchCondition::IdentifierMissing(true));
+            } else if missing == "false" {
+                conditions.push(SearchCondition::IdentifierMissing(false));
             }
         }
 
@@ -217,12 +246,25 @@ impl SearchQuery {
             }
         }
 
+        // Parse gender:not
+        if let Some(gender) = params.get("gender:not") {
+            conditions.push(SearchCondition::GenderNot(gender.clone()));
+        }
+
         // Parse active
         if let Some(active) = params.get("active") {
             let active_bool = active.parse::<bool>().map_err(|_| {
                 FhirError::InvalidSearchParameter(format!("Invalid active value: {}", active))
             })?;
             conditions.push(SearchCondition::Active(active_bool));
+        }
+
+        // Parse active:not
+        if let Some(active) = params.get("active:not") {
+            let active_bool = active.parse::<bool>().map_err(|_| {
+                FhirError::InvalidSearchParameter(format!("Invalid active:not value: {}", active))
+            })?;
+            conditions.push(SearchCondition::ActiveNot(active_bool));
         }
 
         // Parse active:missing
@@ -309,6 +351,16 @@ impl SearchQuery {
                                          AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
                             bind_count -= 1; // No bind parameter needed
                         }
+                        StringModifier::Not => {
+                            sql.push_str(&format!(
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                param_num
+                            ));
+                        }
                     }
                 }
                 SearchCondition::FamilyName(search) => {
@@ -323,6 +375,9 @@ impl SearchQuery {
                         StringModifier::Missing => {
                             sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
                             bind_count -= 1; // No bind parameter needed
+                        }
+                        StringModifier::Not => {
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                         }
                     }
                 }
@@ -344,6 +399,9 @@ impl SearchQuery {
                                 " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
                             );
                             bind_count -= 1; // No bind parameter needed
+                        }
+                        StringModifier::Not => {
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                         }
                     }
                 }
@@ -369,6 +427,15 @@ impl SearchQuery {
                         bind_count - 1, bind_count
                     ));
                 }
+                SearchCondition::IdentifierMissing(is_missing) => {
+                    if *is_missing {
+                        // Field IS NULL or empty array
+                        sql.push_str(" AND (identifier_value IS NULL OR array_length(identifier_value, 1) IS NULL)");
+                    } else {
+                        // Field IS NOT NULL and has values
+                        sql.push_str(" AND (identifier_value IS NOT NULL AND array_length(identifier_value, 1) > 0)");
+                    }
+                }
                 SearchCondition::Birthdate(comparison) => {
                     bind_count += 1;
                     let op = match comparison.prefix {
@@ -385,6 +452,10 @@ impl SearchQuery {
                     bind_count += 1;
                     sql.push_str(&format!(" AND gender = ${}", bind_count));
                 }
+                SearchCondition::GenderNot(_gender) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND (gender IS NULL OR gender != ${})", bind_count));
+                }
                 SearchCondition::GenderOr(genders) => {
                     // OR logic handled by patient repository, not this method
                     bind_count += genders.len();
@@ -392,6 +463,10 @@ impl SearchQuery {
                 SearchCondition::Active(_active) => {
                     bind_count += 1;
                     sql.push_str(&format!(" AND active = ${}", bind_count));
+                }
+                SearchCondition::ActiveNot(_active) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND (active IS NULL OR active != ${})", bind_count));
                 }
                 SearchCondition::ActiveMissing(is_missing) => {
                     if *is_missing {
