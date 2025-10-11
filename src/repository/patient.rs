@@ -648,43 +648,70 @@ impl PatientRepository {
     }
 
     /// Get all versions of a patient from history (includes current version if exists)
-    pub async fn history(&self, id: &Uuid) -> Result<Vec<PatientHistory>> {
-        let mut history = sqlx::query_as!(
-            PatientHistory,
-            r#"
-            SELECT
-                id, version_id, last_updated,
-                content as "content: Value",
-                history_operation, history_timestamp
-            FROM patient_history
-            WHERE id = $1
-            ORDER BY version_id DESC
-            "#,
-            id
-        )
-        .fetch_all(&self.pool)
-        .await?;
+    pub async fn history(&self, id: &Uuid, count: Option<i64>) -> Result<Vec<PatientHistory>> {
+        // Use LIMIT if count is provided, otherwise fetch all
+        let mut history = if let Some(limit) = count {
+            sqlx::query_as!(
+                PatientHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM patient_history
+                WHERE id = $1
+                ORDER BY version_id DESC
+                LIMIT $2
+                "#,
+                id,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as!(
+                PatientHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM patient_history
+                WHERE id = $1
+                ORDER BY version_id DESC
+                "#,
+                id
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
 
         // Try to get current version and add it to history if not already present
+        // Only add if we haven't reached the count limit
         if let Ok(current) = self.read(id).await {
             // Check if current version already exists in history
             let current_version_exists = history.iter().any(|h| h.version_id == current.version_id);
 
             if !current_version_exists {
-                // Convert current Patient to PatientHistory format
-                let current_as_history = PatientHistory {
-                    id: current.id,
-                    version_id: current.version_id,
-                    last_updated: current.last_updated,
-                    content: current.content,
-                    history_operation: if current.version_id == 1 {
-                        "CREATE".to_string()
-                    } else {
-                        "UPDATE".to_string()
-                    },
-                    history_timestamp: current.last_updated,
-                };
-                history.insert(0, current_as_history);
+                // Check if we're at the limit
+                let at_limit = count.map(|c| history.len() >= c as usize).unwrap_or(false);
+
+                if !at_limit {
+                    // Convert current Patient to PatientHistory format
+                    let current_as_history = PatientHistory {
+                        id: current.id,
+                        version_id: current.version_id,
+                        last_updated: current.last_updated,
+                        content: current.content,
+                        history_operation: if current.version_id == 1 {
+                            "CREATE".to_string()
+                        } else {
+                            "UPDATE".to_string()
+                        },
+                        history_timestamp: current.last_updated,
+                    };
+                    history.insert(0, current_as_history);
+                }
             }
         }
 
@@ -1246,5 +1273,94 @@ impl PatientRepository {
         tx.commit().await?;
 
         Ok(())
+    }
+
+    /// Get type-level history - all versions of all patients
+    pub async fn type_history(&self, count: Option<i64>) -> Result<Vec<PatientHistory>> {
+        // Query all history records with optional limit
+        let mut history = if let Some(limit) = count {
+            sqlx::query_as!(
+                PatientHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM patient_history
+                ORDER BY history_timestamp DESC
+                LIMIT $1
+                "#,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as!(
+                PatientHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM patient_history
+                ORDER BY history_timestamp DESC
+                "#
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        // Also get all current versions
+        let current_patients = sqlx::query_as!(
+            Patient,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM patient
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Add current versions to history if not already present and not at limit
+        for current in current_patients {
+            // Check if we're at the limit
+            let at_limit = count.map(|c| history.len() >= c as usize).unwrap_or(false);
+
+            if at_limit {
+                break;
+            }
+
+            let current_version_exists = history
+                .iter()
+                .any(|h| h.id == current.id && h.version_id == current.version_id);
+
+            if !current_version_exists {
+                let current_as_history = PatientHistory {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    history_operation: if current.version_id == 1 {
+                        "CREATE".to_string()
+                    } else {
+                        "UPDATE".to_string()
+                    },
+                    history_timestamp: current.last_updated,
+                };
+                history.push(current_as_history);
+            }
+        }
+
+        // Sort by timestamp descending
+        history.sort_by(|a, b| b.history_timestamp.cmp(&a.history_timestamp));
+
+        // Apply final truncation if needed (after merging and sorting)
+        if let Some(limit) = count {
+            history.truncate(limit as usize);
+        }
+
+        Ok(history)
     }
 }

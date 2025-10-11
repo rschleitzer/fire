@@ -18,7 +18,7 @@ use super::handlers::observation::{
     search_observations, update_observation, update_observation_form, SharedObservationRepo,
 };
 use super::handlers::patient::{
-    create_patient, delete_patient, delete_patients, get_patient_history,
+    create_patient, delete_patient, delete_patients, get_patient_history, get_patient_type_history,
     read_patient, read_patient_version, rollback_patient, search_patients, update_patient,
     update_patient_form, SharedPatientRepo,
 };
@@ -31,6 +31,8 @@ pub fn patient_routes(repo: SharedPatientRepo) -> Router {
                 .post(create_patient)
                 .delete(delete_patients),
         )
+        // Type-level history MUST be before instance routes to match correctly
+        .route("/fhir/Patient/_history", get(get_patient_type_history))
         .route(
             "/fhir/Patient/:id",
             get(read_patient)

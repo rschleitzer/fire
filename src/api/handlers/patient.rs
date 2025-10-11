@@ -352,10 +352,16 @@ pub async fn search_patients(
 pub async fn get_patient_history(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<Uuid>,
+    Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
-    let history = repo.history(&id).await?;
+    // Parse _count parameter
+    let count = params
+        .get("_count")
+        .and_then(|c| c.parse::<i64>().ok());
+
+    let history = repo.history(&id, count).await?;
 
     // Build Bundle using efficient string concatenation
     let total = history.len();
@@ -413,6 +419,61 @@ pub async fn get_patient_history(
                 [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
                 xml_string
             ).into_response())
+        }
+    }
+}
+
+/// Get type-level history for all patients
+pub async fn get_patient_type_history(
+    State(repo): State<SharedPatientRepo>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Result<Response> {
+    // Parse _count parameter
+    let count = params
+        .get("_count")
+        .and_then(|c| c.parse::<i64>().ok());
+
+    let history = repo.type_history(count).await?;
+
+    // Build Bundle using efficient string concatenation
+    let total = history.len();
+    let entries: Vec<String> = history
+        .iter()
+        .map(|h| {
+            format!(
+                r#"{{"resource":{},"request":{{"method":"{}","url":"Patient/{}"}},"response":{{"status":"200","lastModified":"{}"}}}}"#,
+                serde_json::to_string(&h.content).unwrap_or_default(),
+                h.history_operation,
+                h.id,
+                h.last_updated.to_rfc3339()
+            )
+        })
+        .collect();
+
+    let entries_str = entries.join(",");
+    let bundle_str = format!(
+        r#"{{"resourceType":"Bundle","type":"history","total":{},"entry":[{}]}}"#,
+        total, entries_str
+    );
+
+    // Parse string back to Value for Json response
+    let bundle: Value = serde_json::from_str(&bundle_str)?;
+
+    match preferred_format_with_query(&uri, &headers) {
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
+        ResponseFormat::Html => {
+            // For type-level history, just return JSON (no HTML template for this)
+            Ok(Json(bundle).into_response())
         }
     }
 }
