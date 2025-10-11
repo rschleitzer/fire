@@ -16,6 +16,9 @@ pub enum FhirError {
     #[error("Version conflict")]
     VersionConflict,
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Bad request: {0}")]
     BadRequest(String),
 
@@ -51,6 +54,9 @@ impl IntoResponse for FhirError {
                 self.to_string(),
             ),
             FhirError::VersionConflict => {
+                (StatusCode::CONFLICT, "error", "conflict", self.to_string())
+            }
+            FhirError::Conflict(_) => {
                 (StatusCode::CONFLICT, "error", "conflict", self.to_string())
             }
             FhirError::BadRequest(_) => (

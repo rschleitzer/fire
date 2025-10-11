@@ -31,19 +31,61 @@ pub type SharedObservationRepo = Arc<ObservationRepository>;
 /// Create a new observation
 pub async fn create_observation(
     State(repo): State<SharedObservationRepo>,
+    headers: HeaderMap,
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
+    // Check for If-None-Exist header (conditional create)
+    if let Some(if_none_exist) = headers.get("if-none-exist") {
+        let query_string = if_none_exist.to_str()
+            .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-None-Exist header".to_string()))?;
+
+        // Parse query string into HashMap
+        let mut search_params = HashMap::new();
+        for pair in query_string.split('&') {
+            if let Some((key, value)) = pair.split_once('=') {
+                // Basic URL decoding - replace %XX with actual characters
+                let decoded = value.replace("%7C", "|").replace("%7c", "|").replace("+", " ");
+
+                // Special handling for identifier parameter: system|value format
+                if key == "identifier" && decoded.contains('|') {
+                    if let Some((system, val)) = decoded.split_once('|') {
+                        search_params.insert("identifier_system".to_string(), system.to_string());
+                        search_params.insert("identifier_value".to_string(), val.to_string());
+                        continue;
+                    }
+                }
+
+                search_params.insert(key.to_string(), decoded);
+            }
+        }
+
+        // Search for existing resource
+        let (existing, _) = repo.search(&search_params, false).await?;
+
+        if !existing.is_empty() {
+            // Found existing resource - return 200 with existing resource
+            let existing_observation = &existing[0];
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(
+                axum::http::header::LOCATION,
+                format!("/fhir/Observation/{}", existing_observation.id).parse().unwrap()
+            );
+            return Ok((StatusCode::OK, response_headers, Json(existing_observation.to_fhir_json())));
+        }
+        // No match found - continue with create
+    }
+
     let observation = repo.create(content).await?;
 
     // Build Location header per FHIR spec
     let location = format!("/fhir/Observation/{}", observation.id);
-    let mut headers = HeaderMap::new();
-    headers.insert(
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
         axum::http::header::LOCATION,
         location.parse().unwrap()
     );
 
-    Ok((StatusCode::CREATED, headers, Json(observation.to_fhir_json())))
+    Ok((StatusCode::CREATED, response_headers, Json(observation.to_fhir_json())))
 }
 
 /// Read an observation by ID
@@ -81,32 +123,27 @@ pub async fn read_observation(
             }
         }
         Err(crate::error::FhirError::NotFound) => {
-            // Resource doesn't exist - return empty template for new resource
-            let empty_observation = serde_json::json!({
-                "resourceType": "Observation",
-                "id": id.to_string(),
-                "status": "final",
-                "code": { "text": "", "coding": [] },
-                "subject": { "reference": "", "display": "" },
-                "valueQuantity": { "value": null, "unit": "", "system": "http://unitsofmeasure.org", "code": "" }
-            });
-
+            // For HTML requests, return empty template for creating new resource
+            // For JSON/XML (FHIR API), return 404 as per FHIR spec
             match preferred_format_with_query(&uri, &headers) {
                 ResponseFormat::Html => {
+                    let empty_observation = serde_json::json!({
+                        "resourceType": "Observation",
+                        "id": id.to_string(),
+                        "status": "final",
+                        "code": { "text": "", "coding": [] },
+                        "subject": { "reference": "", "display": "" },
+                        "valueQuantity": { "value": null, "unit": "", "system": "http://unitsofmeasure.org", "code": "" }
+                    });
                     let template = ObservationEditTemplate {
                         id: id.to_string(),
                         resource_json: serde_json::to_string(&empty_observation)?,
                     };
                     Ok(Html(template.render().unwrap()).into_response())
                 }
-                ResponseFormat::Json => Ok(Json(empty_observation).into_response()),
-                ResponseFormat::Xml => {
-                    let xml_string = json_to_xml(&empty_observation)
-                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
-                    Ok((
-                        [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
-                        xml_string
-                    ).into_response())
+                ResponseFormat::Json | ResponseFormat::Xml => {
+                    // For FHIR API, return 404 Not Found
+                    Err(crate::error::FhirError::NotFound)
                 }
             }
         }
@@ -114,15 +151,46 @@ pub async fn read_observation(
     }
 }
 
-/// Update an observation
+/// Update an observation - Uses update semantics with version checking
 pub async fn update_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(content): Json<Value>,
-) -> Result<Json<Value>> {
+) -> Result<(StatusCode, Json<Value>)> {
+    // Check if resource exists first
+    let existing = repo.read(&id).await;
+
+    if existing.is_err() {
+        // Resource doesn't exist - return 404 per FHIR spec
+        return Err(crate::error::FhirError::NotFound);
+    }
+
+    let existing_observation = existing.unwrap();
+
+    // Check If-Match header for version conflict
+    if let Some(if_match) = headers.get("if-match") {
+        let if_match_str = if_match.to_str()
+            .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-Match header".to_string()))?;
+
+        // Parse ETag format: W/"version" or just "version"
+        let requested_version = if_match_str
+            .trim_start_matches("W/")
+            .trim_matches('"')
+            .parse::<i32>()
+            .map_err(|_| crate::error::FhirError::BadRequest("Invalid version in If-Match header".to_string()))?;
+
+        if requested_version != existing_observation.version_id {
+            // Version conflict - return 409
+            return Err(crate::error::FhirError::Conflict(
+                format!("Version conflict: expected {}, got {}", existing_observation.version_id, requested_version)
+            ));
+        }
+    }
+
     let observation = repo.update(&id, content).await?;
-    Ok(Json(observation.to_fhir_json()))
-}
+    Ok((StatusCode::OK, Json(observation.to_fhir_json())))}
+
 
 /// Update an observation (HTML form)
 pub async fn update_observation_form(
