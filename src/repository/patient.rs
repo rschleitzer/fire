@@ -901,6 +901,15 @@ impl PatientRepository {
                     sql.push_str(&format!(" AND active = ${}", bind_count));
                     bind_values.push(active.to_string());
                 }
+                SearchCondition::ActiveMissing(is_missing) => {
+                    if *is_missing {
+                        // Field IS NULL
+                        sql.push_str(" AND active IS NULL");
+                    } else {
+                        // Field IS NOT NULL
+                        sql.push_str(" AND active IS NOT NULL");
+                    }
+                }
             }
         }
 
@@ -1075,6 +1084,13 @@ fn build_count_sql(query: &SearchQuery) -> String {
             SearchCondition::Active(_active) => {
                 bind_count += 1;
                 sql.push_str(&format!(" AND active = ${}", bind_count));
+            }
+            SearchCondition::ActiveMissing(is_missing) => {
+                if *is_missing {
+                    sql.push_str(" AND active IS NULL");
+                } else {
+                    sql.push_str(" AND active IS NOT NULL");
+                }
             }
         }
     }

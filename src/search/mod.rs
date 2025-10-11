@@ -33,6 +33,7 @@ pub enum SearchCondition {
     Birthdate(DateComparison),
     Gender(String),
     Active(bool),
+    ActiveMissing(bool), // true = IS NULL, false = IS NOT NULL
 }
 
 #[derive(Debug, Clone)]
@@ -187,6 +188,15 @@ impl SearchQuery {
             conditions.push(SearchCondition::Active(active_bool));
         }
 
+        // Parse active:missing
+        if let Some(missing) = params.get("active:missing") {
+            if missing == "true" {
+                conditions.push(SearchCondition::ActiveMissing(true));
+            } else if missing == "false" {
+                conditions.push(SearchCondition::ActiveMissing(false));
+            }
+        }
+
         // Parse pagination
         let limit = params
             .get("_count")
@@ -333,6 +343,13 @@ impl SearchQuery {
                 SearchCondition::Active(_active) => {
                     bind_count += 1;
                     sql.push_str(&format!(" AND active = ${}", bind_count));
+                }
+                SearchCondition::ActiveMissing(is_missing) => {
+                    if *is_missing {
+                        sql.push_str(" AND active IS NULL");
+                    } else {
+                        sql.push_str(" AND active IS NOT NULL");
+                    }
                 }
             }
         }
