@@ -13,6 +13,7 @@ tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_urlencoded = "0.7"
 quick-xml = { version = "0.31", features = ["serialize"] }
 
 # HTML templating

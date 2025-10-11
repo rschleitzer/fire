@@ -8,3 +8,4 @@ pub mod models;
 pub mod repository;
 pub mod search;
 pub mod services;
+pub mod validation;

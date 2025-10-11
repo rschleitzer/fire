@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
-    Form, Json,
+    Json,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -12,6 +12,7 @@ use crate::api::content_negotiation::*;
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::repository::ObservationRepository;
+use crate::validation::validate_fhir_id;
 use percent_encoding::percent_decode_str;
 use askama::Template;
 use serde::Deserialize;
@@ -98,6 +99,9 @@ pub async fn read_observation(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     // Try to read the observation - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(observation) => {
@@ -166,6 +170,9 @@ pub async fn update_observation(
     headers: HeaderMap,
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, Json<Value>)> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     // Check if resource exists first
     let existing = repo.read(&id).await;
 
@@ -201,11 +208,34 @@ pub async fn update_observation(
 
 
 /// Update an observation (HTML form)
+/// Note: For FHIR API (JSON), POST to instance endpoint returns 400 Bad Request
 pub async fn update_observation_form(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<String>,
-    Form(form_data): Form<ObservationFormData>,
-) -> Result<Redirect> {
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<impl IntoResponse> {
+    // Check content type to determine if this is a FHIR API request or HTML form
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // For FHIR API requests (application/fhir+json or application/json), POST to instance is not allowed
+    if content_type.contains("application/fhir+json") || content_type.contains("application/json") {
+        return Err(crate::error::FhirError::BadRequest(
+            "POST to instance endpoint not allowed. Use PUT for updates.".to_string()
+        ));
+    }
+
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
+    // Parse form data
+    let body_str = String::from_utf8_lossy(&body);
+    let form_data: ObservationFormData = serde_urlencoded::from_str(&body_str)
+        .map_err(|e| crate::error::FhirError::BadRequest(format!("Invalid form data: {}", e)))?;
+
     // Convert form data to FHIR JSON
     let content = serde_json::json!({
         "resourceType": "Observation",
@@ -231,6 +261,9 @@ pub async fn delete_observation(
     State(repo): State<SharedObservationRepo>,
     Path(id): Path<String>,
 ) -> Result<StatusCode> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -242,6 +275,9 @@ pub async fn get_observation_history(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     let history = repo.history(&id).await?;
 
     // Build Bundle using efficient string concatenation
@@ -309,6 +345,9 @@ pub async fn read_observation_version(
     State(repo): State<SharedObservationRepo>,
     Path((id, version_id)): Path<(String, i32)>,
 ) -> Result<(HeaderMap, Json<Value>)> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     let observation = repo.read_version(&id, version_id).await?;
 
     // Build ETag header with version
@@ -350,6 +389,9 @@ pub async fn rollback_observation(
     State(repo): State<SharedObservationRepo>,
     Path((id, version)): Path<(String, i32)>,
 ) -> Result<StatusCode> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }

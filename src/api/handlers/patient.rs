@@ -2,7 +2,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
-    Form, Json,
+    Json,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -13,6 +13,7 @@ use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::repository::PatientRepository;
+use crate::validation::validate_fhir_id;
 use askama::Template;
 use percent_encoding::percent_decode_str;
 
@@ -105,6 +106,9 @@ pub async fn read_patient(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     // Try to read the patient - if it doesn't exist, return empty template for new resource
     match repo.read(&id).await {
         Ok(patient) => {
@@ -174,6 +178,9 @@ pub async fn update_patient(
     headers: HeaderMap,
     Json(content): Json<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     // Check if resource exists first for If-Match version checking
     let existing = repo.read(&id).await;
 
@@ -221,11 +228,34 @@ pub async fn update_patient(
 }
 
 /// Update a patient (HTML form) - Uses upsert semantics per FHIR spec
+/// Note: For FHIR API (JSON), POST to instance endpoint returns 400 Bad Request
 pub async fn update_patient_form(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<String>,
-    Form(form_data): Form<PatientFormData>,
-) -> Result<Redirect> {
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<impl IntoResponse> {
+    // Check content type to determine if this is a FHIR API request or HTML form
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // For FHIR API requests (application/fhir+json or application/json), POST to instance is not allowed
+    if content_type.contains("application/fhir+json") || content_type.contains("application/json") {
+        return Err(crate::error::FhirError::BadRequest(
+            "POST to instance endpoint not allowed. Use PUT for updates.".to_string()
+        ));
+    }
+
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
+    // Parse form data
+    let body_str = String::from_utf8_lossy(&body);
+    let form_data: PatientFormData = serde_urlencoded::from_str(&body_str)
+        .map_err(|e| crate::error::FhirError::BadRequest(format!("Invalid form data: {}", e)))?;
+
     // Convert form data to FHIR JSON
     let content = serde_json::json!({
         "resourceType": "Patient",
@@ -249,6 +279,9 @@ pub async fn delete_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<String>,
 ) -> Result<StatusCode> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -419,6 +452,9 @@ pub async fn get_patient_history(
     headers: HeaderMap,
     uri: axum::http::Uri,
 ) -> Result<Response> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     // Parse _count parameter
     let count = params
         .get("_count")
@@ -546,6 +582,9 @@ pub async fn read_patient_version(
     State(repo): State<SharedPatientRepo>,
     Path((id, version_id)): Path<(String, i32)>,
 ) -> Result<(HeaderMap, Json<Value>)> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     let patient = repo.read_version(&id, version_id).await?;
 
     // Build ETag header with version
@@ -587,6 +626,9 @@ pub async fn rollback_patient(
     State(repo): State<SharedPatientRepo>,
     Path((id, version)): Path<(String, i32)>,
 ) -> Result<StatusCode> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
     repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
 }
