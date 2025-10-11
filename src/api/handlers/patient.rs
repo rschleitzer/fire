@@ -32,9 +32,18 @@ pub type SharedPatientRepo = Arc<PatientRepository>;
 pub async fn create_patient(
     State(repo): State<SharedPatientRepo>,
     Json(content): Json<Value>,
-) -> Result<(StatusCode, Json<Value>)> {
+) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     let patient = repo.create(content).await?;
-    Ok((StatusCode::CREATED, Json(patient.to_fhir_json())))
+
+    // Build Location header per FHIR spec
+    let location = format!("/fhir/Patient/{}", patient.id);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::LOCATION,
+        location.parse().unwrap()
+    );
+
+    Ok((StatusCode::CREATED, headers, Json(patient.to_fhir_json())))
 }
 
 /// Read a patient by ID

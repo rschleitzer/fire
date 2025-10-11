@@ -32,9 +32,18 @@ pub type SharedObservationRepo = Arc<ObservationRepository>;
 pub async fn create_observation(
     State(repo): State<SharedObservationRepo>,
     Json(content): Json<Value>,
-) -> Result<(StatusCode, Json<Value>)> {
+) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
     let observation = repo.create(content).await?;
-    Ok((StatusCode::CREATED, Json(observation.to_fhir_json())))
+
+    // Build Location header per FHIR spec
+    let location = format!("/fhir/Observation/{}", observation.id);
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::LOCATION,
+        location.parse().unwrap()
+    );
+
+    Ok((StatusCode::CREATED, headers, Json(observation.to_fhir_json())))
 }
 
 /// Read an observation by ID
