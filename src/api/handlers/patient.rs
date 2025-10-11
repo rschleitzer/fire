@@ -67,7 +67,14 @@ pub async fn create_patient(
         let (existing, _) = repo.search(&search_params, false).await?;
 
         if !existing.is_empty() {
-            // Found existing resource - return 200 with existing resource
+            // Check for multiple matches - return 412 Precondition Failed per FHIR spec
+            if existing.len() > 1 {
+                return Err(crate::error::FhirError::PreconditionFailed(
+                    format!("Multiple matches found ({} resources)", existing.len())
+                ));
+            }
+
+            // Found exactly one existing resource - return 200 with existing resource
             let existing_patient = &existing[0];
             let mut response_headers = HeaderMap::new();
             response_headers.insert(

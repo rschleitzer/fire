@@ -80,13 +80,7 @@ pub fn validate_patient(content: &Value) -> Result<()> {
                 )));
             }
 
-            // System should be present
-            if identifier.get("system").is_none() {
-                return Err(FhirError::ValidationError(format!(
-                    "identifier[{}] should have a system",
-                    i
-                )));
-            }
+            // System is optional in FHIR R5 (only value is required)
         }
     }
 

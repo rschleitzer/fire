@@ -36,6 +36,9 @@ pub enum FhirError {
 
     #[error("Validation error: {0}")]
     ValidationError(String),
+
+    #[error("Precondition failed: {0}")]
+    PreconditionFailed(String),
 }
 
 impl IntoResponse for FhirError {
@@ -75,6 +78,12 @@ impl IntoResponse for FhirError {
                 StatusCode::BAD_REQUEST,
                 "error",
                 "invalid",
+                self.to_string(),
+            ),
+            FhirError::PreconditionFailed(_) => (
+                StatusCode::PRECONDITION_FAILED,
+                "error",
+                "duplicate",
                 self.to_string(),
             ),
             FhirError::DatabaseError(err) => {
