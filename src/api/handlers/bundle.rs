@@ -40,36 +40,24 @@ pub async fn process_bundle(
         .ok_or_else(|| FhirError::BadRequest("Bundle must have entries".to_string()))?;
 
     let mut response_entries = Vec::new();
+    let mut has_error = false;
 
     // Process each entry
     for entry in entries {
-        let request = entry
-            .get("request")
-            .ok_or_else(|| FhirError::BadRequest("Entry must have a request".to_string()))?;
+        // For batch: continue on errors, wrapping them in response entries
+        // For transaction: stop on first error and rollback
+        let response = match process_entry(&state, entry).await {
+            Ok(resp) => resp,
+            Err(err) => {
+                has_error = true;
 
-        let method = request
-            .get("method")
-            .and_then(|m| m.as_str())
-            .ok_or_else(|| FhirError::BadRequest("Request must have a method".to_string()))?;
+                // For transactions, return error immediately
+                if bundle_type == "transaction" {
+                    return Err(err);
+                }
 
-        let url = request
-            .get("url")
-            .and_then(|u| u.as_str())
-            .ok_or_else(|| FhirError::BadRequest("Request must have a url".to_string()))?;
-
-        let resource = entry.get("resource");
-
-        // Process based on method
-        let response = match method {
-            "POST" => process_post(&state, url, resource).await?,
-            "PUT" => process_put(&state, url, resource).await?,
-            "GET" => process_get(&state, url).await?,
-            "DELETE" => process_delete(&state, url).await?,
-            _ => {
-                return Err(FhirError::BadRequest(format!(
-                    "Unsupported method: {}",
-                    method
-                )))
+                // For batch, wrap error in response entry
+                create_error_response(&err)
             }
         };
 
@@ -86,10 +74,85 @@ pub async fn process_bundle(
     Ok(Json(response_bundle))
 }
 
+async fn process_entry(state: &Arc<BundleState>, entry: &Value) -> Result<Value> {
+    let request = entry
+        .get("request")
+        .ok_or_else(|| FhirError::BadRequest("Entry must have a request".to_string()))?;
+
+    let method = request
+        .get("method")
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| FhirError::BadRequest("Request must have a method".to_string()))?;
+
+    let url = request
+        .get("url")
+        .and_then(|u| u.as_str())
+        .ok_or_else(|| FhirError::BadRequest("Request must have a url".to_string()))?;
+
+    let resource = entry.get("resource");
+
+    // Check for conditional create (ifNoneExist)
+    let if_none_exist = request.get("ifNoneExist").and_then(|v| v.as_str());
+
+    // Process based on method
+    match method {
+        "POST" => process_post(state, url, resource, if_none_exist).await,
+        "PUT" => process_put(state, url, resource).await,
+        "GET" => process_get(state, url).await,
+        "DELETE" => process_delete(state, url).await,
+        _ => Err(FhirError::BadRequest(format!(
+            "Unsupported method: {}",
+            method
+        ))),
+    }
+}
+
+fn create_error_response(err: &FhirError) -> Value {
+    let (status_code, diagnostics) = match err {
+        FhirError::NotFound => (404, "Resource not found"),
+        FhirError::InvalidResource(msg) => (400, msg.as_str()),
+        FhirError::ValidationError(msg) => (400, msg.as_str()),
+        FhirError::BadRequest(msg) => (400, msg.as_str()),
+        FhirError::VersionConflict => (409, "Version conflict"),
+        FhirError::Conflict(msg) => (409, msg.as_str()),
+        FhirError::PreconditionFailed(msg) => (412, msg.as_str()),
+        _ => (500, "Internal server error"),
+    };
+
+    serde_json::json!({
+        "response": {
+            "status": format!("{} {}", status_code, get_status_text(status_code)),
+            "outcome": {
+                "resourceType": "OperationOutcome",
+                "issue": [{
+                    "severity": "error",
+                    "code": "processing",
+                    "diagnostics": diagnostics
+                }]
+            }
+        }
+    })
+}
+
+fn get_status_text(code: u16) -> &'static str {
+    match code {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
+        404 => "Not Found",
+        409 => "Conflict",
+        412 => "Precondition Failed",
+        500 => "Internal Server Error",
+        _ => "Unknown",
+    }
+}
+
 async fn process_post(
     state: &Arc<BundleState>,
     url: &str,
     resource: Option<&Value>,
+    if_none_exist: Option<&str>,
 ) -> Result<Value> {
     let resource = resource
         .ok_or_else(|| FhirError::BadRequest("POST request must have a resource".to_string()))?;
@@ -101,6 +164,33 @@ async fn process_post(
 
     match (url, resource_type) {
         ("Patient", "Patient") => {
+            // Handle conditional create if present
+            if let Some(search_params_str) = if_none_exist {
+                let mut params = std::collections::HashMap::new();
+                for param in search_params_str.split('&') {
+                    if let Some((key, value)) = param.split_once('=') {
+                        params.insert(key.to_string(), value.to_string());
+                    }
+                }
+
+                let (existing, _) = state.patient_repo.search(&params, false).await?;
+
+                if !existing.is_empty() {
+                    // Resource already exists - return 200 with existing resource
+                    let existing_patient = &existing[0];
+                    return Ok(serde_json::json!({
+                        "response": {
+                            "status": "200 OK",
+                            "location": format!("Patient/{}", existing_patient.id),
+                            "etag": format!("W/\"{}\"", existing_patient.version_id),
+                            "lastModified": existing_patient.last_updated
+                        },
+                        "resource": existing_patient.content
+                    }));
+                }
+            }
+
+            // Create new resource
             let patient = state.patient_repo.create(resource.clone()).await?;
             Ok(serde_json::json!({
                 "response": {
@@ -185,46 +275,93 @@ async fn process_put(
 }
 
 async fn process_get(state: &Arc<BundleState>, url: &str) -> Result<Value> {
-    // Parse URL like "Patient/{id}" or "Observation/{id}"
-    let parts: Vec<&str> = url.split('/').collect();
-    if parts.len() != 2 {
-        return Err(FhirError::BadRequest(format!(
-            "Invalid URL format: {}",
-            url
-        )));
-    }
+    // Check if this is a search (has query parameters)
+    if url.contains('?') {
+        let parts: Vec<&str> = url.splitn(2, '?').collect();
+        let resource_type = parts[0];
+        let query_string = parts.get(1).unwrap_or(&"");
 
-    let resource_type = parts[0];
-    let id = Uuid::parse_str(parts[1])
-        .map_err(|_| FhirError::BadRequest(format!("Invalid UUID: {}", parts[1])))?;
+        // Parse query parameters
+        let mut params = std::collections::HashMap::new();
+        for param in query_string.split('&') {
+            if let Some((key, value)) = param.split_once('=') {
+                params.insert(key.to_string(), value.to_string());
+            }
+        }
 
-    match resource_type {
-        "Patient" => {
-            let patient = state.patient_repo.read(&id).await?;
-            Ok(serde_json::json!({
-                "response": {
-                    "status": "200 OK",
-                    "etag": format!("W/\"{}\"", patient.version_id),
-                    "lastModified": patient.last_updated
-                },
-                "resource": patient.content
-            }))
+        match resource_type {
+            "Patient" => {
+                let (patients, total) = state.patient_repo.search(&params, true).await?;
+
+                // Build search bundle
+                let entries: Vec<Value> = patients.into_iter().map(|p| {
+                    serde_json::json!({
+                        "fullUrl": format!("Patient/{}", p.id),
+                        "resource": p.content
+                    })
+                }).collect();
+
+                let search_bundle = serde_json::json!({
+                    "resourceType": "Bundle",
+                    "type": "searchset",
+                    "total": total.unwrap_or(0),
+                    "entry": entries
+                });
+
+                Ok(serde_json::json!({
+                    "response": {
+                        "status": "200 OK"
+                    },
+                    "resource": search_bundle
+                }))
+            }
+            _ => Err(FhirError::BadRequest(format!(
+                "Unsupported resource type for search: {}",
+                resource_type
+            ))),
         }
-        "Observation" => {
-            let observation = state.observation_repo.read(&id).await?;
-            Ok(serde_json::json!({
-                "response": {
-                    "status": "200 OK",
-                    "etag": format!("W/\"{}\"", observation.version_id),
-                    "lastModified": observation.last_updated
-                },
-                "resource": observation.content
-            }))
+    } else {
+        // Parse URL like "Patient/{id}" or "Observation/{id}"
+        let parts: Vec<&str> = url.split('/').collect();
+        if parts.len() != 2 {
+            return Err(FhirError::BadRequest(format!(
+                "Invalid URL format: {}",
+                url
+            )));
         }
-        _ => Err(FhirError::BadRequest(format!(
-            "Unsupported resource type: {}",
-            resource_type
-        ))),
+
+        let resource_type = parts[0];
+        let id = Uuid::parse_str(parts[1])
+            .map_err(|_| FhirError::NotFound)?;  // Treat invalid UUID as NotFound
+
+        match resource_type {
+            "Patient" => {
+                let patient = state.patient_repo.read(&id).await?;
+                Ok(serde_json::json!({
+                    "response": {
+                        "status": "200 OK",
+                        "etag": format!("W/\"{}\"", patient.version_id),
+                        "lastModified": patient.last_updated
+                    },
+                    "resource": patient.content
+                }))
+            }
+            "Observation" => {
+                let observation = state.observation_repo.read(&id).await?;
+                Ok(serde_json::json!({
+                    "response": {
+                        "status": "200 OK",
+                        "etag": format!("W/\"{}\"", observation.version_id),
+                        "lastModified": observation.last_updated
+                    },
+                    "resource": observation.content
+                }))
+            }
+            _ => Err(FhirError::BadRequest(format!(
+                "Unsupported resource type: {}",
+                resource_type
+            ))),
+        }
     }
 }
 
