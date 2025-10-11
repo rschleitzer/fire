@@ -1006,17 +1006,15 @@ impl ObservationRepository {
         Ok(())
     }
 
-    /// Purge deleted observation records from history - FOR TESTING ONLY
-    /// This removes all history records marked with DELETE operation
-    /// Used by test cleanup to ensure test isolation
+    /// Purge all observation history records - FOR TESTING ONLY
+    /// This removes ALL history records to ensure test isolation
+    /// Note: This does NOT delete current (non-deleted) observation records
     pub async fn purge(&self) -> Result<()> {
-        // Delete only the DELETE operation records from history table
-        // This is what Telemed5000 does - it purges "deleted" resources
-        sqlx::query!(
-            "DELETE FROM observation_history WHERE history_operation = 'DELETE'"
-        )
-        .execute(&self.pool)
-        .await?;
+        // Delete all history records for test isolation
+        // This ensures no constraint violations on repeated test runs
+        sqlx::query!("DELETE FROM observation_history")
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
