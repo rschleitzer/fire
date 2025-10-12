@@ -99,20 +99,52 @@ Each resource has: `create()`, `read()`, `read_version()`, `upsert()`, `update()
 
 ## Code Generation Strategy
 
-### Philosophy: Curated Intermediate Model
+### Philosophy: DTD-First with Curated Intermediate Model
 
-Fire uses a **battle-tested two-stage approach**:
+Fire uses a **battle-tested three-stage approach** proven in production commercial FHIR servers:
 
 ```
-FHIR R5 JSONs → Curated XML Model → Generated Code
-  (messy)          (clean/fixed)       (correct)
+                   ┌─────────────────┐
+                   │  fhirspec.dtd   │  ← Proven schema from Telemed5000
+                   │  (Schema/Rules) │
+                   └────────┬────────┘
+                            │
+FHIR R5 JSONs ──────► Curated XML Model ──────► Generated Code
+  (messy)              (clean/fixed)              (correct)
+                    validates against DTD
 ```
 
 **Why This Works:**
-1. **FHIR JSONs have inconsistencies** - Missing fields, vague search params (phonetic), overlapping ValueSets
-2. **Intermediate XML is editable** - Fix issues once, version control corrections
-3. **DSSSL/OpenJade for generation** - Proven at scale, XML-native, declarative templates
-4. **Document corrections** - Each fix documented with `<note>` explaining deviation from spec
+1. **DTD from production system** - Schema proven at scale in commercial FHIR server
+2. **FHIR JSONs have inconsistencies** - Missing fields, vague search params (phonetic), overlapping ValueSets
+3. **Intermediate XML is editable** - Fix issues once, version control corrections, validates against DTD
+4. **DSSSL/OpenJade for generation** - Proven at scale, XML-native, declarative templates
+5. **Document corrections** - Each fix documented in XML, deviation from spec explained
+
+### Phase 0: DTD Schema (Completed ✅)
+
+**File: `model/fhirspec.dtd`**
+
+Defines the structure of the intermediate XML model. Key elements:
+
+- **`<fhir>`** - Root element containing all resources, elements, and codesets
+- **`<resource>`** - Each FHIR resource with properties, elements, searches, operations
+  - `active` attribute controls which resources to generate
+- **`<element>`** - Recursive structure for complex types and backbone elements
+- **`<property>`** - Individual fields with type variants (handles choice types like `value[x]`)
+- **`<search>`** - Search parameters with types: token, reference, quantity, string, composite, etc.
+  - **`<components>`** - For composite search parameters (code-value-quantity, etc.)
+  - **`<paths>`** with **`<parts>`** - Navigation through resource structure
+- **`<codeset>`** - ValueSets for constrained fields
+
+**Key Features:**
+- Handles composite search parameters (just implemented in Fire!)
+- Supports reference targets for chaining
+- Manages choice types (`value[x]`) via `<variants>`
+- Includes upgrade tracking for version migrations
+- Optional operations and profiles (can defer for Fire)
+
+See `model/fhirspec.dtd` for complete schema definition.
 
 ### Phase 1: XML Model Generation
 
@@ -127,7 +159,7 @@ let search_params = load_json("fhir-r5/search-parameters.json");
 let value_sets = load_json("fhir-r5/valuesets.json");
 
 // Outputs provisional model, curated incrementally as we go
-write_xml("model/fhir-fire.xml", extract_and_curate(structure_defs, search_params));
+write_xml("model/fhir.xml", extract_and_curate(structure_defs, search_params));
 ```
 
 **Example XML Output:**
@@ -160,7 +192,7 @@ write_xml("model/fhir-fire.xml", extract_and_curate(structure_defs, search_param
 
 ### Phase 2: Manual Curation
 
-**File: `model/fhir-fire.xml`** (version controlled)
+**File: `model/fhir.xml`** (version controlled)
 
 - Fix FHIR spec inconsistencies
 - Correct misspecified search params
@@ -170,7 +202,7 @@ write_xml("model/fhir-fire.xml", extract_and_curate(structure_defs, search_param
 **Workflow:**
 1. Run generator → code doesn't compile
 2. Find issue in FHIR spec or generated code
-3. Edit `model/fhir-fire.xml` (add `<note>` documenting fix), edit generator if applicable
+3. Edit `model/fhir.xml` (add `<note>` documenting fix), edit generator if applicable
 4. Re-run generator
 5. Repeat until all resources work
 6. Commit XML model, generator, and generated code
@@ -181,7 +213,7 @@ write_xml("model/fhir-fire.xml", extract_and_curate(structure_defs, search_param
 ```
 fire/
 ├── model/
-│   └── fhir-fire.xml              # Curated model (version controlled)
+│   └── fhir.xml                   # Curated model (version controlled)
 ├── codegen/
 │   ├── map.dsl                    # Main entry (includes all modules)
 │   ├── config.scm                 # Generation switches
@@ -216,14 +248,14 @@ set -e
 if [ "$1" == "--rebuild-model" ]; then
     cargo run --bin fhir-to-xml -- \
         --input fhir-r5/ \
-        --output model/fhir-fire.xml
+        --output model/fhir.xml
 fi
 
 # Step 2: Run OpenJade
 export SGML_CATALOG_FILES="$(pwd)/catalog"
 export SP_CHARSET_FIXED="YES"
 export SP_ENCODING="XML"
-openjade -t sgml -d codegen/map.dsl model/fhir-fire.xml
+openjade -t sgml -d codegen/map.dsl model/fhir.xml
 
 # Step 3: Format generated code
 cargo fmt
@@ -520,9 +552,9 @@ This ensures Fire maintains FHIR R5 compliance throughout development.
 - [x] Search chaining and includes
 - [x] 198/198 pyrtest tests passing
 
-### Phase 2: Code Generation (Next)
-- [ ] Build `fhir-to-xml` Rust tool
-- [ ] Generate initial `model/fhir-fire.xml` from FHIR R5 JSONs
+### Phase 2: Code Generation (Current)
+- [x] Build `fhir-to-xml` Rust tool
+- [x] Generate initial `model/fhir.xml` from FHIR R5 JSONs
 - [ ] Set up DSSSL generators
 - [ ] Generate 5-10 common resources (Encounter, Condition, Medication, etc.)
 - [ ] Validate with pyrtest

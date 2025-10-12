@@ -43,3 +43,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # URL encoding/decoding
 percent-encoding = "2.3"
+
+# CLI parsing (for bin/fhir-to-xml)
+clap = { version = "4", features = ["derive"] }

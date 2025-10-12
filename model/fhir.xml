@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fhir SYSTEM "fhirspec.dtd">
+
+<fhir name="Fire" version="5.0.0" reasoning="true" simplified="false">
+  <resources>
+    <resource id="patient" name="Patient" active="true">
+      <description>Demographics and other administrative information about an individual or animal receiving care or other health-related services.</description>
+      <properties>
+        <property id="patient.contained" name="contained" type="element" ref="resource" iscollection="true" notnull="false">
+          <description>Contained, inline Resources</description>
+        </property>
+        <property id="patient.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="patient.modifierextension" name="modifierExtension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Extensions that cannot be ignored</description>
+        </property>
+        <property id="patient.active" name="active" type="boolean" iscollection="false" notnull="false">
+          <description>Whether this patient&apos;s record is in active use</description>
+        </property>
+        <property id="patient.name" name="name" type="element" ref="humanname" iscollection="true" notnull="false">
+          <description>A name associated with the patient</description>
+        </property>
+        <property id="patient.telecom" name="telecom" type="element" ref="contactpoint" iscollection="true" notnull="false">
+          <description>A contact detail for the individual</description>
+        </property>
+        <property id="patient.gender" name="gender" type="code" ref="administrativegender" iscollection="false" notnull="false">
+          <description>male | female | other | unknown</description>
+        </property>
+        <property id="patient.birthdate" name="birthDate" type="date" iscollection="false" notnull="false">
+          <description>The date of birth for the individual</description>
+        </property>
+        <property id="patient.deceased" name="deceased[x]" type="variant" iscollection="false" notnull="false">
+          <description>Indicates if the individual is deceased or not</description>
+          <variants>
+            <variant type="boolean"/>
+            <variant type="dateTime"/>
+          </variants>
+        </property>
+        <property id="patient.address" name="address" type="element" ref="address" iscollection="true" notnull="false">
+          <description>An address for the individual</description>
+        </property>
+        <property id="patient.maritalstatus" name="maritalStatus" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Marital (civil) status of a patient</description>
+        </property>
+        <property id="patient.multiplebirth" name="multipleBirth[x]" type="variant" iscollection="false" notnull="false">
+          <description>Whether patient is part of a multiple birth</description>
+          <variants>
+            <variant type="boolean"/>
+            <variant type="integer"/>
+          </variants>
+        </property>
+        <property id="patient.photo" name="photo" type="element" ref="attachment" iscollection="true" notnull="false">
+          <description>Image of the patient</description>
+        </property>
+        <property id="patient.contact" name="contact" type="element" ref="backboneelement" iscollection="true" notnull="false">
+          <description>A contact party (e.g. guardian, partner, friend) for the patient</description>
+        </property>
+        <property id="patient.communication" name="communication" type="element" ref="backboneelement" iscollection="true" notnull="false">
+          <description>A language which may be used to communicate with the patient about his or her health</description>
+        </property>
+        <property id="patient.generalpractitioner" name="generalPractitioner" type="variant" iscollection="true" notnull="false">
+          <description>Patient&apos;s nominated primary care provider</description>
+        </property>
+        <property id="patient.managingorganization" name="managingOrganization" type="variant" iscollection="false" notnull="false">
+          <description>Organization that is the custodian of the patient record</description>
+        </property>
+        <property id="patient.link" name="link" type="element" ref="backboneelement" iscollection="true" notnull="false">
+          <description>Link to a Patient or RelatedPerson resource that concerns the same actual individual</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+      <searches>
+        <search name="active" query="active" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address" query="address" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address-city" query="address-city" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address-country" query="address-country" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address-postalcode" query="address-postalcode" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address-state" query="address-state" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="address-use" query="address-use" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="birthdate" query="birthdate" type="date">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="death-date" query="death-date" type="date">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="deceased" query="deceased" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="email" query="email" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="family" query="family" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="gender" query="gender" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="general-practitioner" query="general-practitioner" type="reference">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="given" query="given" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="identifier" query="identifier" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="language" query="language" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="link" query="link" type="reference">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="name" query="name" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="organization" query="organization" type="reference">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="phone" query="phone" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="phonetic" query="phonetic" type="string">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+        <search name="telecom" query="telecom" type="token">
+          <paths>
+            <path>
+              <parts>
+                <!-- TODO: Parse expression and generate parts -->
+              </parts>
+            </path>
+          </paths>
+        </search>
+      </searches>
+    </resource>
+  </resources>
+  <elements/>
+  <codesets/>
+</fhir>
