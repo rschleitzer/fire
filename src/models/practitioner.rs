@@ -143,6 +143,15 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
         }
     }
 
+    // Extract telecom
+    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
+        for telecom in telecoms {
+            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
+                params.telecom_value.push(value.to_string());
+            }
+        }
+    }
+
     // Extract active
     if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
         params.active = Some(active);
@@ -160,5 +169,6 @@ pub struct PractitionerSearchParams {
     pub name_text: Vec<String>,
     pub identifier_system: Vec<String>,
     pub identifier_value: Vec<String>,
+    pub telecom_value: Vec<String>,
     pub active: Option<bool>,
 }

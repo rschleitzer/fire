@@ -182,6 +182,7 @@ CREATE TABLE practitioner (
     name_text TEXT[],
     identifier_system TEXT[],
     identifier_value TEXT[],
+    telecom_value TEXT[],
     active BOOLEAN
 );
 
@@ -190,6 +191,7 @@ CREATE INDEX idx_practitioner_last_updated ON practitioner(last_updated);
 CREATE INDEX idx_practitioner_family_name ON practitioner USING GIN(family_name);
 CREATE INDEX idx_practitioner_given_name ON practitioner USING GIN(given_name);
 CREATE INDEX idx_practitioner_identifier_value ON practitioner USING GIN(identifier_value);
+CREATE INDEX idx_practitioner_telecom_value ON practitioner USING GIN(telecom_value);
 CREATE INDEX idx_practitioner_active ON practitioner(active);
 
 -- Create GIN index for JSONB content
@@ -210,6 +212,7 @@ CREATE TABLE practitioner_history (
     name_text TEXT[],
     identifier_system TEXT[],
     identifier_value TEXT[],
+    telecom_value TEXT[],
     active BOOLEAN,
 
     -- History metadata

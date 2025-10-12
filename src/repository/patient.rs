@@ -10,6 +10,15 @@ use crate::models::patient::{extract_patient_search_params, Patient, PatientHist
 use crate::search::{SearchCondition, SearchQuery};
 use crate::services::validate_patient;
 
+// Helper function to capitalize first letter
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
 pub struct PatientRepository {
     pool: PgPool,
 }
@@ -844,8 +853,14 @@ impl PatientRepository {
     ) -> Result<(Vec<Patient>, Option<i64>)> {
         let query = SearchQuery::from_params(params)?;
 
+        // Track JOINs for chained searches
+        let mut joins = Vec::new();
+        let mut join_counter = 0;
+        // Track which reference parameters have already been joined (to reuse aliases)
+        let mut reference_aliases: HashMap<String, String> = HashMap::new();
+
         let mut sql = String::from(
-            r#"SELECT id, version_id, last_updated, content
+            r#"SELECT patient.id, patient.version_id, patient.last_updated, patient.content
                FROM patient WHERE 1=1"#,
         );
 
@@ -861,11 +876,11 @@ impl PatientRepository {
                             bind_count += 1;
                             let param_num = bind_count;
                             sql.push_str(&format!(
-                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                " AND (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt ILIKE ${0}))",
                                 param_num
                             ));
                             bind_values.push(format!("%{}%", search.value));
@@ -874,31 +889,31 @@ impl PatientRepository {
                             bind_count += 1;
                             let param_num = bind_count;
                             sql.push_str(&format!(
-                                " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p = ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s = ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt = ${0}))",
+                                " AND (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s = ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt = ${0}))",
                                 param_num
                             ));
                             bind_values.push(search.value.clone());
                         }
                         crate::search::StringModifier::Missing => {
-                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL) \
-                                         AND (given_name IS NULL OR array_length(given_name, 1) IS NULL) \
-                                         AND (prefix IS NULL OR array_length(prefix, 1) IS NULL) \
-                                         AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
-                                         AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
+                            sql.push_str(" AND (patient.family_name IS NULL OR array_length(patient.family_name, 1) IS NULL) \
+                                         AND (patient.given_name IS NULL OR array_length(patient.given_name, 1) IS NULL) \
+                                         AND (patient.prefix IS NULL OR array_length(patient.prefix, 1) IS NULL) \
+                                         AND (patient.suffix IS NULL OR array_length(patient.suffix, 1) IS NULL) \
+                                         AND (patient.name_text IS NULL OR array_length(patient.name_text, 1) IS NULL)");
                         }
                         crate::search::StringModifier::Not => {
                             bind_count += 1;
                             let param_num = bind_count;
                             sql.push_str(&format!(
-                                " AND NOT (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
-                                 OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s ILIKE ${0}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt ILIKE ${0}))",
                                 param_num
                             ));
                             bind_values.push(format!("%{}%", search.value));
@@ -909,20 +924,20 @@ impl PatientRepository {
                     match search.modifier {
                         crate::search::StringModifier::Contains => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                             bind_values.push(format!("%{}%", search.value));
                         }
                         crate::search::StringModifier::Exact => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})", bind_count));
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn = ${})", bind_count));
                             bind_values.push(search.value.clone());
                         }
                         crate::search::StringModifier::Missing => {
-                            sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)");
+                            sql.push_str(" AND (patient.family_name IS NULL OR array_length(patient.family_name, 1) IS NULL)");
                         }
                         crate::search::StringModifier::Not => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                             bind_values.push(format!("%{}%", search.value));
                         }
                     }
@@ -952,29 +967,29 @@ impl PatientRepository {
                         }
                     }
                     if !or_conditions.is_empty() {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
                     }
                 }
                 SearchCondition::GivenName(search) => {
                     match search.modifier {
                         crate::search::StringModifier::Contains => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                             bind_values.push(format!("%{}%", search.value));
                         }
                         crate::search::StringModifier::Exact => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})", bind_count));
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn = ${})", bind_count));
                             bind_values.push(search.value.clone());
                         }
                         crate::search::StringModifier::Missing => {
                             sql.push_str(
-                                " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
+                                " AND (patient.given_name IS NULL OR array_length(patient.given_name, 1) IS NULL)",
                             );
                         }
                         crate::search::StringModifier::Not => {
                             bind_count += 1;
-                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                            sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                             bind_values.push(format!("%{}%", search.value));
                         }
                     }
@@ -1002,13 +1017,13 @@ impl PatientRepository {
                         }
                     }
                     if !or_conditions.is_empty() {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
                     }
                 }
                 SearchCondition::Identifier(value) => {
                     bind_count += 1;
                     sql.push_str(&format!(
-                        " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
+                        " AND EXISTS (SELECT 1 FROM unnest(patient.identifier_value) AS iv WHERE iv = ${})",
                         bind_count
                     ));
                     bind_values.push(value.clone());
@@ -1017,7 +1032,7 @@ impl PatientRepository {
                     bind_count += 2;
                     sql.push_str(&format!(
                         " AND EXISTS (
-                            SELECT 1 FROM unnest(identifier_system, identifier_value) AS ident(sys, val)
+                            SELECT 1 FROM unnest(patient.identifier_system, patient.identifier_value) AS ident(sys, val)
                             WHERE ident.sys = ${} AND ident.val = ${}
                         )",
                         bind_count - 1, bind_count
@@ -1028,10 +1043,10 @@ impl PatientRepository {
                 SearchCondition::IdentifierMissing(is_missing) => {
                     if *is_missing {
                         // Field IS NULL or empty array
-                        sql.push_str(" AND (identifier_value IS NULL OR array_length(identifier_value, 1) IS NULL)");
+                        sql.push_str(" AND (patient.identifier_value IS NULL OR array_length(patient.identifier_value, 1) IS NULL)");
                     } else {
                         // Field IS NOT NULL and has values
-                        sql.push_str(" AND (identifier_value IS NOT NULL AND array_length(identifier_value, 1) > 0)");
+                        sql.push_str(" AND (patient.identifier_value IS NOT NULL AND array_length(patient.identifier_value, 1) > 0)");
                     }
                 }
                 SearchCondition::Birthdate(comparison) => {
@@ -1045,18 +1060,18 @@ impl PatientRepository {
                         crate::search::DatePrefix::Le => "<=",
                     };
                     // Cast the string parameter to DATE in SQL
-                    sql.push_str(&format!(" AND birthdate {} ${}::date", op, bind_count));
+                    sql.push_str(&format!(" AND patient.birthdate {} ${}::date", op, bind_count));
                     // Format as YYYY-MM-DD which PostgreSQL expects
                     bind_values.push(comparison.value.format("%Y-%m-%d").to_string());
                 }
                 SearchCondition::Gender(gender) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND gender = ${}", bind_count));
+                    sql.push_str(&format!(" AND patient.gender = ${}", bind_count));
                     bind_values.push(gender.clone());
                 }
                 SearchCondition::GenderNot(gender) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND (gender IS NULL OR gender != ${})", bind_count));
+                    sql.push_str(&format!(" AND (patient.gender IS NULL OR patient.gender != ${})", bind_count));
                     bind_values.push(gender.clone());
                 }
                 SearchCondition::GenderOr(genders) => {
@@ -1064,7 +1079,7 @@ impl PatientRepository {
                     let mut or_conditions = Vec::new();
                     for gender in genders {
                         bind_count += 1;
-                        or_conditions.push(format!("gender = ${}", bind_count));
+                        or_conditions.push(format!("patient.gender = ${}", bind_count));
                         bind_values.push(gender.clone());
                     }
                     if !or_conditions.is_empty() {
@@ -1073,27 +1088,27 @@ impl PatientRepository {
                 }
                 SearchCondition::Active(active) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND active = ${}::boolean", bind_count));
+                    sql.push_str(&format!(" AND patient.active = ${}::boolean", bind_count));
                     bind_values.push(active.to_string());
                 }
                 SearchCondition::ActiveNot(active) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND (active IS NULL OR active != ${}::boolean)", bind_count));
+                    sql.push_str(&format!(" AND (patient.active IS NULL OR patient.active != ${}::boolean)", bind_count));
                     bind_values.push(active.to_string());
                 }
                 SearchCondition::ActiveMissing(is_missing) => {
                     if *is_missing {
                         // Field IS NULL
-                        sql.push_str(" AND active IS NULL");
+                        sql.push_str(" AND patient.active IS NULL");
                     } else {
                         // Field IS NOT NULL
-                        sql.push_str(" AND active IS NOT NULL");
+                        sql.push_str(" AND patient.active IS NOT NULL");
                     }
                 }
                 SearchCondition::GeneralPractitioner(reference) => {
                     bind_count += 1;
                     sql.push_str(&format!(
-                        " AND EXISTS (SELECT 1 FROM unnest(general_practitioner_reference) AS gp WHERE gp = ${})",
+                        " AND EXISTS (SELECT 1 FROM unnest(patient.general_practitioner_reference) AS gp WHERE gp = ${})",
                         bind_count
                     ));
                     bind_values.push(reference.clone());
@@ -1101,13 +1116,229 @@ impl PatientRepository {
                 SearchCondition::GeneralPractitionerMissing(is_missing) => {
                     if *is_missing {
                         // Field IS NULL or empty array
-                        sql.push_str(" AND (general_practitioner_reference IS NULL OR array_length(general_practitioner_reference, 1) IS NULL)");
+                        sql.push_str(" AND (patient.general_practitioner_reference IS NULL OR array_length(patient.general_practitioner_reference, 1) IS NULL)");
                     } else {
                         // Field IS NOT NULL and has values
-                        sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
+                        sql.push_str(" AND (patient.general_practitioner_reference IS NOT NULL AND array_length(patient.general_practitioner_reference, 1) > 0)");
                     }
                 }
+                SearchCondition::ForwardChain(chain) => {
+                    // Forward chaining: follow a reference to another resource
+                    // Example: general-practitioner.family=Smith
+                    //   - reference_param = "general-practitioner"
+                    //   - chain = [ChainLink{param: "family"}]
+                    //   - search_value = "Smith"
+
+                    // Determine target table and reference column
+                    let (target_table, reference_column) = match chain.reference_param.as_str() {
+                        "general-practitioner" => ("practitioner", "patient.general_practitioner_reference"),
+                        "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.patient_reference"),
+                        _ => {
+                            tracing::warn!("Unsupported chained reference: {}", chain.reference_param);
+                            continue;
+                        }
+                    };
+
+                    // Check if we've already joined this reference parameter
+                    // If yes, reuse the existing alias; if no, create a new JOIN
+                    let (alias, is_new_join) = if let Some(existing_alias) = reference_aliases.get(&chain.reference_param) {
+                        // Reuse existing alias - don't create new JOIN
+                        (existing_alias.clone(), false)
+                    } else {
+                        // Create new alias and JOIN
+                        let new_alias = format!("chain_{}", join_counter);
+                        join_counter += 1;
+                        reference_aliases.insert(chain.reference_param.clone(), new_alias.clone());
+                        (new_alias, true)
+                    };
+
+                    // Handle multi-level chains (e.g., subject.general-practitioner.family)
+                    if chain.chain.len() > 1 {
+                        // Multi-level: need to JOIN through multiple tables
+                        // For now, we'll handle two levels (e.g., observation -> patient -> practitioner)
+                        let first_param = &chain.chain[0].param;
+
+                        if first_param == "general-practitioner" && chain.chain.len() == 2 {
+                            // observation.subject.general-practitioner.family
+                            // Need to join: observation -> patient -> practitioner
+                            let patient_alias = format!("chain_{}_patient", join_counter - 1);
+                            let prac_alias = format!("chain_{}_prac", join_counter - 1);
+
+                            // Only create JOINs if this is a new join
+                            if is_new_join {
+                                // Join to patient table first
+                                joins.push(format!(
+                                    "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from 'Patient/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE 'Patient/%')",
+                                    target_table, patient_alias, patient_alias, reference_column
+                                ));
+
+                                // Then join patient to practitioner
+                                joins.push(format!(
+                                    "INNER JOIN practitioner AS {} ON {}.id::text IN (SELECT substring(ref from 'Practitioner/'||'(.*)') FROM unnest({}.general_practitioner_reference) AS refs(ref) WHERE ref LIKE 'Practitioner/%')",
+                                    prac_alias, prac_alias, patient_alias
+                                ));
+                            }
+
+                            // Now search on the final parameter
+                            let final_param = &chain.chain[1].param;
+                            bind_count += 1;
+
+                            match final_param.as_str() {
+                                "family" => {
+                                    // FHIR string search defaults to "starts with" not "contains"
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                        prac_alias, bind_count
+                                    ));
+                                    bind_values.push(format!("{}%", chain.search_value));
+                                }
+                                "identifier" => {
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                        prac_alias, bind_count
+                                    ));
+                                    bind_values.push(chain.search_value.clone());
+                                }
+                                _ => {
+                                    tracing::warn!("Unsupported chained parameter: {}", final_param);
+                                    bind_count -= 1;
+                                }
+                            }
+                        }
+                    } else {
+                        // Single level chain (e.g., general-practitioner.family)
+                        let search_param = &chain.chain[0].param;
+
+                        // Build JOIN to target resource only if this is a new join
+                        // Use subquery with unnest to match on actual references
+                        if is_new_join {
+                            joins.push(format!(
+                                "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE '{}/%')",
+                                target_table,
+                                alias,
+                                alias,
+                                capitalize_first(&target_table),
+                                reference_column,
+                                capitalize_first(&target_table)
+                            ));
+                        }
+
+                        // Now add WHERE condition on the chained resource
+                        bind_count += 1;
+
+                        match search_param.as_str() {
+                            "family" => {
+                                // FHIR string search defaults to "starts with" not "contains"
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(format!("{}%", chain.search_value));
+                            }
+                            "given" => {
+                                // FHIR string search defaults to "starts with" not "contains"
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(format!("{}%", chain.search_value));
+                            }
+                            "identifier" => {
+                                // Handle system|value format if present
+                                if chain.search_value.contains('|') {
+                                    if let Some((system, value)) = chain.search_value.split_once('|') {
+                                        bind_count += 1; // Need two binds
+                                        sql.push_str(&format!(
+                                            " AND EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${})",
+                                            alias, alias, bind_count - 1, bind_count
+                                        ));
+                                        bind_values.push(system.to_string());
+                                        bind_values.push(value.to_string());
+                                        bind_count -= 1; // Adjust because we added two
+                                    }
+                                } else {
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                        alias, bind_count
+                                    ));
+                                    bind_values.push(chain.search_value.clone());
+                                }
+                            }
+                            "email" => {
+                                // Search in telecom for email
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(chain.search_value.clone());
+                            }
+                            _ => {
+                                tracing::warn!("Unsupported chained search parameter: {}", search_param);
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                }
+                SearchCondition::ReverseChain(reverse) => {
+                    // Reverse chaining: find resources that are referenced by another resource type
+                    // Example: _has:Observation:subject:code=8867-4
+                    //   Find Patients that have Observations where code=8867-4
+
+                    let alias = format!("revchain_{}", join_counter);
+                    join_counter += 1;
+
+                    match reverse.target_resource_type.as_str() {
+                        "Observation" => {
+                            // Find patients that have observations matching the criteria
+                            bind_count += 1;
+
+                            match reverse.search_param.as_str() {
+                                "code" => {
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (
+                                            SELECT 1 FROM observation AS {}
+                                            WHERE {}.patient_reference = 'Patient/' || patient.id
+                                            AND EXISTS (SELECT 1 FROM unnest({}.code_code) AS cc WHERE cc = ${})
+                                        )",
+                                        alias, alias, alias, bind_count
+                                    ));
+                                    bind_values.push(reverse.search_value.clone());
+                                }
+                                _ => {
+                                    tracing::warn!("Unsupported reverse chain parameter: {}", reverse.search_param);
+                                    bind_count -= 1;
+                                }
+                            }
+                        }
+                        "Patient" => {
+                            // Find practitioners that have patients matching the criteria
+                            // This would be used on Practitioner search, not Patient search
+                            tracing::warn!("Reverse chain for Patient not supported in Patient repository");
+                        }
+                        _ => {
+                            tracing::warn!("Unsupported reverse chain resource type: {}", reverse.target_resource_type);
+                        }
+                    }
+                }
+                // Observation-specific search conditions - not applicable for Patient searches
+                SearchCondition::ObservationStatus(_) |
+                SearchCondition::ObservationCode { .. } |
+                SearchCondition::ObservationCategory(_) |
+                SearchCondition::ObservationPatient(_) |
+                SearchCondition::ObservationSubject(_) |
+                SearchCondition::ObservationDate(_) => {
+                    tracing::warn!("Observation-specific search condition not applicable for Patient search");
+                }
             }
+        }
+
+        // Add JOINs before WHERE clause finishes
+        if !joins.is_empty() {
+            // Insert joins after FROM clause
+            let where_pos = sql.find("WHERE").expect("WHERE clause not found");
+            let before_where = &sql[..where_pos];
+            let after_where = &sql[where_pos..];
+            sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
         }
 
         // Build ORDER BY clause
@@ -1128,6 +1359,10 @@ impl PatientRepository {
         // Add LIMIT and OFFSET directly (not as bind parameters since they're integers we control)
         sql.push_str(&format!(" LIMIT {}", query.limit));
         sql.push_str(&format!(" OFFSET {}", query.offset));
+
+        // Debug logging
+        tracing::debug!("Generated SQL: {}", sql);
+        tracing::debug!("Bind values: {:?}", bind_values);
 
         // Build dynamic query
         let mut query_builder = sqlx::query(&sql);
@@ -1168,6 +1403,12 @@ fn build_count_sql(query: &SearchQuery) -> String {
     let mut sql = String::from("SELECT COUNT(*) FROM patient WHERE 1=1");
     let mut bind_count = 0;
 
+    // Track JOINs for chained searches (same as main search)
+    let mut joins = Vec::new();
+    let mut join_counter = 0;
+    // Track which reference parameters have already been joined (to reuse aliases)
+    let mut reference_aliases: HashMap<String, String> = HashMap::new();
+
     for condition in &query.conditions {
         match condition {
             SearchCondition::Name(search) => {
@@ -1176,39 +1417,39 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 match search.modifier {
                     crate::search::StringModifier::Contains => {
                         sql.push_str(&format!(
-                            " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                            " AND (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt ILIKE ${0}))",
                             param_num
                         ));
                     }
                     crate::search::StringModifier::Exact => {
                         sql.push_str(&format!(
-                            " AND (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p = ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s = ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt = ${0}))",
+                            " AND (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s = ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt = ${0}))",
                             param_num
                         ));
                     }
                     crate::search::StringModifier::Missing => {
-                        sql.push_str(" AND (family_name IS NULL OR array_length(family_name, 1) IS NULL) \
-                                     AND (given_name IS NULL OR array_length(given_name, 1) IS NULL) \
-                                     AND (prefix IS NULL OR array_length(prefix, 1) IS NULL) \
-                                     AND (suffix IS NULL OR array_length(suffix, 1) IS NULL) \
-                                     AND (name_text IS NULL OR array_length(name_text, 1) IS NULL)");
+                        sql.push_str(" AND (patient.family_name IS NULL OR array_length(patient.family_name, 1) IS NULL) \
+                                     AND (patient.given_name IS NULL OR array_length(patient.given_name, 1) IS NULL) \
+                                     AND (patient.prefix IS NULL OR array_length(patient.prefix, 1) IS NULL) \
+                                     AND (patient.suffix IS NULL OR array_length(patient.suffix, 1) IS NULL) \
+                                     AND (patient.name_text IS NULL OR array_length(patient.name_text, 1) IS NULL)");
                         bind_count -= 1;
                     }
                     crate::search::StringModifier::Not => {
                         sql.push_str(&format!(
-                            " AND NOT (EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(prefix) AS p WHERE p ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(suffix) AS s WHERE s ILIKE ${0}) \
-                             OR EXISTS (SELECT 1 FROM unnest(name_text) AS nt WHERE nt ILIKE ${0}))",
+                            " AND NOT (EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.prefix) AS p WHERE p ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.suffix) AS s WHERE s ILIKE ${0}) \
+                             OR EXISTS (SELECT 1 FROM unnest(patient.name_text) AS nt WHERE nt ILIKE ${0}))",
                             param_num
                         ));
                     }
@@ -1218,22 +1459,22 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 bind_count += 1;
                 match search.modifier {
                     crate::search::StringModifier::Contains => {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                     }
                     crate::search::StringModifier::Exact => {
                         sql.push_str(&format!(
-                            " AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn = ${})",
+                            " AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn = ${})",
                             bind_count
                         ));
                     }
                     crate::search::StringModifier::Missing => {
                         sql.push_str(
-                            " AND (family_name IS NULL OR array_length(family_name, 1) IS NULL)",
+                            " AND (patient.family_name IS NULL OR array_length(patient.family_name, 1) IS NULL)",
                         );
                         bind_count -= 1;
                     }
                     crate::search::StringModifier::Not => {
-                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE fn ILIKE ${})", bind_count));
+                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})", bind_count));
                     }
                 }
             }
@@ -1257,29 +1498,29 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     }
                 }
                 if !or_conditions.is_empty() {
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE {})", or_conditions.join(" OR ")));
                 }
             }
             SearchCondition::GivenName(search) => {
                 bind_count += 1;
                 match search.modifier {
                     crate::search::StringModifier::Contains => {
-                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                     }
                     crate::search::StringModifier::Exact => {
                         sql.push_str(&format!(
-                            " AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn = ${})",
+                            " AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn = ${})",
                             bind_count
                         ));
                     }
                     crate::search::StringModifier::Missing => {
                         sql.push_str(
-                            " AND (given_name IS NULL OR array_length(given_name, 1) IS NULL)",
+                            " AND (patient.given_name IS NULL OR array_length(patient.given_name, 1) IS NULL)",
                         );
                         bind_count -= 1;
                     }
                     crate::search::StringModifier::Not => {
-                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE gn ILIKE ${})", bind_count));
+                        sql.push_str(&format!(" AND NOT EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE gn ILIKE ${})", bind_count));
                     }
                 }
             }
@@ -1303,13 +1544,13 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     }
                 }
                 if !or_conditions.is_empty() {
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.given_name) AS gn WHERE {})", or_conditions.join(" OR ")));
                 }
             }
             SearchCondition::Identifier(value) => {
                 bind_count += 1;
                 sql.push_str(&format!(
-                    " AND EXISTS (SELECT 1 FROM unnest(identifier_value) AS iv WHERE iv = ${})",
+                    " AND EXISTS (SELECT 1 FROM unnest(patient.identifier_value) AS iv WHERE iv = ${})",
                     bind_count
                 ));
                 let _ = value; // Silence unused warning
@@ -1318,7 +1559,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 bind_count += 2;
                 sql.push_str(&format!(
                     " AND EXISTS (
-                        SELECT 1 FROM unnest(identifier_system, identifier_value) AS ident(sys, val)
+                        SELECT 1 FROM unnest(patient.identifier_system, patient.identifier_value) AS ident(sys, val)
                         WHERE ident.sys = ${} AND ident.val = ${}
                     )",
                     bind_count - 1, bind_count
@@ -1327,10 +1568,10 @@ fn build_count_sql(query: &SearchQuery) -> String {
             SearchCondition::IdentifierMissing(is_missing) => {
                 if *is_missing {
                     // Field IS NULL or empty array
-                    sql.push_str(" AND (identifier_value IS NULL OR array_length(identifier_value, 1) IS NULL)");
+                    sql.push_str(" AND (patient.identifier_value IS NULL OR array_length(patient.identifier_value, 1) IS NULL)");
                 } else {
                     // Field IS NOT NULL and has values
-                    sql.push_str(" AND (identifier_value IS NOT NULL AND array_length(identifier_value, 1) > 0)");
+                    sql.push_str(" AND (patient.identifier_value IS NOT NULL AND array_length(patient.identifier_value, 1) > 0)");
                 }
             }
             SearchCondition::Birthdate(comparison) => {
@@ -1343,21 +1584,21 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     crate::search::DatePrefix::Ge => ">=",
                     crate::search::DatePrefix::Le => "<=",
                 };
-                sql.push_str(&format!(" AND birthdate {} ${}::date", op, bind_count));
+                sql.push_str(&format!(" AND patient.birthdate {} ${}::date", op, bind_count));
             }
             SearchCondition::Gender(_gender) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND gender = ${}", bind_count));
+                sql.push_str(&format!(" AND patient.gender = ${}", bind_count));
             }
             SearchCondition::GenderNot(_gender) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND (gender IS NULL OR gender != ${})", bind_count));
+                sql.push_str(&format!(" AND (patient.gender IS NULL OR patient.gender != ${})", bind_count));
             }
             SearchCondition::GenderOr(genders) => {
                 let mut or_conditions = Vec::new();
                 for _gender in genders {
                     bind_count += 1;
-                    or_conditions.push(format!("gender = ${}", bind_count));
+                    or_conditions.push(format!("patient.gender = ${}", bind_count));
                 }
                 if !or_conditions.is_empty() {
                     sql.push_str(&format!(" AND ({})", or_conditions.join(" OR ")));
@@ -1365,36 +1606,208 @@ fn build_count_sql(query: &SearchQuery) -> String {
             }
             SearchCondition::Active(_active) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND active = ${}::boolean", bind_count));
+                sql.push_str(&format!(" AND patient.active = ${}::boolean", bind_count));
             }
             SearchCondition::ActiveNot(_active) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND (active IS NULL OR active != ${}::boolean)", bind_count));
+                sql.push_str(&format!(" AND (patient.active IS NULL OR patient.active != ${}::boolean)", bind_count));
             }
             SearchCondition::ActiveMissing(is_missing) => {
                 if *is_missing {
-                    sql.push_str(" AND active IS NULL");
+                    sql.push_str(" AND patient.active IS NULL");
                 } else {
-                    sql.push_str(" AND active IS NOT NULL");
+                    sql.push_str(" AND patient.active IS NOT NULL");
                 }
             }
             SearchCondition::GeneralPractitioner(_reference) => {
                 bind_count += 1;
                 sql.push_str(&format!(
-                    " AND EXISTS (SELECT 1 FROM unnest(general_practitioner_reference) AS gp WHERE gp = ${})",
+                    " AND EXISTS (SELECT 1 FROM unnest(patient.general_practitioner_reference) AS gp WHERE gp = ${})",
                     bind_count
                 ));
             }
             SearchCondition::GeneralPractitionerMissing(is_missing) => {
                 if *is_missing {
                     // Field IS NULL or empty array
-                    sql.push_str(" AND (general_practitioner_reference IS NULL OR array_length(general_practitioner_reference, 1) IS NULL)");
+                    sql.push_str(" AND (patient.general_practitioner_reference IS NULL OR array_length(patient.general_practitioner_reference, 1) IS NULL)");
                 } else {
                     // Field IS NOT NULL and has values
-                    sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
+                    sql.push_str(" AND (patient.general_practitioner_reference IS NOT NULL AND array_length(patient.general_practitioner_reference, 1) > 0)");
                 }
             }
+            SearchCondition::ForwardChain(chain) => {
+                // Forward chaining in count query - need to apply same JOINs as main search
+
+                // Determine target table and reference column
+                let (target_table, reference_column) = match chain.reference_param.as_str() {
+                    "general-practitioner" => ("practitioner", "patient.general_practitioner_reference"),
+                    "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.patient_reference"),
+                    _ => {
+                        tracing::warn!("Unsupported chained reference in count: {}", chain.reference_param);
+                        continue;
+                    }
+                };
+
+                // Check if we've already joined this reference parameter
+                // If yes, reuse the existing alias; if no, create a new JOIN
+                let (alias, is_new_join) = if let Some(existing_alias) = reference_aliases.get(&chain.reference_param) {
+                    // Reuse existing alias - don't create new JOIN
+                    (existing_alias.clone(), false)
+                } else {
+                    // Create new alias and JOIN
+                    let new_alias = format!("chain_{}", join_counter);
+                    join_counter += 1;
+                    reference_aliases.insert(chain.reference_param.clone(), new_alias.clone());
+                    (new_alias, true)
+                };
+
+                // Handle multi-level chains
+                if chain.chain.len() > 1 {
+                    let first_param = &chain.chain[0].param;
+
+                    if first_param == "general-practitioner" && chain.chain.len() == 2 {
+                        let patient_alias = format!("chain_{}_patient", join_counter - 1);
+                        let prac_alias = format!("chain_{}_prac", join_counter - 1);
+
+                        // Only create JOINs if this is a new join
+                        if is_new_join {
+                            joins.push(format!(
+                                "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from 'Patient/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE 'Patient/%')",
+                                target_table, patient_alias, patient_alias, reference_column
+                            ));
+
+                            joins.push(format!(
+                                "INNER JOIN practitioner AS {} ON {}.id::text IN (SELECT substring(ref from 'Practitioner/'||'(.*)') FROM unnest({}.general_practitioner_reference) AS refs(ref) WHERE ref LIKE 'Practitioner/%')",
+                                prac_alias, prac_alias, patient_alias
+                            ));
+                        }
+
+                        let final_param = &chain.chain[1].param;
+                        bind_count += 1;
+
+                        match final_param.as_str() {
+                            "family" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                    prac_alias, bind_count
+                                ));
+                            }
+                            "identifier" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                    prac_alias, bind_count
+                                ));
+                            }
+                            _ => {
+                                tracing::warn!("Unsupported chained parameter in count: {}", final_param);
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                } else {
+                    // Single level chain
+                    let search_param = &chain.chain[0].param;
+
+                    // Only create JOIN if this is a new join
+                    if is_new_join {
+                        joins.push(format!(
+                            "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE '{}/%')",
+                            target_table,
+                            alias,
+                            alias,
+                            capitalize_first(&target_table),
+                            reference_column,
+                            capitalize_first(&target_table)
+                        ));
+                    }
+
+                    bind_count += 1;
+
+                    match search_param.as_str() {
+                        "family" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "given" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "identifier" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "email" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        _ => {
+                            tracing::warn!("Unsupported chained search parameter in count: {}", search_param);
+                            bind_count -= 1;
+                        }
+                    }
+                }
+            }
+            SearchCondition::ReverseChain(reverse) => {
+                // Reverse chaining in count query
+                let alias = format!("revchain_{}", join_counter);
+                join_counter += 1;
+
+                match reverse.target_resource_type.as_str() {
+                    "Observation" => {
+                        bind_count += 1;
+
+                        match reverse.search_param.as_str() {
+                            "code" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (
+                                        SELECT 1 FROM observation AS {}
+                                        WHERE {}.patient_reference = 'Patient/' || patient.id
+                                        AND EXISTS (SELECT 1 FROM unnest({}.code_code) AS cc WHERE cc = ${})
+                                    )",
+                                    alias, alias, alias, bind_count
+                                ));
+                            }
+                            _ => {
+                                tracing::warn!("Unsupported reverse chain parameter in count: {}", reverse.search_param);
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                    "Patient" => {
+                        tracing::warn!("Reverse chain for Patient not supported in Patient repository count");
+                    }
+                    _ => {
+                        tracing::warn!("Unsupported reverse chain resource type in count: {}", reverse.target_resource_type);
+                    }
+                }
+            }
+            // Observation-specific search conditions - not applicable for Patient searches
+            SearchCondition::ObservationStatus(_) |
+            SearchCondition::ObservationCode { .. } |
+            SearchCondition::ObservationCategory(_) |
+            SearchCondition::ObservationPatient(_) |
+            SearchCondition::ObservationSubject(_) |
+            SearchCondition::ObservationDate(_) => {
+                tracing::debug!("Observation-specific search condition not applicable for Patient count query");
+            }
         }
+    }
+
+    // Add JOINs before WHERE clause (same as main search)
+    if !joins.is_empty() {
+        // Insert joins after FROM clause
+        let where_pos = sql.find("WHERE").expect("WHERE clause not found in count SQL");
+        let before_where = &sql[..where_pos];
+        let after_where = &sql[where_pos..];
+        sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
     }
 
     sql

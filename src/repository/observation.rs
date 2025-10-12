@@ -1,6 +1,7 @@
 use chrono::Utc;
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
@@ -8,7 +9,17 @@ use crate::models::observation::{
     extract_observation_search_params, Observation, ObservationHistory,
 };
 use crate::models::patient::Patient;
+use crate::search::{SearchCondition, SearchQuery};
 use crate::services::validate_observation;
+
+// Helper function to capitalize first letter
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
 
 pub struct ObservationRepository {
     pool: PgPool,
@@ -734,131 +745,233 @@ impl ObservationRepository {
     /// Search observations with optional total count
     pub async fn search(
         &self,
-        params: &std::collections::HashMap<String, String>,
+        params: &HashMap<String, String>,
         include_total: bool,
-    ) -> crate::error::Result<(Vec<Observation>, Option<i64>)> {
-        // Build WHERE clause manually for observation-specific parameters
-        let mut where_conditions = vec!["1=1".to_string()];
-        let mut bind_values: Vec<String> = Vec::new();
+    ) -> Result<(Vec<Observation>, Option<i64>)> {
+        let query = SearchQuery::from_params(params)?;
 
-        // Status parameter
-        if let Some(status) = params.get("status") {
-            bind_values.push(status.clone());
-            where_conditions.push(format!("status = ${}", bind_values.len()));
-        }
+        // Track JOINs for chained searches
+        let mut joins = Vec::new();
+        let mut join_counter = 0;
 
-        // Code parameter - handle system|value format
-        if let Some(code) = params.get("code") {
-            if code.contains('|') {
-                // Format: system|value
-                if let Some((system, value)) = code.split_once('|') {
-                    bind_values.push(system.to_string());
-                    bind_values.push(value.to_string());
-                    where_conditions.push(format!(
-                        "code_system = ${} AND code_code = ${}",
-                        bind_values.len() - 1,
-                        bind_values.len()
-                    ));
-                }
-            } else {
-                // Just the code value
-                bind_values.push(code.clone());
-                where_conditions.push(format!("code_code = ${}", bind_values.len()));
-            }
-        }
-
-        // Category parameter (category_code array)
-        if let Some(category) = params.get("category") {
-            bind_values.push(category.clone());
-            where_conditions.push(format!("${} = ANY(category_code)", bind_values.len()));
-        }
-
-        // Patient/subject reference
-        if let Some(patient) = params.get("patient") {
-            bind_values.push(format!("Patient/{}", patient));
-            where_conditions.push(format!("patient_reference = ${}", bind_values.len()));
-        }
-
-        if let Some(subject) = params.get("subject") {
-            bind_values.push(subject.clone());
-            where_conditions.push(format!("subject_reference = ${}", bind_values.len()));
-        }
-
-        // Date parameters for effective dates with prefix support (ge, le, gt, lt, eq)
-        if let Some(date) = params.get("date") {
-            // Parse the date with prefix
-            let (op, date_str) = if let Some(stripped) = date.strip_prefix("ge") {
-                (">=", stripped)
-            } else if let Some(stripped) = date.strip_prefix("le") {
-                ("<=", stripped)
-            } else if let Some(stripped) = date.strip_prefix("gt") {
-                (">", stripped)
-            } else if let Some(stripped) = date.strip_prefix("lt") {
-                ("<", stripped)
-            } else if let Some(stripped) = date.strip_prefix("eq") {
-                ("=", stripped)
-            } else {
-                ("=", date.as_str())
-            };
-
-            bind_values.push(date_str.to_string());
-            where_conditions.push(format!(
-                "effective_datetime {} ${}::timestamptz",
-                op,
-                bind_values.len()
-            ));
-        }
-
-        let where_clause = where_conditions.join(" AND ");
-
-        // Parse pagination
-        let limit = params
-            .get("_count")
-            .and_then(|c| c.parse::<i64>().ok())
-            .unwrap_or(50)
-            .min(1000);
-
-        let offset = params
-            .get("_offset")
-            .and_then(|o| o.parse::<i64>().ok())
-            .unwrap_or(0);
-
-        // Build ORDER BY clause
-        let order_by = "ORDER BY last_updated DESC";
-
-        // Get total count if requested
-        let total = if include_total {
-            let count_sql = format!(
-                "SELECT COUNT(*) as count FROM observation WHERE {}",
-                where_clause
-            );
-            let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
-            for value in &bind_values {
-                count_query = count_query.bind(value);
-            }
-            Some(count_query.fetch_one(&self.pool).await?)
-        } else {
-            None
-        };
-
-        // Build main query (only select fields we need for raw JSON model)
-        let sql = format!(
-            "SELECT id, version_id, last_updated, content
-             FROM observation
-             WHERE {}
-             {}
-             LIMIT {}
-             OFFSET {}",
-            where_clause, order_by, limit, offset
+        let mut sql = String::from(
+            r#"SELECT observation.id, observation.version_id, observation.last_updated, observation.content
+               FROM observation WHERE 1=1"#,
         );
 
-        // Execute query
-        let mut query_builder = sqlx::query_as::<_, Observation>(&sql);
+        let mut bind_values: Vec<String> = Vec::new();
+        let mut bind_count = 0;
+
+        for condition in &query.conditions {
+            match condition {
+                SearchCondition::ObservationStatus(status) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND observation.status = ${}", bind_count));
+                    bind_values.push(status.clone());
+                }
+                SearchCondition::ObservationCode { system, code } => {
+                    if let Some(sys) = system {
+                        bind_count += 2;
+                        sql.push_str(&format!(
+                            " AND observation.code_system = ${} AND observation.code_code = ${}",
+                            bind_count - 1,
+                            bind_count
+                        ));
+                        bind_values.push(sys.clone());
+                        bind_values.push(code.clone());
+                    } else {
+                        bind_count += 1;
+                        sql.push_str(&format!(" AND observation.code_code = ${}", bind_count));
+                        bind_values.push(code.clone());
+                    }
+                }
+                SearchCondition::ObservationCategory(category) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(
+                        " AND ${} = ANY(observation.category_code)",
+                        bind_count
+                    ));
+                    bind_values.push(category.clone());
+                }
+                SearchCondition::ObservationPatient(patient_id) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_count));
+                    bind_values.push(format!("Patient/{}", patient_id));
+                }
+                SearchCondition::ObservationSubject(subject_ref) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
+                    bind_values.push(subject_ref.clone());
+                }
+                SearchCondition::ObservationDate(comparison) => {
+                    bind_count += 1;
+                    let op = match comparison.prefix {
+                        crate::search::DatePrefix::Eq => "=",
+                        crate::search::DatePrefix::Ne => "!=",
+                        crate::search::DatePrefix::Gt => ">",
+                        crate::search::DatePrefix::Lt => "<",
+                        crate::search::DatePrefix::Ge => ">=",
+                        crate::search::DatePrefix::Le => "<=",
+                    };
+                    sql.push_str(&format!(
+                        " AND observation.effective_datetime {} ${}::timestamptz",
+                        op, bind_count
+                    ));
+                    bind_values.push(comparison.value.format("%Y-%m-%dT%H:%M:%S%.fZ").to_string());
+                }
+                SearchCondition::ForwardChain(chain) => {
+                    // Forward chaining for Observation: follow subject reference to Patient
+                    // Example: subject:Patient.family=Brown
+                    let alias = format!("chain_{}", join_counter);
+                    join_counter += 1;
+
+                    // Determine target table and reference column
+                    let (target_table, reference_column) = match chain.reference_param.as_str() {
+                        "subject" if chain.resource_type.as_deref() == Some("Patient") => {
+                            ("patient", "observation.patient_reference")
+                        }
+                        _ => {
+                            tracing::warn!(
+                                "Unsupported chained reference in observation: {}",
+                                chain.reference_param
+                            );
+                            continue;
+                        }
+                    };
+
+                    // For now, handle single-level chains
+                    if chain.chain.len() == 1 {
+                        let search_param = &chain.chain[0].param;
+
+                        // Build JOIN to target resource (Patient)
+                        joins.push(format!(
+                            "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
+                            target_table,
+                            alias,
+                            alias,
+                            capitalize_first(&target_table),
+                            reference_column,
+                            capitalize_first(&target_table)
+                        ));
+
+                        // Now add WHERE condition on the chained resource
+                        bind_count += 1;
+
+                        match search_param.as_str() {
+                            "family" => {
+                                // FHIR string search defaults to "starts with"
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(format!("{}%", chain.search_value));
+                            }
+                            "given" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(format!("{}%", chain.search_value));
+                            }
+                            "identifier" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                    alias, bind_count
+                                ));
+                                bind_values.push(chain.search_value.clone());
+                            }
+                            "name" => {
+                                // Search all name fields
+                                sql.push_str(&format!(
+                                    " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${{0}}) \
+                                     OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${{0}}))",
+                                    alias, alias
+                                ));
+                                bind_values.push(format!("{}%", chain.search_value));
+                            }
+                            _ => {
+                                tracing::warn!(
+                                    "Unsupported chained search parameter in observation: {}",
+                                    search_param
+                                );
+                                bind_count -= 1;
+                            }
+                        }
+                    } else {
+                        tracing::warn!("Multi-level chains not yet supported for observations");
+                    }
+                }
+                _ => {
+                    // Other search conditions not yet mapped for observations
+                    tracing::warn!("Unsupported search condition for observations: {:?}", condition);
+                }
+            }
+        }
+
+        // Add JOINs before WHERE clause
+        if !joins.is_empty() {
+            let where_pos = sql.find("WHERE").expect("WHERE clause not found");
+            let before_where = &sql[..where_pos];
+            let after_where = &sql[where_pos..];
+            sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
+        }
+
+        // Build ORDER BY clause
+        if !query.sort.is_empty() {
+            sql.push_str(" ORDER BY ");
+            for (i, sort) in query.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&sort.field);
+                match sort.direction {
+                    crate::search::SortDirection::Ascending => sql.push_str(" ASC"),
+                    crate::search::SortDirection::Descending => sql.push_str(" DESC"),
+                }
+            }
+        } else {
+            // Default sort by last_updated DESC
+            sql.push_str(" ORDER BY observation.last_updated DESC");
+        }
+
+        // Add LIMIT and OFFSET
+        sql.push_str(&format!(" LIMIT {}", query.limit));
+        sql.push_str(&format!(" OFFSET {}", query.offset));
+
+        // Debug logging
+        tracing::debug!("Generated Observation SQL: {}", sql);
+        tracing::debug!("Bind values: {:?}", bind_values);
+
+        // Build dynamic query
+        let mut query_builder = sqlx::query(&sql);
         for value in &bind_values {
             query_builder = query_builder.bind(value);
         }
 
-        let observations = query_builder.fetch_all(&self.pool).await?;
+        let rows = query_builder.fetch_all(&self.pool).await?;
+
+        let observations = rows
+            .into_iter()
+            .map(|row| Observation {
+                id: row.get("id"),
+                version_id: row.get("version_id"),
+                last_updated: row.get("last_updated"),
+                content: row.get("content"),
+            })
+            .collect();
+
+        // Get total count if requested
+        let total = if include_total {
+            let count_sql = build_count_sql(&query);
+            let mut count_query_builder = sqlx::query(&count_sql);
+            for value in &bind_values {
+                count_query_builder = count_query_builder.bind(value);
+            }
+            let count_row = count_query_builder.fetch_one(&self.pool).await?;
+            Some(count_row.get::<i64, _>(0))
+        } else {
+            None
+        };
 
         Ok((observations, total))
     }
@@ -1067,4 +1180,154 @@ impl ObservationRepository {
 
         Ok(())
     }
+}
+
+fn build_count_sql(query: &SearchQuery) -> String {
+    let mut sql = String::from("SELECT COUNT(*) FROM observation WHERE 1=1");
+    let mut bind_count = 0;
+
+    // Track JOINs for chained searches (same as main search)
+    let mut joins = Vec::new();
+    let mut join_counter = 0;
+
+    for condition in &query.conditions {
+        match condition {
+            SearchCondition::ObservationStatus(_status) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND observation.status = ${}", bind_count));
+            }
+            SearchCondition::ObservationCode { system, code: _ } => {
+                if system.is_some() {
+                    bind_count += 2;
+                    sql.push_str(&format!(
+                        " AND observation.code_system = ${} AND observation.code_code = ${}",
+                        bind_count - 1,
+                        bind_count
+                    ));
+                } else {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND observation.code_code = ${}", bind_count));
+                }
+            }
+            SearchCondition::ObservationCategory(_category) => {
+                bind_count += 1;
+                sql.push_str(&format!(
+                    " AND ${} = ANY(observation.category_code)",
+                    bind_count
+                ));
+            }
+            SearchCondition::ObservationPatient(_patient_id) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_count));
+            }
+            SearchCondition::ObservationSubject(_subject_ref) => {
+                bind_count += 1;
+                sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
+            }
+            SearchCondition::ObservationDate(comparison) => {
+                bind_count += 1;
+                let op = match comparison.prefix {
+                    crate::search::DatePrefix::Eq => "=",
+                    crate::search::DatePrefix::Ne => "!=",
+                    crate::search::DatePrefix::Gt => ">",
+                    crate::search::DatePrefix::Lt => "<",
+                    crate::search::DatePrefix::Ge => ">=",
+                    crate::search::DatePrefix::Le => "<=",
+                };
+                sql.push_str(&format!(
+                    " AND observation.effective_datetime {} ${}::timestamptz",
+                    op, bind_count
+                ));
+            }
+            SearchCondition::ForwardChain(chain) => {
+                // Forward chaining in count query - need to apply same JOINs as main search
+                let alias = format!("chain_{}", join_counter);
+                join_counter += 1;
+
+                // Determine target table and reference column
+                let (target_table, reference_column) = match chain.reference_param.as_str() {
+                    "subject" if chain.resource_type.as_deref() == Some("Patient") => {
+                        ("patient", "observation.patient_reference")
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "Unsupported chained reference in observation count: {}",
+                            chain.reference_param
+                        );
+                        continue;
+                    }
+                };
+
+                // Handle single-level chains
+                if chain.chain.len() == 1 {
+                    let search_param = &chain.chain[0].param;
+
+                    // Build JOIN to target resource
+                    joins.push(format!(
+                        "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
+                        target_table,
+                        alias,
+                        alias,
+                        capitalize_first(&target_table),
+                        reference_column,
+                        capitalize_first(&target_table)
+                    ));
+
+                    bind_count += 1;
+
+                    match search_param.as_str() {
+                        "family" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "given" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "identifier" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                alias, bind_count
+                            ));
+                        }
+                        "name" => {
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${{0}}) \
+                                 OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${{0}}))",
+                                alias, alias
+                            ));
+                        }
+                        _ => {
+                            tracing::warn!(
+                                "Unsupported chained search parameter in observation count: {}",
+                                search_param
+                            );
+                            bind_count -= 1;
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Other search conditions not yet mapped for observations
+                tracing::debug!("Unsupported search condition in observation count: {:?}", condition);
+            }
+        }
+    }
+
+    // Add JOINs before WHERE clause (same as main search)
+    if !joins.is_empty() {
+        // Insert joins after FROM clause
+        let where_pos = sql
+            .find("WHERE")
+            .expect("WHERE clause not found in observation count SQL");
+        let before_where = &sql[..where_pos];
+        let after_where = &sql[where_pos..];
+        sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
+    }
+
+    sql
 }

@@ -25,6 +25,7 @@ pub enum SortDirection {
 
 #[derive(Debug, Clone)]
 pub enum SearchCondition {
+    // Patient search conditions
     FamilyName(StringSearch),
     GivenName(StringSearch),
     Name(StringSearch), // Searches both family and given with OR
@@ -43,6 +44,39 @@ pub enum SearchCondition {
     FamilyNameOr(Vec<StringSearch>),
     GivenNameOr(Vec<StringSearch>),
     GenderOr(Vec<String>),
+    // Observation search conditions
+    ObservationStatus(String),
+    ObservationCode { system: Option<String>, code: String },
+    ObservationCategory(String),
+    ObservationPatient(String), // patient parameter (just ID)
+    ObservationSubject(String), // subject parameter (full reference)
+    ObservationDate(DateComparison),
+    // Forward chaining: reference.parameter (e.g., general-practitioner.family=Smith)
+    ForwardChain(ChainedSearch),
+    // Reverse chaining: _has:ResourceType:reference:parameter (e.g., _has:Observation:subject:code=8867-4)
+    ReverseChain(ReverseChainedSearch),
+}
+
+#[derive(Debug, Clone)]
+pub struct ChainedSearch {
+    pub reference_param: String, // e.g., "general-practitioner", "subject"
+    pub resource_type: Option<String>, // e.g., "Patient", "Practitioner" (from :ResourceType modifier)
+    pub chain: Vec<ChainLink>, // The chain of parameters (e.g., ["family"], ["general-practitioner", "family"])
+    pub search_value: String, // The final search value
+    pub modifier: StringModifier, // The modifier for the final parameter
+}
+
+#[derive(Debug, Clone)]
+pub struct ChainLink {
+    pub param: String, // Parameter name (e.g., "family", "general-practitioner")
+}
+
+#[derive(Debug, Clone)]
+pub struct ReverseChainedSearch {
+    pub target_resource_type: String, // e.g., "Observation" (what we're looking for)
+    pub reference_param: String, // e.g., "subject" (the reference field in target resource)
+    pub search_param: String, // e.g., "code" (the search parameter on target resource)
+    pub search_value: String, // The search value
 }
 
 #[derive(Debug, Clone)]
@@ -292,6 +326,68 @@ impl SearchQuery {
             }
         }
 
+        // Observation-specific parameters
+
+        // Parse status
+        if let Some(status) = params.get("status") {
+            conditions.push(SearchCondition::ObservationStatus(status.clone()));
+        }
+
+        // Parse code (supports system|value format)
+        if let Some(code) = params.get("code") {
+            if code.contains('|') {
+                if let Some((system, value)) = code.split_once('|') {
+                    conditions.push(SearchCondition::ObservationCode {
+                        system: Some(system.to_string()),
+                        code: value.to_string(),
+                    });
+                }
+            } else {
+                conditions.push(SearchCondition::ObservationCode {
+                    system: None,
+                    code: code.clone(),
+                });
+            }
+        }
+
+        // Parse category
+        if let Some(category) = params.get("category") {
+            conditions.push(SearchCondition::ObservationCategory(category.clone()));
+        }
+
+        // Parse patient parameter
+        if let Some(patient) = params.get("patient") {
+            conditions.push(SearchCondition::ObservationPatient(patient.clone()));
+        }
+
+        // Parse subject parameter
+        if let Some(subject) = params.get("subject") {
+            conditions.push(SearchCondition::ObservationSubject(subject.clone()));
+        }
+
+        // Parse date parameter (for Observation.effectiveDateTime)
+        if let Some(date) = params.get("date") {
+            let comparison = parse_date_param(date)?;
+            conditions.push(SearchCondition::ObservationDate(comparison));
+        }
+
+        // Parse chained parameters (forward chaining)
+        // Look for parameters containing "." (e.g., "general-practitioner.family")
+        for (key, value) in params.iter() {
+            if key.contains('.') && !key.starts_with('_') {
+                let chained = parse_chained_param(key, value)?;
+                conditions.push(SearchCondition::ForwardChain(chained));
+            }
+        }
+
+        // Parse reverse chaining (_has parameter)
+        // Format: _has:ResourceType:reference:parameter=value
+        // Example: _has:Observation:subject:code=8867-4
+        if let Some(has_value) = params.iter().find(|(k, _)| k.starts_with("_has:")).map(|(k, v)| (k.clone(), v.clone())) {
+            let reverse_chain = parse_reverse_chain(&has_value.0, &has_value.1)?;
+            conditions.push(SearchCondition::ReverseChain(reverse_chain));
+        }
+
         // Parse pagination
         let limit = params
             .get("_count")
@@ -507,6 +603,55 @@ impl SearchQuery {
                         sql.push_str(" AND (general_practitioner_reference IS NOT NULL AND array_length(general_practitioner_reference, 1) > 0)");
                     }
                 }
+                SearchCondition::ObservationStatus(_status) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND status = ${}", bind_count));
+                }
+                SearchCondition::ObservationCode { system, code: _ } => {
+                    if system.is_some() {
+                        bind_count += 2;
+                        sql.push_str(&format!(
+                            " AND code_system = ${} AND code_code = ${}",
+                            bind_count - 1,
+                            bind_count
+                        ));
+                    } else {
+                        bind_count += 1;
+                        sql.push_str(&format!(" AND code_code = ${}", bind_count));
+                    }
+                }
+                SearchCondition::ObservationCategory(_category) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND ${} = ANY(category_code)", bind_count));
+                }
+                SearchCondition::ObservationPatient(_patient_id) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND patient_reference = ${}", bind_count));
+                }
+                SearchCondition::ObservationSubject(_subject_ref) => {
+                    bind_count += 1;
+                    sql.push_str(&format!(" AND subject_reference = ${}", bind_count));
+                }
+                SearchCondition::ObservationDate(comparison) => {
+                    bind_count += 1;
+                    let op = match comparison.prefix {
+                        DatePrefix::Eq => "=",
+                        DatePrefix::Ne => "!=",
+                        DatePrefix::Gt => ">",
+                        DatePrefix::Lt => "<",
+                        DatePrefix::Ge => ">=",
+                        DatePrefix::Le => "<=",
+                    };
+                    sql.push_str(&format!(" AND effective_datetime {} ${}::timestamptz", op, bind_count));
+                }
+                SearchCondition::ForwardChain(_chain) => {
+                    // Chaining is handled in the repository layer with proper JOINs
+                    // This build_sql method is not used when chaining is present
+                }
+                SearchCondition::ReverseChain(_reverse) => {
+                    // Reverse chaining is handled in the repository layer with proper EXISTS clauses
+                    // This build_sql method is not used when reverse chaining is present
+                }
             }
         }
 
@@ -620,5 +765,87 @@ fn parse_date_param(value: &str) -> Result<DateComparison> {
     Ok(DateComparison {
         prefix,
         value: date,
+    })
+}
+
+fn parse_chained_param(key: &str, value: &str) -> Result<ChainedSearch> {
+    // Parse forward chaining parameters
+    // Format: reference_param.param1.param2...=value
+    // Example: "general-practitioner.family" = "Smith"
+    // Example: "subject:Patient.family" = "Brown"
+    // Example: "subject:Patient.general-practitioner.family" = "Smith" (multi-level)
+
+    // Check for resource type modifier (e.g., "subject:Patient")
+    let (base_param, resource_type) = if let Some(colon_pos) = key.find(':') {
+        let dot_pos = key.find('.').unwrap_or(key.len());
+        if colon_pos < dot_pos {
+            // Resource type modifier before first dot
+            let parts: Vec<&str> = key[..dot_pos].split(':').collect();
+            if parts.len() == 2 {
+                (parts[0].to_string(), Some(parts[1].to_string()))
+            } else {
+                (key[..dot_pos].to_string(), None)
+            }
+        } else {
+            (key[..dot_pos].to_string(), None)
+        }
+    } else {
+        let dot_pos = key.find('.').unwrap_or(key.len());
+        (key[..dot_pos].to_string(), None)
+    };
+
+    // Parse the chain (everything after first dot)
+    let chain_str = if let Some(dot_pos) = key.find('.') {
+        &key[dot_pos + 1..]
+    } else {
+        return Err(FhirError::InvalidSearchParameter(format!(
+            "Invalid chained parameter (no dot): {}",
+            key
+        )));
+    };
+
+    // Split chain by dots (e.g., "general-practitioner.family" or "family")
+    let chain_parts: Vec<&str> = chain_str.split('.').collect();
+    let mut chain_links = Vec::new();
+
+    for part in chain_parts {
+        chain_links.push(ChainLink {
+            param: part.to_string(),
+        });
+    }
+
+    Ok(ChainedSearch {
+        reference_param: base_param,
+        resource_type,
+        chain: chain_links,
+        search_value: value.to_string(),
+        modifier: StringModifier::Contains, // Default to contains for now
+    })
+}
+
+fn parse_reverse_chain(key: &str, value: &str) -> Result<ReverseChainedSearch> {
+    // Parse reverse chaining (_has parameter)
+    // Format: _has:ResourceType:reference:parameter=value
+    // Example: "_has:Observation:subject:code" = "8867-4"
+
+    // Remove "_has:" prefix
+    let without_prefix = key.strip_prefix("_has:").ok_or_else(|| {
+        FhirError::InvalidSearchParameter(format!("Invalid _has parameter: {}", key))
+    })?;
+
+    // Split by colons: ResourceType:reference:parameter
+    let parts: Vec<&str> = without_prefix.split(':').collect();
+    if parts.len() != 3 {
+        return Err(FhirError::InvalidSearchParameter(format!(
+            "Invalid _has format (expected ResourceType:reference:parameter): {}",
+            key
+        )));
+    }
+
+    Ok(ReverseChainedSearch {
+        target_resource_type: parts[0].to_string(),
+        reference_param: parts[1].to_string(),
+        search_param: parts[2].to_string(),
+        search_value: value.to_string(),
     })
 }

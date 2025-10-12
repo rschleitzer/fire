@@ -40,9 +40,10 @@ impl PractitionerRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
+                telecom_value,
                 active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#,
             id,
             version_id,
@@ -83,6 +84,11 @@ impl PractitionerRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
             params.active,
         )
         .execute(&mut *tx)
@@ -153,10 +159,11 @@ impl PractitionerRepository {
                     id, version_id, last_updated, content,
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
+                    telecom_value,
                     active,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 "#,
                 old_practitioner.id,
                 old_practitioner.version_id,
@@ -197,6 +204,11 @@ impl PractitionerRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&old_params.identifier_value[..])),
+                old_params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.telecom_value[..])),
                 old_params.active,
                 if old_practitioner.version_id == 1 {
                     "CREATE"
@@ -226,7 +238,8 @@ impl PractitionerRepository {
                     name_text = $9,
                     identifier_system = $10,
                     identifier_value = $11,
-                    active = $12
+                    telecom_value = $12,
+                    active = $13
                 WHERE id = $1
                 "#,
                 id,
@@ -268,6 +281,11 @@ impl PractitionerRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&params.identifier_value[..])),
+                params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.telecom_value[..])),
                 params.active,
             )
             .execute(&mut *tx)
@@ -297,9 +315,10 @@ impl PractitionerRepository {
                     id, version_id, last_updated, content,
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
+                    telecom_value,
                     active
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 "#,
                 id,
                 version_id,
@@ -340,6 +359,11 @@ impl PractitionerRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&params.identifier_value[..])),
+                params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.telecom_value[..])),
                 params.active,
             )
             .execute(&mut *tx)
@@ -389,10 +413,11 @@ impl PractitionerRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
+                telecom_value,
                 active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
             old_practitioner.id,
             old_practitioner.version_id,
@@ -433,6 +458,11 @@ impl PractitionerRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.telecom_value[..])),
             old_params.active,
             if old_practitioner.version_id == 1 {
                 "CREATE"
@@ -462,7 +492,8 @@ impl PractitionerRepository {
                 name_text = $9,
                 identifier_system = $10,
                 identifier_value = $11,
-                active = $12
+                telecom_value = $12,
+                active = $13
             WHERE id = $1
             "#,
             id,
@@ -504,6 +535,11 @@ impl PractitionerRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
             params.active,
         )
         .execute(&mut *tx)
@@ -560,10 +596,11 @@ impl PractitionerRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
+                telecom_value,
                 active,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
             id,
             new_version_id,
@@ -604,6 +641,11 @@ impl PractitionerRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
             params.active,
             "DELETE",
             Utc::now(),
