@@ -1862,22 +1862,21 @@ fn build_count_sql(query: &SearchQuery) -> String {
                             }
                         }
                         "identifier" => {
-                            bind_count += 1;
                             if has_or_values {
                                 // Split on comma and create OR conditions for identifier values
                                 let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
                                 let mut or_conditions = Vec::new();
                                 for _value in &values {
-                                    or_conditions.push(format!("iv = ${}", bind_count));
                                     bind_count += 1;
+                                    or_conditions.push(format!("iv = ${}", bind_count));
                                 }
-                                bind_count -= 1; // Adjust back since we incremented in the loop
                                 sql.push_str(&format!(
                                     " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE {})",
                                     alias,
                                     or_conditions.join(" OR ")
                                 ));
                             } else {
+                                bind_count += 1;
                                 sql.push_str(&format!(
                                     " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
                                     alias, bind_count
@@ -1885,22 +1884,21 @@ fn build_count_sql(query: &SearchQuery) -> String {
                             }
                         }
                         "email" => {
-                            bind_count += 1;
                             if has_or_values {
                                 // Split on comma and create OR conditions
                                 let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
                                 let mut or_conditions = Vec::new();
                                 for _value in &values {
-                                    or_conditions.push(format!("tv = ${}", bind_count));
                                     bind_count += 1;
+                                    or_conditions.push(format!("tv = ${}", bind_count));
                                 }
-                                bind_count -= 1; // Adjust back
                                 sql.push_str(&format!(
                                     " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE {})",
                                     alias,
                                     or_conditions.join(" OR ")
                                 ));
                             } else {
+                                bind_count += 1;
                                 sql.push_str(&format!(
                                     " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
                                     alias, bind_count

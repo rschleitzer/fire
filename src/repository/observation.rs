@@ -883,9 +883,9 @@ impl ObservationRepository {
                             "name" => {
                                 // Search all name fields
                                 sql.push_str(&format!(
-                                    " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${{0}}) \
-                                     OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${{0}}))",
-                                    alias, alias
+                                    " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) \
+                                     OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
+                                    alias, bind_count, alias, bind_count
                                 ));
                                 bind_values.push(format!("{}%", chain.search_value));
                             }
@@ -1296,9 +1296,9 @@ fn build_count_sql(query: &SearchQuery) -> String {
                         }
                         "name" => {
                             sql.push_str(&format!(
-                                " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${{0}}) \
-                                 OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${{0}}))",
-                                alias, alias
+                                " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
+                                alias, bind_count, alias, bind_count
                             ));
                         }
                         _ => {
