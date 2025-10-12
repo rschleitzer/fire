@@ -1296,16 +1296,30 @@ impl PatientRepository {
                                 // Handle system|value format if present
                                 if chain.search_value.contains('|') {
                                     if let Some((system, value)) = chain.search_value.split_once('|') {
-                                        bind_count += 1; // Need two binds
+                                        bind_count += 2; // Need two binds
                                         sql.push_str(&format!(
                                             " AND EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${})",
                                             alias, alias, bind_count - 1, bind_count
                                         ));
                                         bind_values.push(system.to_string());
                                         bind_values.push(value.to_string());
-                                        bind_count -= 1; // Adjust because we added two
                                     }
+                                } else if has_or_values {
+                                    // Split on comma and create OR conditions for identifier values
+                                    let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                    let mut or_conditions = Vec::new();
+                                    for _value in &values {
+                                        bind_count += 1;
+                                        or_conditions.push(format!("iv = ${}", bind_count));
+                                        bind_values.push(_value.to_string());
+                                    }
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE {})",
+                                        alias,
+                                        or_conditions.join(" OR ")
+                                    ));
                                 } else {
+                                    bind_count += 1;
                                     sql.push_str(&format!(
                                         " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
                                         alias, bind_count
@@ -1314,12 +1328,29 @@ impl PatientRepository {
                                 }
                             }
                             "email" => {
-                                // Search in telecom for email
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(chain.search_value.clone());
+                                // Search in telecom for email with OR logic support
+                                if has_or_values {
+                                    // Split on comma and create OR conditions
+                                    let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                    let mut or_conditions = Vec::new();
+                                    for _value in &values {
+                                        bind_count += 1;
+                                        or_conditions.push(format!("tv = ${}", bind_count));
+                                        bind_values.push(_value.to_string());
+                                    }
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE {})",
+                                        alias,
+                                        or_conditions.join(" OR ")
+                                    ));
+                                } else {
+                                    bind_count += 1;
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
+                                        alias, bind_count
+                                    ));
+                                    bind_values.push(chain.search_value.clone());
+                                }
                             }
                             _ => {
                                 tracing::warn!("Unsupported chained search parameter: {}", search_param);
@@ -1831,16 +1862,50 @@ fn build_count_sql(query: &SearchQuery) -> String {
                             }
                         }
                         "identifier" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
-                                alias, bind_count
-                            ));
+                            bind_count += 1;
+                            if has_or_values {
+                                // Split on comma and create OR conditions for identifier values
+                                let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                let mut or_conditions = Vec::new();
+                                for _value in &values {
+                                    or_conditions.push(format!("iv = ${}", bind_count));
+                                    bind_count += 1;
+                                }
+                                bind_count -= 1; // Adjust back since we incremented in the loop
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE {})",
+                                    alias,
+                                    or_conditions.join(" OR ")
+                                ));
+                            } else {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                                    alias, bind_count
+                                ));
+                            }
                         }
                         "email" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
-                                alias, bind_count
-                            ));
+                            bind_count += 1;
+                            if has_or_values {
+                                // Split on comma and create OR conditions
+                                let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                let mut or_conditions = Vec::new();
+                                for _value in &values {
+                                    or_conditions.push(format!("tv = ${}", bind_count));
+                                    bind_count += 1;
+                                }
+                                bind_count -= 1; // Adjust back
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE {})",
+                                    alias,
+                                    or_conditions.join(" OR ")
+                                ));
+                            } else {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv = ${})",
+                                    alias, bind_count
+                                ));
+                            }
                         }
                         _ => {
                             tracing::warn!("Unsupported chained search parameter in count: {}", search_param);
