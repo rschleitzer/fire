@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE fhir SYSTEM "fhirspec.dtd">
 
-<fhir name="Fire" version="5.0.0" reasoning="true" simplified="false">
+<fhir name="Fire" version="5.0.0">
   <resources>
     <resource id="patient" name="Patient" active="true">
       <description>Demographics and other administrative information about an individual or animal receiving care or other health-related services.</description>
@@ -59,10 +59,10 @@
         <property id="patient.communication" name="communication" type="element" ref="backboneelement" iscollection="true" notnull="false">
           <description>A language which may be used to communicate with the patient about his or her health</description>
         </property>
-        <property id="patient.generalpractitioner" name="generalPractitioner" type="variant" iscollection="true" notnull="false">
+        <property id="patient.generalpractitioner" name="generalPractitioner" type="element" ref="reference" iscollection="true" notnull="false">
           <description>Patient&apos;s nominated primary care provider</description>
         </property>
-        <property id="patient.managingorganization" name="managingOrganization" type="variant" iscollection="false" notnull="false">
+        <property id="patient.managingorganization" name="managingOrganization" type="element" ref="reference" iscollection="false" notnull="false">
           <description>Organization that is the custodian of the patient record</description>
         </property>
         <property id="patient.link" name="link" type="element" ref="backboneelement" iscollection="true" notnull="false">
@@ -282,6 +282,1807 @@
       </searches>
     </resource>
   </resources>
-  <elements/>
-  <codesets/>
+  <elements>
+    <element id="resource" name="Resource">
+      <description>Base Resource (abstract)</description>
+      <properties>
+        <property id="resource.id" name="id" type="id" iscollection="false" notnull="false">
+          <description>Logical id of this artifact</description>
+        </property>
+        <property id="resource.meta" name="meta" type="element" ref="meta" iscollection="false" notnull="false">
+          <description>Metadata about the resource</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="element" name="Element">
+      <description>Element Type: Base definition for all elements in a resource.</description>
+      <properties>
+        <property id="element.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="element.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="backboneelement" name="BackboneElement">
+      <description>BackboneElement Type: Base definition for all elements that are defined inside a resource - but not those in a data type.</description>
+      <properties>
+        <property id="backboneelement.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="backboneelement.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="backboneelement.modifierextension" name="modifierExtension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Extensions that cannot be ignored even if unrecognized</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="address" name="Address">
+      <description>Address Type: An address expressed using postal conventions (as opposed to GPS or other location definition formats).  This data type may be used to convey addresses for use in delivering mail as well as for visiting locations which might not be valid for mail delivery.  There are a variety of postal address formats defined around the world.
+The ISO21090-codedString may be used to provide a coded representation of the contents of strings in an Address.</description>
+      <properties>
+        <property id="address.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="address.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="address.use" name="use" type="code" ref="addressuse" iscollection="false" notnull="false">
+          <description>home | work | temp | old | billing - purpose of this address</description>
+        </property>
+        <property id="address.type" name="type" type="code" ref="addresstype" iscollection="false" notnull="false">
+          <description>postal | physical | both</description>
+        </property>
+        <property id="address.text" name="text" type="string" iscollection="false" notnull="false">
+          <description>Text representation of the address</description>
+        </property>
+        <property id="address.line" name="line" type="string" iscollection="true" notnull="false">
+          <description>Street name, number, direction &amp; P.O. Box etc.</description>
+        </property>
+        <property id="address.city" name="city" type="string" iscollection="false" notnull="false">
+          <description>Name of city, town etc.</description>
+        </property>
+        <property id="address.district" name="district" type="string" iscollection="false" notnull="false">
+          <description>District name (aka county)</description>
+        </property>
+        <property id="address.state" name="state" type="string" iscollection="false" notnull="false">
+          <description>Sub-unit of country (abbreviations ok)</description>
+        </property>
+        <property id="address.postalcode" name="postalCode" type="string" iscollection="false" notnull="false">
+          <description>Postal code for area</description>
+        </property>
+        <property id="address.country" name="country" type="string" iscollection="false" notnull="false">
+          <description>Country (e.g. may be ISO 3166 2 or 3 letter code)</description>
+        </property>
+        <property id="address.period" name="period" type="element" ref="period" iscollection="false" notnull="false">
+          <description>Time period when address was/is in use</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="age" name="Age">
+      <description>Age Type: A duration of time during which an organism (or a process) has existed.</description>
+      <properties>
+        <property id="age.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="age.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="age.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="age.comparator" name="comparator" type="code" ref="quantitycomparator" iscollection="false" notnull="false">
+          <description>&lt; | &lt;= | &gt;= | &gt; | ad - how to understand the value</description>
+        </property>
+        <property id="age.unit" name="unit" type="string" iscollection="false" notnull="false">
+          <description>Unit representation</description>
+        </property>
+        <property id="age.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>System that defines coded unit form</description>
+        </property>
+        <property id="age.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Coded form of the unit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="annotation" name="Annotation">
+      <description>Annotation Type: A  text note which also  contains information about who made the statement and when.</description>
+      <properties>
+        <property id="annotation.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="annotation.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="annotation.author" name="author[x]" type="variant" iscollection="false" notnull="false">
+          <description>Individual responsible for the annotation</description>
+          <variants>
+            <variant type="element" ref="reference"/>
+            <variant type="string"/>
+          </variants>
+        </property>
+        <property id="annotation.time" name="time" type="dateTime" iscollection="false" notnull="false">
+          <description>When the annotation was made</description>
+        </property>
+        <property id="annotation.text" name="text" type="markdown" iscollection="false" notnull="false">
+          <description>The annotation  - text content (as markdown)</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="attachment" name="Attachment">
+      <description>Attachment Type: For referring to data content defined in other formats.</description>
+      <properties>
+        <property id="attachment.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="attachment.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="attachment.contenttype" name="contentType" type="code" ref="mimetype" iscollection="false" notnull="false">
+          <description>Mime type of the content, with charset etc.</description>
+        </property>
+        <property id="attachment.language" name="language" type="code" ref="language" iscollection="false" notnull="false">
+          <description>Human language of the content (BCP-47)</description>
+        </property>
+        <property id="attachment.data" name="data" type="base64Binary" iscollection="false" notnull="false">
+          <description>Data inline, base64ed</description>
+        </property>
+        <property id="attachment.url" name="url" type="url" iscollection="false" notnull="false">
+          <description>Uri where the data can be found</description>
+        </property>
+        <property id="attachment.size" name="size" type="integer64" iscollection="false" notnull="false">
+          <description>Number of bytes of content (if url provided)</description>
+        </property>
+        <property id="attachment.hash" name="hash" type="base64Binary" iscollection="false" notnull="false">
+          <description>Hash of the data (sha-1, base64ed)</description>
+        </property>
+        <property id="attachment.title" name="title" type="string" iscollection="false" notnull="false">
+          <description>Label to display in place of the data</description>
+        </property>
+        <property id="attachment.creation" name="creation" type="dateTime" iscollection="false" notnull="false">
+          <description>Date attachment was first created</description>
+        </property>
+        <property id="attachment.height" name="height" type="integer" iscollection="false" notnull="false">
+          <description>Height of the image in pixels (photo/video)</description>
+        </property>
+        <property id="attachment.width" name="width" type="integer" iscollection="false" notnull="false">
+          <description>Width of the image in pixels (photo/video)</description>
+        </property>
+        <property id="attachment.frames" name="frames" type="integer" iscollection="false" notnull="false">
+          <description>Number of frames if &gt; 1 (photo)</description>
+        </property>
+        <property id="attachment.duration" name="duration" type="decimal" iscollection="false" notnull="false">
+          <description>Length in seconds (audio / video)</description>
+        </property>
+        <property id="attachment.pages" name="pages" type="integer" iscollection="false" notnull="false">
+          <description>Number of printed pages</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="availability" name="Availability">
+      <description>Availability Type: Availability data for an {item}.</description>
+      <properties>
+        <property id="availability.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="availability.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="availability.availabletime" name="availableTime" type="element" ref="element" iscollection="true" notnull="false">
+          <description>Times the {item} is available</description>
+        </property>
+        <property id="availability.notavailabletime" name="notAvailableTime" type="element" ref="element" iscollection="true" notnull="false">
+          <description>Not available during this time due to provided reason</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="codeableconcept" name="CodeableConcept">
+      <description>CodeableConcept Type: A concept that may be defined by a formal reference to a terminology or ontology or may be provided by text.</description>
+      <properties>
+        <property id="codeableconcept.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="codeableconcept.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="codeableconcept.coding" name="coding" type="element" ref="coding" iscollection="true" notnull="false">
+          <description>Code defined by a terminology system</description>
+        </property>
+        <property id="codeableconcept.text" name="text" type="string" iscollection="false" notnull="false">
+          <description>Plain text representation of the concept</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="codeablereference" name="CodeableReference">
+      <description>CodeableReference Type: A reference to a resource (by instance), or instead, a reference to a concept defined in a terminology or ontology (by class).</description>
+      <properties>
+        <property id="codeablereference.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="codeablereference.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="codeablereference.concept" name="concept" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Reference to a concept (by class)</description>
+        </property>
+        <property id="codeablereference.reference" name="reference" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>Reference to a resource (by instance)</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="coding" name="Coding">
+      <description>Coding Type: A reference to a code defined by a terminology system.</description>
+      <properties>
+        <property id="coding.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="coding.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="coding.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>Identity of the terminology system</description>
+        </property>
+        <property id="coding.version" name="version" type="string" iscollection="false" notnull="false">
+          <description>Version of the system - if relevant</description>
+        </property>
+        <property id="coding.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Symbol in syntax defined by the system</description>
+        </property>
+        <property id="coding.display" name="display" type="string" iscollection="false" notnull="false">
+          <description>Representation defined by the system</description>
+        </property>
+        <property id="coding.userselected" name="userSelected" type="boolean" iscollection="false" notnull="false">
+          <description>If this coding was chosen directly by the user</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="contactdetail" name="ContactDetail">
+      <description>ContactDetail Type: Specifies contact information for a person or organization.</description>
+      <properties>
+        <property id="contactdetail.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="contactdetail.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="contactdetail.name" name="name" type="string" iscollection="false" notnull="false">
+          <description>Name of an individual to contact</description>
+        </property>
+        <property id="contactdetail.telecom" name="telecom" type="element" ref="contactpoint" iscollection="true" notnull="false">
+          <description>Contact details for individual or organization</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="contactpoint" name="ContactPoint">
+      <description>ContactPoint Type: Details for all kinds of technology mediated contact points for a person or organization, including telephone, email, etc.</description>
+      <properties>
+        <property id="contactpoint.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="contactpoint.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="contactpoint.system" name="system" type="code" ref="contactpointsystem" iscollection="false" notnull="false">
+          <description>phone | fax | email | pager | url | sms | other</description>
+        </property>
+        <property id="contactpoint.value" name="value" type="string" iscollection="false" notnull="false">
+          <description>The actual contact point details</description>
+        </property>
+        <property id="contactpoint.use" name="use" type="code" ref="contactpointuse" iscollection="false" notnull="false">
+          <description>home | work | temp | old | mobile - purpose of this contact point</description>
+        </property>
+        <property id="contactpoint.rank" name="rank" type="integer" iscollection="false" notnull="false">
+          <description>Specify preferred order of use (1 = highest)</description>
+        </property>
+        <property id="contactpoint.period" name="period" type="element" ref="period" iscollection="false" notnull="false">
+          <description>Time period when the contact point was/is in use</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="count" name="Count">
+      <description>Count Type: A measured amount (or an amount that can potentially be measured). Note that measured amounts include amounts that are not precisely quantified, including amounts involving arbitrary units and floating currencies.</description>
+      <properties>
+        <property id="count.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="count.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="count.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="count.comparator" name="comparator" type="code" ref="quantitycomparator" iscollection="false" notnull="false">
+          <description>&lt; | &lt;= | &gt;= | &gt; | ad - how to understand the value</description>
+        </property>
+        <property id="count.unit" name="unit" type="string" iscollection="false" notnull="false">
+          <description>Unit representation</description>
+        </property>
+        <property id="count.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>System that defines coded unit form</description>
+        </property>
+        <property id="count.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Coded form of the unit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="datarequirement" name="DataRequirement">
+      <description>DataRequirement Type: Describes a required data item for evaluation in terms of the type of data, and optional code or date-based filters of the data.</description>
+      <properties>
+        <property id="datarequirement.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="datarequirement.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="datarequirement.type" name="type" type="code" ref="fhirtypes" iscollection="false" notnull="false">
+          <description>The type of the required data</description>
+        </property>
+        <property id="datarequirement.profile" name="profile" type="canonical" iscollection="true" notnull="false">
+          <description>The profile of the required data</description>
+        </property>
+        <property id="datarequirement.subject" name="subject[x]" type="variant" iscollection="false" notnull="false">
+          <description>E.g. Patient, Practitioner, RelatedPerson, Organization, Location, Device</description>
+          <variants>
+            <variant type="element" ref="codeableconcept"/>
+            <variant type="element" ref="reference"/>
+          </variants>
+        </property>
+        <property id="datarequirement.mustsupport" name="mustSupport" type="string" iscollection="true" notnull="false">
+          <description>Indicates specific structure elements that are referenced by the knowledge module</description>
+        </property>
+        <property id="datarequirement.codefilter" name="codeFilter" type="element" ref="element" iscollection="true" notnull="false">
+          <description>What codes are expected</description>
+        </property>
+        <property id="datarequirement.datefilter" name="dateFilter" type="element" ref="element" iscollection="true" notnull="false">
+          <description>What dates/date ranges are expected</description>
+        </property>
+        <property id="datarequirement.valuefilter" name="valueFilter" type="element" ref="element" iscollection="true" notnull="false">
+          <description>What values are expected</description>
+        </property>
+        <property id="datarequirement.limit" name="limit" type="integer" iscollection="false" notnull="false">
+          <description>Number of results</description>
+        </property>
+        <property id="datarequirement.sort" name="sort" type="element" ref="element" iscollection="true" notnull="false">
+          <description>Order of the results</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="distance" name="Distance">
+      <description>Distance Type: A length - a value with a unit that is a physical distance.</description>
+      <properties>
+        <property id="distance.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="distance.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="distance.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="distance.comparator" name="comparator" type="code" ref="quantitycomparator" iscollection="false" notnull="false">
+          <description>&lt; | &lt;= | &gt;= | &gt; | ad - how to understand the value</description>
+        </property>
+        <property id="distance.unit" name="unit" type="string" iscollection="false" notnull="false">
+          <description>Unit representation</description>
+        </property>
+        <property id="distance.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>System that defines coded unit form</description>
+        </property>
+        <property id="distance.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Coded form of the unit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="dosage" name="Dosage">
+      <description>Dosage Type: Indicates how the medication is/was taken or should be taken by the patient.</description>
+      <properties>
+        <property id="dosage.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="dosage.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="dosage.modifierextension" name="modifierExtension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Extensions that cannot be ignored even if unrecognized</description>
+        </property>
+        <property id="dosage.sequence" name="sequence" type="integer" iscollection="false" notnull="false">
+          <description>The order of the dosage instructions</description>
+        </property>
+        <property id="dosage.text" name="text" type="string" iscollection="false" notnull="false">
+          <description>Free text dosage instructions e.g. SIG</description>
+        </property>
+        <property id="dosage.additionalinstruction" name="additionalInstruction" type="element" ref="codeableconcept" iscollection="true" notnull="false">
+          <description>Supplemental instruction or warnings to the patient - e.g. &quot;with meals&quot;, &quot;may cause drowsiness&quot;</description>
+        </property>
+        <property id="dosage.patientinstruction" name="patientInstruction" type="string" iscollection="false" notnull="false">
+          <description>Patient or consumer oriented instructions</description>
+        </property>
+        <property id="dosage.timing" name="timing" type="element" ref="timing" iscollection="false" notnull="false">
+          <description>When medication should be administered</description>
+        </property>
+        <property id="dosage.asneeded" name="asNeeded" type="boolean" iscollection="false" notnull="false">
+          <description>Take &quot;as needed&quot;</description>
+        </property>
+        <property id="dosage.asneededfor" name="asNeededFor" type="element" ref="codeableconcept" iscollection="true" notnull="false">
+          <description>Take &quot;as needed&quot; (for x)</description>
+        </property>
+        <property id="dosage.site" name="site" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Body site to administer to</description>
+        </property>
+        <property id="dosage.route" name="route" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>How drug should enter body</description>
+        </property>
+        <property id="dosage.method" name="method" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Technique for administering medication</description>
+        </property>
+        <property id="dosage.doseandrate" name="doseAndRate" type="element" ref="element" iscollection="true" notnull="false">
+          <description>Amount of medication administered, to be administered or typical amount to be administered</description>
+        </property>
+        <property id="dosage.maxdoseperperiod" name="maxDosePerPeriod" type="element" ref="ratio" iscollection="true" notnull="false">
+          <description>Upper limit on medication per unit of time</description>
+        </property>
+        <property id="dosage.maxdoseperadministration" name="maxDosePerAdministration" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Upper limit on medication per administration</description>
+        </property>
+        <property id="dosage.maxdoseperlifetime" name="maxDosePerLifetime" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Upper limit on medication per lifetime of the patient</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="duration" name="Duration">
+      <description>Duration Type: A length of time.</description>
+      <properties>
+        <property id="duration.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="duration.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="duration.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="duration.comparator" name="comparator" type="code" ref="quantitycomparator" iscollection="false" notnull="false">
+          <description>&lt; | &lt;= | &gt;= | &gt; | ad - how to understand the value</description>
+        </property>
+        <property id="duration.unit" name="unit" type="string" iscollection="false" notnull="false">
+          <description>Unit representation</description>
+        </property>
+        <property id="duration.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>System that defines coded unit form</description>
+        </property>
+        <property id="duration.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Coded form of the unit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="expression" name="Expression">
+      <description>Expression Type: A expression that is evaluated in a specified context and returns a value. The context of use of the expression must specify the context in which the expression is evaluated, and how the result of the expression is used.</description>
+      <properties>
+        <property id="expression.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="expression.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="expression.description" name="description" type="string" iscollection="false" notnull="false">
+          <description>Natural language description of the condition</description>
+        </property>
+        <property id="expression.name" name="name" type="code" iscollection="false" notnull="false">
+          <description>Short name assigned to expression for reuse</description>
+        </property>
+        <property id="expression.language" name="language" type="code" ref="expressionlanguage" iscollection="false" notnull="false">
+          <description>text/cql | text/fhirpath | application/x-fhir-query | etc.</description>
+        </property>
+        <property id="expression.expression" name="expression" type="string" iscollection="false" notnull="false">
+          <description>Expression in specified language</description>
+        </property>
+        <property id="expression.reference" name="reference" type="uri" iscollection="false" notnull="false">
+          <description>Where the expression is found</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="extendedcontactdetail" name="ExtendedContactDetail">
+      <description>ExtendedContactDetail Type: Specifies contact information for a specific purpose over a period of time, might be handled/monitored by a specific named person or organization.</description>
+      <properties>
+        <property id="extendedcontactdetail.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="extendedcontactdetail.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="extendedcontactdetail.purpose" name="purpose" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>The type of contact</description>
+        </property>
+        <property id="extendedcontactdetail.name" name="name" type="element" ref="humanname" iscollection="true" notnull="false">
+          <description>Name of an individual to contact</description>
+        </property>
+        <property id="extendedcontactdetail.telecom" name="telecom" type="element" ref="contactpoint" iscollection="true" notnull="false">
+          <description>Contact details (e.g.phone/fax/url)</description>
+        </property>
+        <property id="extendedcontactdetail.address" name="address" type="element" ref="address" iscollection="false" notnull="false">
+          <description>Address for the contact</description>
+        </property>
+        <property id="extendedcontactdetail.organization" name="organization" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>This contact detail is handled/monitored by a specific organization</description>
+        </property>
+        <property id="extendedcontactdetail.period" name="period" type="element" ref="period" iscollection="false" notnull="false">
+          <description>Period that this contact was valid for usage</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="extension" name="Extension">
+      <description>Extension Type: Optional Extension Element - found in all resources.</description>
+      <properties>
+        <property id="extension.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="extension.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="extension.url" name="url" type="string" iscollection="false" notnull="false">
+          <description>identifies the meaning of the extension</description>
+        </property>
+        <property id="extension.value" name="value[x]" type="variant" iscollection="false" notnull="false">
+          <description>Value of extension</description>
+          <variants>
+            <variant type="base64Binary"/>
+            <variant type="boolean"/>
+            <variant type="canonical"/>
+            <variant type="code"/>
+            <variant type="date"/>
+            <variant type="dateTime"/>
+            <variant type="decimal"/>
+            <variant type="id"/>
+            <variant type="dateTime"/>
+            <variant type="integer"/>
+            <variant type="integer64"/>
+            <variant type="markdown"/>
+            <variant type="oid"/>
+            <variant type="integer"/>
+            <variant type="string"/>
+            <variant type="time"/>
+            <variant type="integer"/>
+            <variant type="uri"/>
+            <variant type="url"/>
+            <variant type="uuid"/>
+            <variant type="element" ref="address"/>
+            <variant type="element" ref="age"/>
+            <variant type="element" ref="annotation"/>
+            <variant type="element" ref="attachment"/>
+            <variant type="element" ref="codeableconcept"/>
+            <variant type="element" ref="codeablereference"/>
+            <variant type="element" ref="coding"/>
+            <variant type="element" ref="contactpoint"/>
+            <variant type="element" ref="count"/>
+            <variant type="element" ref="distance"/>
+            <variant type="element" ref="duration"/>
+            <variant type="element" ref="humanname"/>
+            <variant type="element" ref="identifier"/>
+            <variant type="element" ref="money"/>
+            <variant type="element" ref="period"/>
+            <variant type="element" ref="quantity"/>
+            <variant type="element" ref="range"/>
+            <variant type="element" ref="ratio"/>
+            <variant type="element" ref="ratiorange"/>
+            <variant type="element" ref="reference"/>
+            <variant type="element" ref="sampleddata"/>
+            <variant type="element" ref="signature"/>
+            <variant type="element" ref="timing"/>
+            <variant type="element" ref="contactdetail"/>
+            <variant type="element" ref="datarequirement"/>
+            <variant type="element" ref="expression"/>
+            <variant type="element" ref="parameterdefinition"/>
+            <variant type="element" ref="relatedartifact"/>
+            <variant type="element" ref="triggerdefinition"/>
+            <variant type="element" ref="usagecontext"/>
+            <variant type="element" ref="availability"/>
+            <variant type="element" ref="extendedcontactdetail"/>
+            <variant type="element" ref="dosage"/>
+            <variant type="element" ref="meta"/>
+          </variants>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="humanname" name="HumanName">
+      <description>HumanName Type: A name, normally of a human, that can be used for other living entities (e.g. animals but not organizations) that have been assigned names by a human and may need the use of name parts or the need for usage information.</description>
+      <properties>
+        <property id="humanname.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="humanname.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="humanname.use" name="use" type="code" ref="nameuse" iscollection="false" notnull="false">
+          <description>usual | official | temp | nickname | anonymous | old | maiden</description>
+        </property>
+        <property id="humanname.text" name="text" type="string" iscollection="false" notnull="false">
+          <description>Text representation of the full name</description>
+        </property>
+        <property id="humanname.family" name="family" type="string" iscollection="false" notnull="false">
+          <description>Family name (often called &apos;Surname&apos;)</description>
+        </property>
+        <property id="humanname.given" name="given" type="string" iscollection="true" notnull="false">
+          <description>Given names (not always &apos;first&apos;). Includes middle names</description>
+        </property>
+        <property id="humanname.prefix" name="prefix" type="string" iscollection="true" notnull="false">
+          <description>Parts that come before the name</description>
+        </property>
+        <property id="humanname.suffix" name="suffix" type="string" iscollection="true" notnull="false">
+          <description>Parts that come after the name</description>
+        </property>
+        <property id="humanname.period" name="period" type="element" ref="period" iscollection="false" notnull="false">
+          <description>Time period when name was/is in use</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="identifier" name="Identifier">
+      <description>Identifier Type: An identifier - identifies some entity uniquely and unambiguously. Typically this is used for business identifiers.</description>
+      <properties>
+        <property id="identifier.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="identifier.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="identifier.use" name="use" type="code" ref="identifieruse" iscollection="false" notnull="false">
+          <description>usual | official | temp | secondary | old (If known)</description>
+        </property>
+        <property id="identifier.type" name="type" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Description of identifier</description>
+        </property>
+        <property id="identifier.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>The namespace for the identifier value</description>
+        </property>
+        <property id="identifier.value" name="value" type="string" iscollection="false" notnull="false">
+          <description>The value that is unique</description>
+        </property>
+        <property id="identifier.period" name="period" type="element" ref="period" iscollection="false" notnull="false">
+          <description>Time period when id is/was valid for use</description>
+        </property>
+        <property id="identifier.assigner" name="assigner" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>Organization that issued id (may be just text)</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="meta" name="Meta">
+      <description>Meta Type: The metadata about a resource. This is content in the resource that is maintained by the infrastructure. Changes to the content might not always be associated with version changes to the resource.</description>
+      <properties>
+        <property id="meta.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="meta.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="meta.versionid" name="versionId" type="id" iscollection="false" notnull="false">
+          <description>Version specific identifier</description>
+        </property>
+        <property id="meta.lastupdated" name="lastUpdated" type="dateTime" iscollection="false" notnull="false">
+          <description>When the resource version last changed</description>
+        </property>
+        <property id="meta.source" name="source" type="uri" iscollection="false" notnull="false">
+          <description>Identifies where the resource comes from</description>
+        </property>
+        <property id="meta.profile" name="profile" type="canonical" iscollection="true" notnull="false">
+          <description>Profiles this resource claims to conform to</description>
+        </property>
+        <property id="meta.security" name="security" type="element" ref="coding" iscollection="true" notnull="false">
+          <description>Security Labels applied to this resource</description>
+        </property>
+        <property id="meta.tag" name="tag" type="element" ref="coding" iscollection="true" notnull="false">
+          <description>Tags applied to this resource</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="money" name="Money">
+      <description>Money Type: An amount of economic utility in some recognized currency.</description>
+      <properties>
+        <property id="money.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="money.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="money.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="money.currency" name="currency" type="code" ref="currencycode" iscollection="false" notnull="false">
+          <description>ISO 4217 Currency Code</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="parameterdefinition" name="ParameterDefinition">
+      <description>ParameterDefinition Type: The parameters to the module. This collection specifies both the input and output parameters. Input parameters are provided by the caller as part of the $evaluate operation. Output parameters are included in the GuidanceResponse.</description>
+      <properties>
+        <property id="parameterdefinition.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="parameterdefinition.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="parameterdefinition.name" name="name" type="code" iscollection="false" notnull="false">
+          <description>Name used to access the parameter value</description>
+        </property>
+        <property id="parameterdefinition.use" name="use" type="code" ref="parameteruse" iscollection="false" notnull="false">
+          <description>in | out</description>
+        </property>
+        <property id="parameterdefinition.min" name="min" type="integer" iscollection="false" notnull="false">
+          <description>Minimum cardinality</description>
+        </property>
+        <property id="parameterdefinition.max" name="max" type="string" iscollection="false" notnull="false">
+          <description>Maximum cardinality (a number of *)</description>
+        </property>
+        <property id="parameterdefinition.documentation" name="documentation" type="string" iscollection="false" notnull="false">
+          <description>A brief description of the parameter</description>
+        </property>
+        <property id="parameterdefinition.type" name="type" type="code" ref="fhirtypes" iscollection="false" notnull="false">
+          <description>What type of value</description>
+        </property>
+        <property id="parameterdefinition.profile" name="profile" type="canonical" iscollection="false" notnull="false">
+          <description>What profile the value is expected to be</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="period" name="Period">
+      <description>Period Type: A time period defined by a start and end date and optionally time.</description>
+      <properties>
+        <property id="period.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="period.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="period.start" name="start" type="dateTime" iscollection="false" notnull="false">
+          <description>Starting time with inclusive boundary</description>
+        </property>
+        <property id="period.end" name="end" type="dateTime" iscollection="false" notnull="false">
+          <description>End time with inclusive boundary, if not ongoing</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="quantity" name="Quantity">
+      <description>Quantity Type: A measured amount (or an amount that can potentially be measured). Note that measured amounts include amounts that are not precisely quantified, including amounts involving arbitrary units and floating currencies.</description>
+      <properties>
+        <property id="quantity.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="quantity.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="quantity.value" name="value" type="decimal" iscollection="false" notnull="false">
+          <description>Numerical value (with implicit precision)</description>
+        </property>
+        <property id="quantity.comparator" name="comparator" type="code" ref="quantitycomparator" iscollection="false" notnull="false">
+          <description>&lt; | &lt;= | &gt;= | &gt; | ad - how to understand the value</description>
+        </property>
+        <property id="quantity.unit" name="unit" type="string" iscollection="false" notnull="false">
+          <description>Unit representation</description>
+        </property>
+        <property id="quantity.system" name="system" type="uri" iscollection="false" notnull="false">
+          <description>System that defines coded unit form</description>
+        </property>
+        <property id="quantity.code" name="code" type="code" iscollection="false" notnull="false">
+          <description>Coded form of the unit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="range" name="Range">
+      <description>Range Type: A set of ordered Quantities defined by a low and high limit.</description>
+      <properties>
+        <property id="range.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="range.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="range.low" name="low" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Low limit</description>
+        </property>
+        <property id="range.high" name="high" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>High limit</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="ratio" name="Ratio">
+      <description>Ratio Type: A relationship of two Quantity values - expressed as a numerator and a denominator.</description>
+      <properties>
+        <property id="ratio.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="ratio.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="ratio.numerator" name="numerator" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Numerator value</description>
+        </property>
+        <property id="ratio.denominator" name="denominator" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Denominator value</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="ratiorange" name="RatioRange">
+      <description>RatioRange Type: A range of ratios expressed as a low and high numerator and a denominator.</description>
+      <properties>
+        <property id="ratiorange.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="ratiorange.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="ratiorange.lownumerator" name="lowNumerator" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Low Numerator limit</description>
+        </property>
+        <property id="ratiorange.highnumerator" name="highNumerator" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>High Numerator limit</description>
+        </property>
+        <property id="ratiorange.denominator" name="denominator" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Denominator value</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="reference" name="Reference">
+      <description>Reference Type: A reference from one resource to another.</description>
+      <properties>
+        <property id="reference.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="reference.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="reference.reference" name="reference" type="string" iscollection="false" notnull="false">
+          <description>Literal reference, Relative, internal or absolute URL</description>
+        </property>
+        <property id="reference.type" name="type" type="uri" iscollection="false" notnull="false">
+          <description>Type the reference refers to (e.g. &quot;Patient&quot;) - must be a resource in resources</description>
+        </property>
+        <property id="reference.identifier" name="identifier" type="element" ref="identifier" iscollection="false" notnull="false">
+          <description>Logical reference, when literal reference is not known</description>
+        </property>
+        <property id="reference.display" name="display" type="string" iscollection="false" notnull="false">
+          <description>Text alternative for the resource</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="relatedartifact" name="RelatedArtifact">
+      <description>RelatedArtifact Type: Related artifacts such as additional documentation, justification, or bibliographic references.</description>
+      <properties>
+        <property id="relatedartifact.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="relatedartifact.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="relatedartifact.type" name="type" type="code" ref="relatedartifacttype" iscollection="false" notnull="false">
+          <description>documentation | justification | citation | predecessor | successor | derived-from | depends-on | composed-of | part-of | amends | amended-with | appends | appended-with | cites | cited-by | comments-on | comment-in | contains | contained-in | corrects | correction-in | replaces | replaced-with | retracts | retracted-by | signs | similar-to | supports | supported-with | transforms | transformed-into | transformed-with | documents | specification-of | created-with | cite-as</description>
+        </property>
+        <property id="relatedartifact.classifier" name="classifier" type="element" ref="codeableconcept" iscollection="true" notnull="false">
+          <description>Additional classifiers</description>
+        </property>
+        <property id="relatedartifact.label" name="label" type="string" iscollection="false" notnull="false">
+          <description>Short label</description>
+        </property>
+        <property id="relatedartifact.display" name="display" type="string" iscollection="false" notnull="false">
+          <description>Brief description of the related artifact</description>
+        </property>
+        <property id="relatedartifact.citation" name="citation" type="markdown" iscollection="false" notnull="false">
+          <description>Bibliographic citation for the artifact</description>
+        </property>
+        <property id="relatedartifact.document" name="document" type="element" ref="attachment" iscollection="false" notnull="false">
+          <description>What document is being referenced</description>
+        </property>
+        <property id="relatedartifact.resource" name="resource" type="canonical" iscollection="false" notnull="false">
+          <description>What artifact is being referenced</description>
+        </property>
+        <property id="relatedartifact.resourcereference" name="resourceReference" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>What artifact, if not a conformance resource</description>
+        </property>
+        <property id="relatedartifact.publicationstatus" name="publicationStatus" type="code" ref="relatedartifactpublicationstatus" iscollection="false" notnull="false">
+          <description>draft | active | retired | unknown</description>
+        </property>
+        <property id="relatedartifact.publicationdate" name="publicationDate" type="date" iscollection="false" notnull="false">
+          <description>Date of publication of the artifact being referred to</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="sampleddata" name="SampledData">
+      <description>SampledData Type: A series of measurements taken by a device, with upper and lower limits. There may be more than one dimension in the data.</description>
+      <properties>
+        <property id="sampleddata.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="sampleddata.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="sampleddata.origin" name="origin" type="element" ref="quantity" iscollection="false" notnull="false">
+          <description>Zero value and units</description>
+        </property>
+        <property id="sampleddata.interval" name="interval" type="decimal" iscollection="false" notnull="false">
+          <description>Number of intervalUnits between samples</description>
+        </property>
+        <property id="sampleddata.intervalunit" name="intervalUnit" type="code" ref="units" iscollection="false" notnull="false">
+          <description>The measurement unit of the interval between samples</description>
+        </property>
+        <property id="sampleddata.factor" name="factor" type="decimal" iscollection="false" notnull="false">
+          <description>Multiply data by this before adding to origin</description>
+        </property>
+        <property id="sampleddata.lowerlimit" name="lowerLimit" type="decimal" iscollection="false" notnull="false">
+          <description>Lower limit of detection</description>
+        </property>
+        <property id="sampleddata.upperlimit" name="upperLimit" type="decimal" iscollection="false" notnull="false">
+          <description>Upper limit of detection</description>
+        </property>
+        <property id="sampleddata.dimensions" name="dimensions" type="integer" iscollection="false" notnull="false">
+          <description>Number of sample points at each time point</description>
+        </property>
+        <property id="sampleddata.codemap" name="codeMap" type="canonical" iscollection="false" notnull="false">
+          <description>Defines the codes used in the data</description>
+        </property>
+        <property id="sampleddata.offsets" name="offsets" type="string" iscollection="false" notnull="false">
+          <description>Offsets, typically in time, at which data values were taken</description>
+        </property>
+        <property id="sampleddata.data" name="data" type="string" iscollection="false" notnull="false">
+          <description>Decimal values with spaces, or &quot;E&quot; | &quot;U&quot; | &quot;L&quot;, or another code</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="signature" name="Signature">
+      <description>Signature Type: A signature along with supporting context. The signature may be a digital signature that is cryptographic in nature, or some other signature acceptable to the domain. This other signature may be as simple as a graphical image representing a hand-written signature, or a signature ceremony Different signature approaches have different utilities.</description>
+      <properties>
+        <property id="signature.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="signature.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="signature.type" name="type" type="element" ref="coding" iscollection="true" notnull="false">
+          <description>Indication of the reason the entity signed the object(s)</description>
+        </property>
+        <property id="signature.when" name="when" type="dateTime" iscollection="false" notnull="false">
+          <description>When the signature was created</description>
+        </property>
+        <property id="signature.who" name="who" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>Who signed</description>
+        </property>
+        <property id="signature.onbehalfof" name="onBehalfOf" type="element" ref="reference" iscollection="false" notnull="false">
+          <description>The party represented</description>
+        </property>
+        <property id="signature.targetformat" name="targetFormat" type="code" ref="mimetype" iscollection="false" notnull="false">
+          <description>The technical format of the signed resources</description>
+        </property>
+        <property id="signature.sigformat" name="sigFormat" type="code" ref="mimetype" iscollection="false" notnull="false">
+          <description>The technical format of the signature</description>
+        </property>
+        <property id="signature.data" name="data" type="base64Binary" iscollection="false" notnull="false">
+          <description>The actual signature content (XML DigSig. JWS, picture, etc.)</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="timing" name="Timing">
+      <description>Timing Type: Specifies an event that may occur multiple times. Timing schedules are used to record when things are planned, expected or requested to occur. The most common usage is in dosage instructions for medications. They are also used when planning care of various kinds, and may be used for reporting the schedule to which past regular activities were carried out.</description>
+      <properties>
+        <property id="timing.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="timing.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="timing.modifierextension" name="modifierExtension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Extensions that cannot be ignored even if unrecognized</description>
+        </property>
+        <property id="timing.event" name="event" type="dateTime" iscollection="true" notnull="false">
+          <description>When the event occurs</description>
+        </property>
+        <property id="timing.repeat" name="repeat" type="element" ref="element" iscollection="false" notnull="false">
+          <description>When the event is to occur</description>
+        </property>
+        <property id="timing.code" name="code" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>C | BID | TID | QID | AM | PM | QD | QOD | +</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="triggerdefinition" name="TriggerDefinition">
+      <description>TriggerDefinition Type: A description of a triggering event. Triggering events can be named events, data events, or periodic, as determined by the type element.</description>
+      <properties>
+        <property id="triggerdefinition.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="triggerdefinition.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="triggerdefinition.type" name="type" type="code" ref="triggertype" iscollection="false" notnull="false">
+          <description>named-event | periodic | data-changed | data-added | data-modified | data-removed | data-accessed | data-access-ended</description>
+        </property>
+        <property id="triggerdefinition.name" name="name" type="string" iscollection="false" notnull="false">
+          <description>Name or URI that identifies the event</description>
+        </property>
+        <property id="triggerdefinition.code" name="code" type="element" ref="codeableconcept" iscollection="false" notnull="false">
+          <description>Coded definition of the event</description>
+        </property>
+        <property id="triggerdefinition.subscriptiontopic" name="subscriptionTopic" type="canonical" iscollection="false" notnull="false">
+          <description>What event</description>
+        </property>
+        <property id="triggerdefinition.timing" name="timing[x]" type="variant" iscollection="false" notnull="false">
+          <description>Timing of the event</description>
+          <variants>
+            <variant type="element" ref="timing"/>
+            <variant type="element" ref="reference"/>
+            <variant type="date"/>
+            <variant type="dateTime"/>
+          </variants>
+        </property>
+        <property id="triggerdefinition.data" name="data" type="element" ref="datarequirement" iscollection="true" notnull="false">
+          <description>Triggering data of the event (multiple = &apos;and&apos;)</description>
+        </property>
+        <property id="triggerdefinition.condition" name="condition" type="element" ref="expression" iscollection="false" notnull="false">
+          <description>Whether the event triggers (boolean expression)</description>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+    <element id="usagecontext" name="UsageContext">
+      <description>UsageContext Type: Specifies clinical/business/etc. metadata that can be used to retrieve, index and/or categorize an artifact. This metadata can either be specific to the applicable population (e.g., age category, DRG) or the specific context of care (e.g., venue, care setting, provider of care).</description>
+      <properties>
+        <property id="usagecontext.id" name="id" type="string" iscollection="false" notnull="false">
+          <description>Unique id for inter-element referencing</description>
+        </property>
+        <property id="usagecontext.extension" name="extension" type="element" ref="extension" iscollection="true" notnull="false">
+          <description>Additional content defined by implementations</description>
+        </property>
+        <property id="usagecontext.code" name="code" type="element" ref="coding" iscollection="false" notnull="false">
+          <description>Type of context being specified</description>
+        </property>
+        <property id="usagecontext.value" name="value[x]" type="variant" iscollection="false" notnull="false">
+          <description>Value that defines the context</description>
+          <variants>
+            <variant type="element" ref="codeableconcept"/>
+            <variant type="element" ref="quantity"/>
+            <variant type="element" ref="range"/>
+            <variant type="element" ref="reference"/>
+          </variants>
+        </property>
+      </properties>
+      <elements/>
+      <codesets/>
+    </element>
+  </elements>
+  <codesets>
+    <codeset name="AdministrativeGender" id="administrativegender">
+      <description>The gender of a person used for administrative purposes.</description>
+      <codes>
+        <code name="Male" value="male">
+          <description>Male.</description>
+        </code>
+        <code name="Female" value="female">
+          <description>Female.</description>
+        </code>
+        <code name="Other" value="other">
+          <description>Other.</description>
+        </code>
+        <code name="Unknown" value="unknown">
+          <description>Unknown.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="PropertyRepresentation" id="propertyrepresentation">
+      <description>How a property is represented when serialized.</description>
+      <codes>
+        <code name="XML Attribute" value="xmlAttr">
+          <description>In XML, this property is represented as an attribute not an element.</description>
+        </code>
+        <code name="XML Text" value="xmlText">
+          <description>This element is represented using the XML text attribute (primitives only).</description>
+        </code>
+        <code name="Type Attribute" value="typeAttr">
+          <description>The type of this element is indicated using xsi:type.</description>
+        </code>
+        <code name="CDA Text Format" value="cdaText">
+          <description>Use CDA narrative instead of XHTML.</description>
+        </code>
+        <code name="XHTML" value="xhtml">
+          <description>The property is represented using XHTML.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ConstraintSeverity" id="constraintseverity">
+      <description>SHALL applications comply with this constraint?</description>
+      <codes>
+        <code name="Error" value="error">
+          <description>If the constraint is violated, the resource is not conformant.</description>
+        </code>
+        <code name="Warning" value="warning">
+          <description>If the constraint is violated, the resource is conformant, but it is not necessarily following best practice.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="QuantityComparator" id="quantitycomparator">
+      <description>How the Quantity should be understood and represented.</description>
+      <codes>
+        <code name="Less than" value="&lt;">
+          <description>The actual value is less than the given value.</description>
+        </code>
+        <code name="Less or Equal to" value="&lt;=">
+          <description>The actual value is less than or equal to the given value.</description>
+        </code>
+        <code name="Greater or Equal to" value="&gt;=">
+          <description>The actual value is greater than or equal to the given value.</description>
+        </code>
+        <code name="Greater than" value="&gt;">
+          <description>The actual value is greater than the given value.</description>
+        </code>
+        <code name="Sufficient to achieve this total quantity" value="ad">
+          <description>The actual value is sufficient for the total quantity to equal the given value.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="PriceComponentType" id="pricecomponenttype">
+      <description>Codes indicating the kind of the price component.</description>
+      <codes>
+        <code name="base price" value="base">
+          <description>the amount is the base price used for calculating the total price before applying surcharges, discount or taxes.</description>
+        </code>
+        <code name="surcharge" value="surcharge">
+          <description>the amount is a surcharge applied on the base price.</description>
+        </code>
+        <code name="deduction" value="deduction">
+          <description>the amount is a deduction applied on the base price.</description>
+        </code>
+        <code name="discount" value="discount">
+          <description>the amount is a discount applied on the base price.</description>
+        </code>
+        <code name="tax" value="tax">
+          <description>the amount is the tax component of the total price.</description>
+        </code>
+        <code name="informational" value="informational">
+          <description>the amount is of informational character, it has not been applied in the calculation of the total price.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ContactPointUse" id="contactpointuse">
+      <description>Use of contact point.</description>
+      <codes>
+        <code name="Home" value="home">
+          <description>A communication contact point at a home; attempted contacts for business purposes might intrude privacy and chances are one will contact family or other household members instead of the person one wishes to call. Typically used with urgent cases, or if no other contacts are available.</description>
+        </code>
+        <code name="Work" value="work">
+          <description>An office contact point. First choice for business related contacts during business hours.</description>
+        </code>
+        <code name="Temp" value="temp">
+          <description>A temporary contact point. The period can provide more detailed information.</description>
+        </code>
+        <code name="Old" value="old">
+          <description>This contact point is no longer in use (or was never correct, but retained for records).</description>
+        </code>
+        <code name="Mobile" value="mobile">
+          <description>A telecommunication device that moves and stays with its owner. May have characteristics of all other use codes, suitable for urgent matters, not the first choice for routine business.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="BindingStrength" id="bindingstrength">
+      <description>Indication of the degree of conformance expectations associated with a binding.</description>
+      <codes>
+        <code name="Required" value="required">
+          <description>To be conformant, the concept in this element SHALL be from the specified value set.</description>
+        </code>
+        <code name="Extensible" value="extensible">
+          <description>To be conformant, the concept in this element SHALL be from the specified value set if any of the codes within the value set can apply to the concept being communicated.  If the value set does not cover the concept (based on human review), alternate codings (or, data type allowing, text) may be included instead.</description>
+        </code>
+        <code name="Preferred" value="preferred">
+          <description>Instances are encouraged to draw from the specified codes for interoperability purposes but are not required to do so to be considered conformant.</description>
+        </code>
+        <code name="Example" value="example">
+          <description>Instances are not expected or even encouraged to draw from the specified value set.  The value set merely provides examples of the types of concepts intended to be included.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="AdditionalBindingPurposeCodes" id="additionalbindingpurpose">
+      <description>Additional Binding Purpose</description>
+      <codes>
+        <code name="Maximum Binding" value="maximum">
+          <description>A required binding, for use when the binding strength is &apos;extensible&apos; or &apos;preferred&apos;</description>
+        </code>
+        <code name="Minimum Binding" value="minimum">
+          <description>The minimum allowable value set - any conformant system SHALL support all these codes</description>
+        </code>
+        <code name="Required Binding" value="required">
+          <description>This value set is used as a required binding (in addition to the base binding (not a replacement), usually in a particular usage context)</description>
+        </code>
+        <code name="Conformance Binding" value="extensible">
+          <description>This value set is used as an extensible binding (in addition to the base binding (not a replacement), usually in a particular usage context)</description>
+        </code>
+        <code name="Candidate Binding" value="candidate">
+          <description>This value set is a candidate to substitute for the overall conformance value set in some situations; usually these are defined in the documentation</description>
+        </code>
+        <code name="Current Binding" value="current">
+          <description>New records are required to use this value set, but legacy records may use other codes. The definition of &apos;new record&apos; is difficult, since systems often create new records based on pre-existing data. Usually &apos;current&apos; bindings are mandated by an external authority that makes clear rules around this</description>
+        </code>
+        <code name="Preferred Binding" value="preferred">
+          <description>This is the value set that is preferred in a given context (documentation should explain why)</description>
+        </code>
+        <code name="UI Suggested Binding" value="ui">
+          <description>This value set is provided for user look up in a given context. Typically, these valuesets only include a subset of codes relevant for input in a context</description>
+        </code>
+        <code name="Starter Binding" value="starter">
+          <description>This value set is a good set of codes to start with when designing your system</description>
+        </code>
+        <code name="Component Binding" value="component">
+          <description>This value set is a component of the base value set. Usually this is called out so that documentation can be written about a portion of the value set</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ContactPointSystem" id="contactpointsystem">
+      <description>Telecommunications form for contact point.</description>
+      <codes>
+        <code name="Phone" value="phone">
+          <description>The value is a telephone number used for voice calls. Use of full international numbers starting with + is recommended to enable automatic dialing support but not required.</description>
+        </code>
+        <code name="Fax" value="fax">
+          <description>The value is a fax machine. Use of full international numbers starting with + is recommended to enable automatic dialing support but not required.</description>
+        </code>
+        <code name="Email" value="email">
+          <description>The value is an email address.</description>
+        </code>
+        <code name="Pager" value="pager">
+          <description>The value is a pager number. These may be local pager numbers that are only usable on a particular pager system.</description>
+        </code>
+        <code name="URL" value="url">
+          <description>A contact that is not a phone, fax, pager or email address and is expressed as a URL.  This is intended for various institutional or personal contacts including web sites, blogs, Skype, Twitter, Facebook, etc. Do not use for email addresses.</description>
+        </code>
+        <code name="SMS" value="sms">
+          <description>A contact that can be used for sending a sms message (e.g. mobile phones, some landlines).</description>
+        </code>
+        <code name="Other" value="other">
+          <description>A contact that is not a phone, fax, page or email address and is not expressible as a URL.  E.g. Internal mail address.  This SHOULD NOT be used for contacts that are expressible as a URL (e.g. Skype, Twitter, Facebook, etc.)  Extensions may be used to distinguish &quot;other&quot; contact types.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="EventTiming" id="eventtiming">
+      <description>Real-world event relating to the schedule.</description>
+      <codes>
+        <code name="Morning" value="MORN">
+          <description>Event occurs during the morning. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Early Morning" value="MORN.early">
+          <description>Event occurs during the early morning. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Late Morning" value="MORN.late">
+          <description>Event occurs during the late morning. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Noon" value="NOON">
+          <description>Event occurs around 12:00pm. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Afternoon" value="AFT">
+          <description>Event occurs during the afternoon. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Early Afternoon" value="AFT.early">
+          <description>Event occurs during the early afternoon. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Late Afternoon" value="AFT.late">
+          <description>Event occurs during the late afternoon. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Evening" value="EVE">
+          <description>Event occurs during the evening. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Early Evening" value="EVE.early">
+          <description>Event occurs during the early evening. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Late Evening" value="EVE.late">
+          <description>Event occurs during the late evening. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Night" value="NIGHT">
+          <description>Event occurs during the night. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="After Sleep" value="PHS">
+          <description>Event occurs [offset] after subject goes to sleep. The exact time is unspecified and established by institution convention or patient interpretation.</description>
+        </code>
+        <code name="Immediate" value="IMD">
+          <description>Event occurs a single time (with no repetitions) as soon as possible after the scheduled or actual start of the overall event.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="NarrativeStatus" id="narrativestatus">
+      <description>The status of a resource narrative.</description>
+      <codes>
+        <code name="Generated" value="generated">
+          <description>The contents of the narrative are entirely generated from the core elements in the content.</description>
+        </code>
+        <code name="Extensions" value="extensions">
+          <description>The contents of the narrative are entirely generated from the core elements in the content and some of the content is generated from extensions. The narrative SHALL reflect the impact of all modifier extensions.</description>
+        </code>
+        <code name="Additional" value="additional">
+          <description>The contents of the narrative may contain additional information not found in the structured data. Note that there is no computable way to determine what the extra information is, other than by human inspection.</description>
+        </code>
+        <code name="Empty" value="empty">
+          <description>The contents of the narrative are some equivalent of &quot;No human-readable text provided in this case&quot;.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="DaysOfWeek" id="daysofweek">
+      <description>The days of the week.</description>
+      <codes>
+        <code name="Monday" value="mon">
+          <description>Monday.</description>
+        </code>
+        <code name="Tuesday" value="tue">
+          <description>Tuesday.</description>
+        </code>
+        <code name="Wednesday" value="wed">
+          <description>Wednesday.</description>
+        </code>
+        <code name="Thursday" value="thu">
+          <description>Thursday.</description>
+        </code>
+        <code name="Friday" value="fri">
+          <description>Friday.</description>
+        </code>
+        <code name="Saturday" value="sat">
+          <description>Saturday.</description>
+        </code>
+        <code name="Sunday" value="sun">
+          <description>Sunday.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="TimingAbbreviation" id="timingabbreviation">
+      <description>Code for a known / defined timing pattern.</description>
+      <codes>
+        <code name="Continuous (frequency)" value="C">
+          <description>Service is provided continuously between start time and stop time.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ContributorType" id="contributortype">
+      <description>The type of contributor.</description>
+      <codes>
+        <code name="Author" value="author">
+          <description>An author of the content of the module.</description>
+        </code>
+        <code name="Editor" value="editor">
+          <description>An editor of the content of the module.</description>
+        </code>
+        <code name="Reviewer" value="reviewer">
+          <description>A reviewer of the content of the module.</description>
+        </code>
+        <code name="Endorser" value="endorser">
+          <description>An endorser of the content of the module.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="IdentifierUse" id="identifieruse">
+      <description>Identifies the purpose for this identifier, if known .</description>
+      <codes>
+        <code name="Usual" value="usual">
+          <description>The identifier recommended for display and use in real-world interactions which should be used when such identifier is different from the &quot;official&quot; identifier.</description>
+        </code>
+        <code name="Official" value="official">
+          <description>The identifier considered to be most trusted for the identification of this item. Sometimes also known as &quot;primary&quot; and &quot;main&quot;. The determination of &quot;official&quot; is subjective and implementation guides often provide additional guidelines for use.</description>
+        </code>
+        <code name="Temp" value="temp">
+          <description>A temporary identifier.</description>
+        </code>
+        <code name="Secondary" value="secondary">
+          <description>An identifier that was assigned in secondary use - it serves to identify the object in a relative context, but cannot be consistently assigned to the same object again in a different context.</description>
+        </code>
+        <code name="Old" value="old">
+          <description>The identifier id no longer considered valid, but may be relevant for search purposes.  E.g. Changes to identifier schemes, account merges, etc.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="DiscriminatorType" id="discriminatortype">
+      <description>How an element value is interpreted when discrimination is evaluated.</description>
+      <codes>
+        <code name="Value" value="value">
+          <description>The slices have different values in the nominated element, as determined by the applicable fixed value, pattern, or required ValueSet binding.</description>
+        </code>
+        <code name="Exists" value="exists">
+          <description>The slices are differentiated by the presence or absence of the nominated element. There SHALL be no more than two slices. The slices are differentiated by the fact that one must have a max of 0 and the other must have a min of 1 (or more).  The order in which the slices are declared doesn&apos;t matter.</description>
+        </code>
+        <code name="Pattern" value="pattern">
+          <description>The slices have different values in the nominated element, as determined by the applicable fixed value, pattern, or required ValueSet binding. This has the same meaning as &apos;value&apos; and is deprecated.</description>
+        </code>
+        <code name="Type" value="type">
+          <description>The slices are differentiated by type of the nominated element.</description>
+        </code>
+        <code name="Profile" value="profile">
+          <description>The slices are differentiated by conformance of the nominated element to a specified profile. Note that if the path specifies .resolve() then the profile is the target profile on the reference. In this case, validation by the possible profiles is required to differentiate the slices.</description>
+        </code>
+        <code name="Position" value="position">
+          <description>The slices are differentiated by their index. This is only possible if all but the last slice have min=max cardinality, and the (optional) last slice contains other undifferentiated elements.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="TriggerType" id="triggertype">
+      <description>The type of trigger.</description>
+      <codes>
+        <code name="Named Event" value="named-event">
+          <description>The trigger occurs in response to a specific named event, and no other information about the trigger is specified. Named events are completely pre-coordinated, and the formal semantics of the trigger are not provided.</description>
+        </code>
+        <code name="Periodic" value="periodic">
+          <description>The trigger occurs at a specific time or periodically as described by a timing or schedule. A periodic event cannot have any data elements, but may have a name assigned as a shorthand for the event.</description>
+        </code>
+        <code name="Data Changed" value="data-changed">
+          <description>The trigger occurs whenever data of a particular type is changed in any way, either added, modified, or removed.</description>
+        </code>
+        <code name="Data Accessed" value="data-accessed">
+          <description>The trigger occurs whenever data of a particular type is accessed.</description>
+        </code>
+        <code name="Data Access Ended" value="data-access-ended">
+          <description>The trigger occurs whenever access to data of a particular type is completed.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="SortDirection" id="sortdirection">
+      <description>The possible sort directions, ascending or descending.</description>
+      <codes>
+        <code name="Ascending" value="ascending">
+          <description>Sort by the value ascending, so that lower values appear first.</description>
+        </code>
+        <code name="Descending" value="descending">
+          <description>Sort by the value descending, so that lower values appear last.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="RelatedArtifactType" id="relatedartifacttype">
+      <description>The type of relationship to the related artifact.</description>
+      <codes>
+        <code name="Documentation" value="documentation">
+          <description>Additional documentation for the knowledge resource. This would include additional instructions on usage as well as additional information on clinical context or appropriateness.</description>
+        </code>
+        <code name="Justification" value="justification">
+          <description>The target artifact is a summary of the justification for the knowledge resource including supporting evidence, relevant guidelines, or other clinically important information. This information is intended to provide a way to make the justification for the knowledge resource available to the consumer of interventions or results produced by the knowledge resource.</description>
+        </code>
+        <code name="Citation" value="citation">
+          <description>Bibliographic citation for papers, references, or other relevant material for the knowledge resource. This is intended to allow for citation of related material, but that was not necessarily specifically prepared in connection with this knowledge resource.</description>
+        </code>
+        <code name="Predecessor" value="predecessor">
+          <description>The previous version of the knowledge artifact, used to establish an ordering of versions of an artifact, independent of the status of each version.</description>
+        </code>
+        <code name="Successor" value="successor">
+          <description>The subsequent version of the knowledge artfact, used to establish an ordering of versions of an artifact, independent of the status of each version.</description>
+        </code>
+        <code name="Derived From" value="derived-from">
+          <description>This artifact is derived from the target artifact. This is intended to capture the relationship in which a particular knowledge resource is based on the content of another artifact, but is modified to capture either a different set of overall requirements, or a more specific set of requirements such as those involved in a particular institution or clinical setting. The artifact may be derived from one or more target artifacts.</description>
+        </code>
+        <code name="Depends On" value="depends-on">
+          <description>This artifact depends on the target artifact. There is a requirement to use the target artifact in the creation or interpretation of this artifact.</description>
+        </code>
+        <code name="Composed Of" value="composed-of">
+          <description>This artifact is composed of the target artifact. This artifact is constructed with the target artifact as a component. The target artifact is a part of this artifact. (A dataset is composed of data.).</description>
+        </code>
+        <code name="Part Of" value="part-of">
+          <description>This artifact is a part of the target artifact. The target artifact is composed of this artifact (and possibly other artifacts).</description>
+        </code>
+        <code name="Amends" value="amends">
+          <description>This artifact amends or changes the target artifact. This artifact adds additional information that is functionally expected to replace information in the target artifact. This artifact replaces a part but not all of the target artifact.</description>
+        </code>
+        <code name="Amended With" value="amended-with">
+          <description>This artifact is amended with or changed by the target artifact. There is information in this artifact that should be functionally replaced with information in the target artifact.</description>
+        </code>
+        <code name="Appends" value="appends">
+          <description>This artifact adds additional information to the target artifact. The additional information does not replace or change information in the target artifact.</description>
+        </code>
+        <code name="Appended With" value="appended-with">
+          <description>This artifact has additional information in the target artifact.</description>
+        </code>
+        <code name="Cites" value="cites">
+          <description>This artifact cites the target artifact. This may be a bibliographic citation for papers, references, or other relevant material for the knowledge resource. This is intended to allow for citation of related material, but that was not necessarily specifically prepared in connection with this knowledge resource.</description>
+        </code>
+        <code name="Cited By" value="cited-by">
+          <description>This artifact is cited by the target artifact.</description>
+        </code>
+        <code name="Is Comment On" value="comments-on">
+          <description>This artifact contains comments about the target artifact.</description>
+        </code>
+        <code name="Has Comment In" value="comment-in">
+          <description>This artifact has comments about it in the target artifact.  The type of comments may be expressed in the targetClassifier element such as reply, review, editorial, feedback, solicited, unsolicited, structured, unstructured.</description>
+        </code>
+        <code name="Contains" value="contains">
+          <description>This artifact is a container in which the target artifact is contained. A container is a data structure whose instances are collections of other objects. (A database contains the dataset.).</description>
+        </code>
+        <code name="Contained In" value="contained-in">
+          <description>This artifact is contained in the target artifact. The target artifact is a data structure whose instances are collections of other objects.</description>
+        </code>
+        <code name="Corrects" value="corrects">
+          <description>This artifact identifies errors and replacement content for the target artifact.</description>
+        </code>
+        <code name="Correction In" value="correction-in">
+          <description>This artifact has corrections to it in the target artifact. The target artifact identifies errors and replacement content for this artifact.</description>
+        </code>
+        <code name="Replaces" value="replaces">
+          <description>This artifact replaces or supersedes the target artifact. The target artifact may be considered deprecated.</description>
+        </code>
+        <code name="Replaced With" value="replaced-with">
+          <description>This artifact is replaced with or superseded by the target artifact. This artifact may be considered deprecated.</description>
+        </code>
+        <code name="Retracts" value="retracts">
+          <description>This artifact retracts the target artifact. The content that was published in the target artifact should be considered removed from publication and should no longer be considered part of the public record.</description>
+        </code>
+        <code name="Retracted By" value="retracted-by">
+          <description>This artifact is retracted by the target artifact. The content that was published in this artifact should be considered removed from publication and should no longer be considered part of the public record.</description>
+        </code>
+        <code name="Signs" value="signs">
+          <description>This artifact is a signature of the target artifact.</description>
+        </code>
+        <code name="Similar To" value="similar-to">
+          <description>This artifact has characteristics in common with the target artifact. This relationship may be used in systems to "deduplicate" knowledge artifacts from different sources, or in systems to show "similar items".</description>
+        </code>
+        <code name="Supports" value="supports">
+          <description>This artifact provides additional support for the target artifact. The type of support  is not documentation as it does not describe, explain, or instruct regarding the target artifact.</description>
+        </code>
+        <code name="Supported With" value="supported-with">
+          <description>The target artifact contains additional information related to the knowledge artifact but is not documentation as the additional information does not describe, explain, or instruct regarding the knowledge artifact content or application. This could include an associated dataset.</description>
+        </code>
+        <code name="Transforms" value="transforms">
+          <description>This artifact was generated by transforming the target artifact (e.g., format or language conversion). This is intended to capture the relationship in which a particular knowledge resource is based on the content of another artifact, but changes are only apparent in form and there is only one target artifact with the "transforms" relationship type.</description>
+        </code>
+        <code name="Transformed Into" value="transformed-into">
+          <description>This artifact was transformed into the target artifact (e.g., by format or language conversion).</description>
+        </code>
+        <code name="Transformed With" value="transformed-with">
+          <description>This artifact was generated by transforming a related artifact (e.g., format or language conversion), noted separately with the "transforms" relationship type. This transformation used the target artifact to inform the transformation. The target artifact may be a conversion script or translation guide.</description>
+        </code>
+        <code name="Documents" value="documents">
+          <description>This artifact provides additional documentation for the target artifact. This could include additional instructions on usage as well as additional information on clinical context or appropriateness.</description>
+        </code>
+        <code name="Specification Of" value="specification-of">
+          <description>The target artifact is a precise description of a concept in this artifact. This may be used when the RelatedArtifact datatype is used in elements contained in this artifact.</description>
+        </code>
+        <code name="Created With" value="created-with">
+          <description>This artifact was created with the target artifact. The target artifact is a tool or support material used in the creation of the artifact, and not content that the artifact was derived from.</description>
+        </code>
+        <code name="Cite As" value="cite-as">
+          <description>The related artifact is the citation for this artifact.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="AddressType" id="addresstype">
+      <description>The type of an address (physical / postal).</description>
+      <codes>
+        <code name="Postal" value="postal">
+          <description>Mailing addresses - PO Boxes and care-of addresses.</description>
+        </code>
+        <code name="Physical" value="physical">
+          <description>A physical address that can be visited.</description>
+        </code>
+        <code name="Postal &amp; Physical" value="both">
+          <description>An address that is both physical and postal.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ReferenceVersionRules" id="referenceversionrules">
+      <description>Whether a reference needs to be version specific or version independent, or whether either can be used.</description>
+      <codes>
+        <code name="Either Specific or independent" value="either">
+          <description>The reference may be either version independent or version specific.</description>
+        </code>
+        <code name="Version independent" value="independent">
+          <description>The reference must be version independent.</description>
+        </code>
+        <code name="Version Specific" value="specific">
+          <description>The reference must be version specific.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="VirtualServiceType" id="virtualservicetype">
+      <description>Example codes for possible virtual service connection types.</description>
+      <codes>
+        <code name="Zoom web conferencing" value="zoom">
+          <description>the amount is the base price used for calculating the total price before applying surcharges, discount or taxes.</description>
+        </code>
+        <code name="Microsoft Teams" value="ms-teams">
+          <description>Microsoft Teams web conferencing meeting</description>
+        </code>
+        <code name="WhatsApp conference call" value="whatsapp">
+          <description>A conference call using the WhatsApp conference call service</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="FHIRTypes" id="fhirtypes">
+      <description>One of the types defined as part of this version of FHIR.</description>
+      <codes>
+        <code name="Base" value="Base">
+          <description>Base Type: Base definition for all types defined in FHIR type system.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="NameUse" id="nameuse">
+      <description>The use of a human name.</description>
+      <codes>
+        <code name="Usual" value="usual">
+          <description>Known as/conventional/the one you normally use.</description>
+        </code>
+        <code name="Official" value="official">
+          <description>The formal name as registered in an official (government) registry, but which name might not be commonly used. May be called &quot;legal name&quot;.</description>
+        </code>
+        <code name="Temp" value="temp">
+          <description>A temporary name. Name.period can provide more detailed information. This may also be used for temporary names assigned at birth or in emergency situations.</description>
+        </code>
+        <code name="Nickname" value="nickname">
+          <description>A name that is used to address the person in an informal manner, but is not part of their formal or usual name.</description>
+        </code>
+        <code name="Anonymous" value="anonymous">
+          <description>Anonymous assigned name, alias, or pseudonym (used to protect a person&apos;s identity for privacy reasons).</description>
+        </code>
+        <code name="Old" value="old">
+          <description>This name is no longer in use (or was never correct, but retained for records).</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="AddressUse" id="addressuse">
+      <description>The use of an address.</description>
+      <codes>
+        <code name="Home" value="home">
+          <description>A communication address at a home.</description>
+        </code>
+        <code name="Work" value="work">
+          <description>An office address. First choice for business related contacts during business hours.</description>
+        </code>
+        <code name="Temporary" value="temp">
+          <description>A temporary address. The period can provide more detailed information.</description>
+        </code>
+        <code name="Old / Incorrect" value="old">
+          <description>This address is no longer in use (or was never correct but retained for records).</description>
+        </code>
+        <code name="Billing" value="billing">
+          <description>An address to be used to send bills, invoices, receipts etc.</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="MimeType" id="mimetype">
+      <description>IANA MIME types (placeholder - use IANA registry)</description>
+      <codes>
+        <code name="JSON" value="application/json">
+          <description>JSON format</description>
+        </code>
+        <code name="XML" value="application/xml">
+          <description>XML format</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="Language" id="language">
+      <description>BCP 47 language codes (placeholder)</description>
+      <codes>
+        <code name="English" value="en">
+          <description>English</description>
+        </code>
+        <code name="English (US)" value="en-US">
+          <description>English (United States)</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="CurrencyCode" id="currencycode">
+      <description>ISO 4217 currency codes (placeholder)</description>
+      <codes>
+        <code name="US Dollar" value="USD">
+          <description>US Dollar</description>
+        </code>
+        <code name="Euro" value="EUR">
+          <description>Euro</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="Units" id="units">
+      <description>UCUM units (placeholder)</description>
+      <codes>
+        <code name="Seconds" value="s">
+          <description>Seconds</description>
+        </code>
+        <code name="Minutes" value="min">
+          <description>Minutes</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ParameterUse" id="parameteruse">
+      <description>Operation parameter use</description>
+      <codes>
+        <code name="In" value="in">
+          <description>Input parameter</description>
+        </code>
+        <code name="Out" value="out">
+          <description>Output parameter</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="ExpressionLanguage" id="expressionlanguage">
+      <description>Expression languages</description>
+      <codes>
+        <code name="FHIRPath" value="text/fhirpath">
+          <description>FHIRPath expression language</description>
+        </code>
+        <code name="CQL" value="text/cql">
+          <description>Clinical Quality Language</description>
+        </code>
+      </codes>
+    </codeset>
+    <codeset name="RelatedArtifactPublicationStatus" id="relatedartifactpublicationstatus">
+      <description>Publication status of related artifacts</description>
+      <codes>
+        <code name="Draft" value="draft">
+          <description>Draft</description>
+        </code>
+        <code name="Active" value="active">
+          <description>Active</description>
+        </code>
+        <code name="Retired" value="retired">
+          <description>Retired</description>
+        </code>
+        <code name="Unknown" value="unknown">
+          <description>Unknown</description>
+        </code>
+      </codes>
+    </codeset>
+  </codesets>
 </fhir>

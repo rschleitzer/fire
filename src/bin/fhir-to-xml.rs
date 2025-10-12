@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use clap::Parser;
@@ -104,6 +104,23 @@ struct SearchComponent {
     expression: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct CodeSystem {
+    #[serde(rename = "resourceType")]
+    resource_type: String,
+    id: String,
+    name: String,
+    description: Option<String>,
+    concept: Option<Vec<CodeConcept>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CodeConcept {
+    code: String,
+    display: String,
+    definition: Option<String>,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -114,10 +131,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 1: Load FHIR R5 JSON files
     println!("\n📖 Loading FHIR R5 definitions...");
     let structures = load_structure_definitions(&args.input)?;
+    let complex_types = load_complex_types(&args.input)?;
     let search_params = load_search_parameters(&args.input)?;
+    let code_systems = load_code_systems(&args.input)?;
 
     println!("   Found {} structure definitions", structures.len());
+    println!("   Found {} complex type definitions", complex_types.len());
     println!("   Found {} search parameters", search_params.len());
+    println!("   Found {} code systems", code_systems.len());
 
     // Step 2: Filter resources if specified
     let resource_filter: Option<Vec<String>> = args.resources.map(|r| {
@@ -131,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 4: Generate XML
     println!("\n📝 Generating XML model...");
-    let xml = generate_xml(&resources)?;
+    let xml = generate_xml(&resources, &complex_types, &code_systems)?;
 
     // Step 5: Write output
     if let Some(parent) = args.output.parent() {
@@ -166,6 +187,24 @@ fn load_structure_definitions(input_dir: &PathBuf) -> Result<Vec<StructureDefini
     Ok(structures)
 }
 
+fn load_complex_types(input_dir: &PathBuf) -> Result<Vec<StructureDefinition>, Box<dyn std::error::Error>> {
+    let types_path = input_dir.join("profiles-types.json");
+    let content = fs::read_to_string(&types_path)?;
+    let bundle: FhirBundle = serde_json::from_str(&content)?;
+
+    let mut types = Vec::new();
+    for entry in bundle.entry {
+        if let Ok(def) = serde_json::from_value::<StructureDefinition>(entry.resource) {
+            // Only include complex types (data types like Address, HumanName, etc.)
+            if def.kind == "complex-type" {
+                types.push(def);
+            }
+        }
+    }
+
+    Ok(types)
+}
+
 fn load_search_parameters(input_dir: &PathBuf) -> Result<HashMap<String, Vec<SearchParameter>>, Box<dyn std::error::Error>> {
     let search_path = input_dir.join("search-parameters.json");
     let content = fs::read_to_string(&search_path)?;
@@ -183,6 +222,23 @@ fn load_search_parameters(input_dir: &PathBuf) -> Result<HashMap<String, Vec<Sea
     }
 
     Ok(by_resource)
+}
+
+fn load_code_systems(input_dir: &PathBuf) -> Result<Vec<CodeSystem>, Box<dyn std::error::Error>> {
+    let valuesets_path = input_dir.join("valuesets.json");
+    let content = fs::read_to_string(&valuesets_path)?;
+    let bundle: FhirBundle = serde_json::from_str(&content)?;
+
+    let mut code_systems = Vec::new();
+    for entry in bundle.entry {
+        if let Ok(cs) = serde_json::from_value::<CodeSystem>(entry.resource) {
+            if cs.resource_type == "CodeSystem" && cs.concept.is_some() {
+                code_systems.push(cs);
+            }
+        }
+    }
+
+    Ok(code_systems)
 }
 
 #[derive(Debug)]
@@ -328,7 +384,7 @@ fn extract_search_params(
     params
 }
 
-fn generate_xml(resources: &[ResourceDefinition]) -> Result<String, Box<dyn std::error::Error>> {
+fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem]) -> Result<String, Box<dyn std::error::Error>> {
     let mut xml = String::new();
 
     // XML header and DTD reference
@@ -336,7 +392,7 @@ fn generate_xml(resources: &[ResourceDefinition]) -> Result<String, Box<dyn std:
     xml.push_str("<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">\n\n");
 
     // Root element
-    xml.push_str("<fhir name=\"Fire\" version=\"5.0.0\" reasoning=\"true\" simplified=\"false\">\n");
+    xml.push_str("<fhir name=\"Fire\" version=\"5.0.0\">\n");
     xml.push_str("  <resources>\n");
 
     for resource in resources {
@@ -344,11 +400,263 @@ fn generate_xml(resources: &[ResourceDefinition]) -> Result<String, Box<dyn std:
     }
 
     xml.push_str("  </resources>\n");
-    xml.push_str("  <elements/>\n"); // Global elements (complex types) - TODO
-    xml.push_str("  <codesets/>\n"); // ValueSets - TODO
+
+    // Collect all referenced element types recursively
+    let mut referenced_types = HashSet::new();
+    let mut to_process = Vec::new();
+
+    // Start with types referenced by resources
+    for resource in resources {
+        for element in &resource.elements {
+            for type_name in &element.types {
+                let dtd_type = map_fhir_type_to_dtd(type_name);
+                if dtd_type == "element" {
+                    if referenced_types.insert(type_name.as_str()) {
+                        to_process.push(type_name.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    // Create a map for quick lookup
+    let type_map: HashMap<&str, &StructureDefinition> = all_complex_types
+        .iter()
+        .map(|t| (t.type_name.as_str(), t))
+        .collect();
+
+    // Recursively follow references
+    while let Some(type_name) = to_process.pop() {
+        if let Some(complex_type) = type_map.get(type_name) {
+            if let Some(snapshot) = &complex_type.snapshot {
+                for elem in &snapshot.element {
+                    if let Some(types) = &elem.types {
+                        for elem_type in types {
+                            let dtd_type = map_fhir_type_to_dtd(&elem_type.code);
+                            if dtd_type == "element" {
+                                if referenced_types.insert(elem_type.code.as_str()) {
+                                    to_process.push(elem_type.code.as_str());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate element definitions for all referenced types
+    xml.push_str("  <elements>\n");
+
+    // Add hardcoded Resource element (abstract base type)
+    xml.push_str("    <element id=\"resource\" name=\"Resource\">\n");
+    xml.push_str("      <description>Base Resource (abstract)</description>\n");
+    xml.push_str("      <properties>\n");
+    xml.push_str("        <property id=\"resource.id\" name=\"id\" type=\"id\" iscollection=\"false\" notnull=\"false\">\n");
+    xml.push_str("          <description>Logical id of this artifact</description>\n");
+    xml.push_str("        </property>\n");
+    xml.push_str("        <property id=\"resource.meta\" name=\"meta\" type=\"element\" ref=\"meta\" iscollection=\"false\" notnull=\"false\">\n");
+    xml.push_str("          <description>Metadata about the resource</description>\n");
+    xml.push_str("        </property>\n");
+    xml.push_str("      </properties>\n");
+    xml.push_str("      <elements/>\n");
+    xml.push_str("      <codesets/>\n");
+    xml.push_str("    </element>\n");
+
+    // Track generated IDs to avoid duplicates
+    let mut generated_ids = HashSet::new();
+
+    for complex_type in all_complex_types {
+        let type_name = complex_type.type_name.as_str();
+        if referenced_types.contains(type_name) {
+            let element_id = type_name.to_lowercase();
+
+            // Skip if already generated (e.g., MoneyQuantity and SimpleQuantity duplicate Quantity)
+            if generated_ids.insert(element_id.clone()) {
+                generate_element_xml(&mut xml, complex_type)?;
+            }
+        }
+    }
+    xml.push_str("  </elements>\n");
+
+    // Collect all referenced codesets
+    let mut referenced_codesets = HashSet::new();
+
+    // From resources
+    for resource in resources {
+        for element in &resource.elements {
+            if let Some(binding) = &element.binding_name {
+                referenced_codesets.insert(to_lowercase_preserve_digits(binding));
+            }
+        }
+    }
+
+    // From elements
+    for complex_type in all_complex_types {
+        if let Some(snapshot) = &complex_type.snapshot {
+            for elem in &snapshot.element {
+                if let Some(binding) = &elem.binding {
+                    if let Some(extensions) = &binding.extension {
+                        for ext in extensions {
+                            if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                    if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                        referenced_codesets.insert(to_lowercase_preserve_digits(value));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate codesets
+    xml.push_str("  <codesets>\n");
+
+    // Create a map for quick lookup
+    let codeset_map: HashMap<String, &CodeSystem> = all_code_systems
+        .iter()
+        .map(|cs| (cs.id.replace("-", "").to_lowercase(), cs))
+        .collect();
+
+    for codeset_id in referenced_codesets.iter() {
+        if let Some(code_system) = codeset_map.get(codeset_id.as_str()) {
+            generate_codeset_xml(&mut xml, code_system)?;
+        }
+    }
+
+    // Add hardcoded stub codesets for external references
+    add_stub_codesets(&mut xml);
+
+    xml.push_str("  </codesets>\n");
     xml.push_str("</fhir>\n");
 
     Ok(xml)
+}
+
+fn add_stub_codesets(xml: &mut String) {
+    // MimeType - IANA MIME types
+    xml.push_str("    <codeset name=\"MimeType\" id=\"mimetype\">\n");
+    xml.push_str("      <description>IANA MIME types (placeholder - use IANA registry)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"JSON\" value=\"application/json\">\n");
+    xml.push_str("          <description>JSON format</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"XML\" value=\"application/xml\">\n");
+    xml.push_str("          <description>XML format</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // Language - BCP 47
+    xml.push_str("    <codeset name=\"Language\" id=\"language\">\n");
+    xml.push_str("      <description>BCP 47 language codes (placeholder)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"English\" value=\"en\">\n");
+    xml.push_str("          <description>English</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
+    xml.push_str("          <description>English (United States)</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // CurrencyCode - ISO 4217
+    xml.push_str("    <codeset name=\"CurrencyCode\" id=\"currencycode\">\n");
+    xml.push_str("      <description>ISO 4217 currency codes (placeholder)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"US Dollar\" value=\"USD\">\n");
+    xml.push_str("          <description>US Dollar</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Euro\" value=\"EUR\">\n");
+    xml.push_str("          <description>Euro</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // Units - UCUM
+    xml.push_str("    <codeset name=\"Units\" id=\"units\">\n");
+    xml.push_str("      <description>UCUM units (placeholder)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"Seconds\" value=\"s\">\n");
+    xml.push_str("          <description>Seconds</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Minutes\" value=\"min\">\n");
+    xml.push_str("          <description>Minutes</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // ParameterUse
+    xml.push_str("    <codeset name=\"ParameterUse\" id=\"parameteruse\">\n");
+    xml.push_str("      <description>Operation parameter use</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"In\" value=\"in\">\n");
+    xml.push_str("          <description>Input parameter</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Out\" value=\"out\">\n");
+    xml.push_str("          <description>Output parameter</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // ExpressionLanguage
+    xml.push_str("    <codeset name=\"ExpressionLanguage\" id=\"expressionlanguage\">\n");
+    xml.push_str("      <description>Expression languages</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"FHIRPath\" value=\"text/fhirpath\">\n");
+    xml.push_str("          <description>FHIRPath expression language</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"CQL\" value=\"text/cql\">\n");
+    xml.push_str("          <description>Clinical Quality Language</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // RelatedArtifactPublicationStatus
+    xml.push_str("    <codeset name=\"RelatedArtifactPublicationStatus\" id=\"relatedartifactpublicationstatus\">\n");
+    xml.push_str("      <description>Publication status of related artifacts</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"Draft\" value=\"draft\">\n");
+    xml.push_str("          <description>Draft</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Active\" value=\"active\">\n");
+    xml.push_str("          <description>Active</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Retired\" value=\"retired\">\n");
+    xml.push_str("          <description>Retired</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"Unknown\" value=\"unknown\">\n");
+    xml.push_str("          <description>Unknown</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+}
+
+fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<(), Box<dyn std::error::Error>> {
+    let codeset_id = code_system.id.replace("-", "").to_lowercase();
+
+    xml.push_str(&format!("    <codeset name=\"{}\" id=\"{}\">\n", code_system.name, codeset_id));
+    xml.push_str(&format!("      <description>{}</description>\n",
+        escape_xml(&code_system.description.as_ref().unwrap_or(&String::new()))));
+
+    xml.push_str("      <codes>\n");
+    if let Some(concepts) = &code_system.concept {
+        for concept in concepts {
+            xml.push_str(&format!("        <code name=\"{}\" value=\"{}\">\n",
+                escape_xml(&concept.display),
+                escape_xml(&concept.code)));
+            xml.push_str(&format!("          <description>{}</description>\n",
+                escape_xml(&concept.definition.as_ref().unwrap_or(&concept.display))));
+            xml.push_str("        </code>\n");
+        }
+    }
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    Ok(())
 }
 
 fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Result<(), Box<dyn std::error::Error>> {
@@ -378,6 +686,66 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Res
     xml.push_str("      </searches>\n");
 
     xml.push_str("    </resource>\n");
+
+    Ok(())
+}
+
+fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) -> Result<(), Box<dyn std::error::Error>> {
+    let element_id = complex_type.type_name.to_lowercase();
+
+    xml.push_str(&format!("    <element id=\"{}\" name=\"{}\">\n", element_id, complex_type.name));
+    xml.push_str(&format!("      <description>{}</description>\n", escape_xml(&complex_type.description.as_ref().unwrap_or(&String::new()))));
+
+    // Properties
+    xml.push_str("      <properties>\n");
+    if let Some(snapshot) = &complex_type.snapshot {
+        for elem in &snapshot.element {
+            // Only include direct properties of the complex type (not nested or root)
+            if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
+                let name = elem.path.split('.').last().unwrap_or("").to_string();
+                let types = elem.types.as_ref()
+                    .map(|t| t.iter().map(|et| et.code.clone()).collect())
+                    .unwrap_or_default();
+
+                let cardinality = format!("{}..{}",
+                    elem.min.unwrap_or(0),
+                    elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
+                );
+
+                // Extract binding name
+                let binding_name = elem.binding.as_ref().and_then(|binding| {
+                    binding.extension.as_ref().and_then(|extensions| {
+                        for ext in extensions {
+                            if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                    if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                        return Some(value.to_string());
+                                    }
+                                }
+                            }
+                        }
+                        None
+                    })
+                });
+
+                let element_info = ElementInfo {
+                    name,
+                    path: elem.path.clone(),
+                    types,
+                    description: elem.short_description.clone().unwrap_or_default(),
+                    cardinality,
+                    binding_name,
+                };
+
+                generate_property_xml(xml, &element_info, &complex_type.name)?;
+            }
+        }
+    }
+    xml.push_str("      </properties>\n");
+
+    xml.push_str("      <elements/>\n");
+    xml.push_str("      <codesets/>\n");
+    xml.push_str("    </element>\n");
 
     Ok(())
 }
@@ -515,8 +883,10 @@ fn map_fhir_type_to_dtd(fhir_type: &str) -> &str {
         "dateTime" | "instant" => "dateTime",
         "time" => "time",
         "base64Binary" => "base64Binary",
-        "Reference" => "variant", // References are complex types
-        _ => "element", // All complex types are elements
+        // FHIR internal types - map to primitive
+        "http://hl7.org/fhirpath/System.String" => "string",
+        t if t.starts_with("http://hl7.org/fhirpath/") => "string", // Other FHIRPath primitives
+        _ => "element", // All complex types (including Reference) are elements
     }
 }
 
@@ -538,4 +908,13 @@ fn escape_xml(text: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+        // Replace smart quotes with regular quotes
+        .replace('\u{201C}', "\"")  // Left double quote
+        .replace('\u{201D}', "\"")  // Right double quote
+        .replace('\u{2018}', "'")   // Left single quote
+        .replace('\u{2019}', "'")   // Right single quote
+        // Replace other special characters
+        .replace('\u{2013}', "-")   // En dash
+        .replace('\u{2014}', "-")   // Em dash
+        .replace('\u{2026}', "...")  // Ellipsis
 }
