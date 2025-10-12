@@ -817,7 +817,8 @@ impl ObservationRepository {
                         " AND observation.effective_datetime {} ${}::timestamptz",
                         op, bind_count
                     ));
-                    bind_values.push(comparison.value.format("%Y-%m-%dT%H:%M:%S%.fZ").to_string());
+                    // Convert NaiveDate to string format (YYYY-MM-DD) - PostgreSQL will handle the comparison
+                    bind_values.push(comparison.value.format("%Y-%m-%d").to_string());
                 }
                 SearchCondition::ForwardChain(chain) => {
                     // Forward chaining for Observation: follow subject reference to Patient
