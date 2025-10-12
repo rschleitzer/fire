@@ -21,6 +21,153 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Recursively build JOINs and WHERE conditions for a chained search
+/// Returns (joins, where_clause, bind_count_increment, bind_values)
+fn build_chain_joins(
+    chain: &[crate::search::ChainLink],
+    source_table: &str,
+    source_alias: &str,
+    reference_field: &str,
+    join_counter: &mut usize,
+    bind_counter: &mut usize,
+    search_value: &str,
+) -> Result<(Vec<String>, Option<String>, Vec<String>)> {
+    if chain.is_empty() {
+        return Ok((Vec::new(), None, Vec::new()));
+    }
+
+    let current_param = &chain[0].param;
+    let remaining_chain = &chain[1..];
+
+    // Determine if this is a reference parameter (leads to another resource)
+    // or a search parameter (final value to search for)
+    let is_reference = !remaining_chain.is_empty();
+
+    if is_reference {
+        // This is a reference to another resource - need to follow it
+        // Determine target table based on reference parameter name
+        let target_table = match current_param.as_str() {
+            "general-practitioner" => "practitioner",
+            "subject" => "patient", // Could be other types, but for Observation it's usually Patient
+            "patient" => "patient",
+            _ => {
+                return Err(FhirError::InvalidSearchParameter(format!(
+                    "Unsupported reference parameter in chain: {}",
+                    current_param
+                )))
+            }
+        };
+
+        let alias = format!("chain_{}", *join_counter);
+        *join_counter += 1;
+
+        // Get the reference column for THIS join from the source table
+        // The reference_field parameter should already contain the fully qualified column name
+        // (e.g., "chain_0.general_practitioner_reference" or "observation.patient_reference")
+        let reference_type = capitalize_first(target_table);
+        let join_sql = format!(
+            "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
+            target_table,
+            alias,
+            alias,
+            reference_type,
+            reference_field,
+            reference_type
+        );
+
+        // Determine the reference field for the next level (if any)
+        // Only get the reference column if the next parameter is also a reference
+        // (i.e., if there are more than 1 elements remaining in the chain)
+        let next_reference_field = if remaining_chain.len() > 1 {
+            format!("{}.{}", alias, get_reference_column(target_table, &remaining_chain[0].param)?)
+        } else {
+            // Next param is the final search parameter, no reference field needed
+            String::new()
+        };
+
+        // Recurse to build the rest of the chain
+        let (mut sub_joins, sub_where, sub_binds) = build_chain_joins(
+            remaining_chain,
+            target_table,
+            &alias,
+            &next_reference_field,
+            join_counter,
+            bind_counter,
+            search_value,
+        )?;
+
+        // Prepend our JOIN to the sub-joins
+        let mut all_joins = vec![join_sql];
+        all_joins.append(&mut sub_joins);
+
+        Ok((all_joins, sub_where, sub_binds))
+    } else {
+        // This is the final search parameter - generate WHERE clause
+        *bind_counter += 1;
+        let bind_num = *bind_counter;
+
+        let (where_clause, bind_value) = match current_param.as_str() {
+            "family" => (
+                format!(
+                    "EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                    source_alias, bind_num
+                ),
+                format!("{}%", search_value),
+            ),
+            "given" => (
+                format!(
+                    "EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                    source_alias, bind_num
+                ),
+                format!("{}%", search_value),
+            ),
+            "identifier" => (
+                format!(
+                    "EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
+                    source_alias, bind_num
+                ),
+                search_value.to_string(),
+            ),
+            "name" => (
+                format!(
+                    "(EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
+                    source_alias, bind_num, source_alias, bind_num
+                ),
+                format!("{}%", search_value),
+            ),
+            "telecom" | "email" => (
+                format!(
+                    "EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv ILIKE ${})",
+                    source_alias, bind_num
+                ),
+                format!("%{}%", search_value),
+            ),
+            _ => {
+                *bind_counter -= 1; // Undo the increment
+                return Err(FhirError::InvalidSearchParameter(format!(
+                    "Unsupported search parameter in chain: {}",
+                    current_param
+                )));
+            }
+        };
+
+        Ok((Vec::new(), Some(where_clause), vec![bind_value]))
+    }
+}
+
+/// Get the reference column name for a given table and reference parameter
+fn get_reference_column(table: &str, param: &str) -> Result<String> {
+    match (table, param) {
+        ("patient", "general-practitioner") => Ok("general_practitioner_reference".to_string()),
+        ("observation", "subject") => Ok("subject_reference".to_string()),
+        ("observation", "patient") => Ok("patient_reference".to_string()),
+        _ => Err(FhirError::InvalidSearchParameter(format!(
+            "Unsupported reference parameter '{}' for table '{}'",
+            param, table
+        ))),
+    }
+}
+
 pub struct ObservationRepository {
     pool: PgPool,
 }
@@ -822,15 +969,18 @@ impl ObservationRepository {
                 }
                 SearchCondition::ForwardChain(chain) => {
                     // Forward chaining for Observation: follow subject reference to Patient
-                    // Example: subject:Patient.family=Brown
-                    let alias = format!("chain_{}", join_counter);
-                    join_counter += 1;
+                    // Supports arbitrary depth: subject:Patient.family=Brown OR subject:Patient.general-practitioner.family=Smith
 
-                    // Determine target table and reference column
+                    // Determine target table and reference column for the first hop
                     let (target_table, reference_column) = match chain.reference_param.as_str() {
                         "subject" if chain.resource_type.as_deref() == Some("Patient") => {
                             ("patient", "observation.patient_reference")
                         }
+                        "subject" => {
+                            // Generic subject - could be various types, default to patient
+                            ("patient", "observation.subject_reference")
+                        }
+                        "patient" => ("patient", "observation.patient_reference"),
                         _ => {
                             tracing::warn!(
                                 "Unsupported chained reference in observation: {}",
@@ -840,66 +990,56 @@ impl ObservationRepository {
                         }
                     };
 
-                    // For now, handle single-level chains
-                    if chain.chain.len() == 1 {
-                        let search_param = &chain.chain[0].param;
+                    // Create the first JOIN to the target resource
+                    let alias = format!("chain_{}", join_counter);
+                    join_counter += 1;
 
-                        // Build JOIN to target resource (Patient)
-                        joins.push(format!(
-                            "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
-                            target_table,
-                            alias,
-                            alias,
-                            capitalize_first(&target_table),
-                            reference_column,
-                            capitalize_first(&target_table)
-                        ));
+                    let reference_type = capitalize_first(target_table);
+                    let join_sql = format!(
+                        "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
+                        target_table,
+                        alias,
+                        alias,
+                        reference_type,
+                        reference_column,
+                        reference_type
+                    );
+                    joins.push(join_sql);
 
-                        // Now add WHERE condition on the chained resource
-                        bind_count += 1;
-
-                        match search_param.as_str() {
-                            "family" => {
-                                // FHIR string search defaults to "starts with"
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(format!("{}%", chain.search_value));
-                            }
-                            "given" => {
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(format!("{}%", chain.search_value));
-                            }
-                            "identifier" => {
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(chain.search_value.clone());
-                            }
-                            "name" => {
-                                // Search all name fields
-                                sql.push_str(&format!(
-                                    " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) \
-                                     OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
-                                    alias, bind_count, alias, bind_count
-                                ));
-                                bind_values.push(format!("{}%", chain.search_value));
-                            }
-                            _ => {
-                                tracing::warn!(
-                                    "Unsupported chained search parameter in observation: {}",
-                                    search_param
-                                );
-                                bind_count -= 1;
-                            }
+                    // Now recursively build the rest of the chain starting from the target resource
+                    // Need to determine the reference field for the next level if the chain continues
+                    let next_reference_field = if chain.chain.len() > 1 {
+                        // There's at least one more reference in the chain
+                        // Get the reference column for the first element of the remaining chain
+                        match get_reference_column(target_table, &chain.chain[0].param) {
+                            Ok(col) => format!("{}.{}", alias, col),
+                            Err(_) => String::new(), // Will be handled by recursive call
                         }
                     } else {
-                        tracing::warn!("Multi-level chains not yet supported for observations");
+                        // Only one element left in chain - it's the final search parameter
+                        String::new()
+                    };
+
+                    match build_chain_joins(
+                        &chain.chain,
+                        target_table,
+                        &alias,
+                        &next_reference_field,
+                        &mut join_counter,
+                        &mut bind_count,
+                        &chain.search_value,
+                    ) {
+                        Ok((chain_joins, chain_where, mut chain_binds)) => {
+                            joins.extend(chain_joins);
+                            if let Some(where_clause) = chain_where {
+                                sql.push_str(&format!(" AND {}", where_clause));
+                            }
+                            bind_values.append(&mut chain_binds);
+                        }
+                        Err(e) => {
+                            tracing::error!("Error building chain joins: {}", e);
+                            continue;
+                        }
                     }
                 }
                 _ => {
@@ -1241,15 +1381,18 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 ));
             }
             SearchCondition::ForwardChain(chain) => {
-                // Forward chaining in count query - need to apply same JOINs as main search
-                let alias = format!("chain_{}", join_counter);
-                join_counter += 1;
+                // Forward chaining in count query - use same logic as main search
 
-                // Determine target table and reference column
+                // Determine target table and reference column for the first hop
                 let (target_table, reference_column) = match chain.reference_param.as_str() {
                     "subject" if chain.resource_type.as_deref() == Some("Patient") => {
                         ("patient", "observation.patient_reference")
                     }
+                    "subject" => {
+                        // Generic subject - could be various types, default to patient
+                        ("patient", "observation.subject_reference")
+                    }
+                    "patient" => ("patient", "observation.patient_reference"),
                     _ => {
                         tracing::warn!(
                             "Unsupported chained reference in observation count: {}",
@@ -1259,56 +1402,55 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     }
                 };
 
-                // Handle single-level chains
-                if chain.chain.len() == 1 {
-                    let search_param = &chain.chain[0].param;
+                // Create the first JOIN to the target resource
+                let alias = format!("chain_{}", join_counter);
+                join_counter += 1;
 
-                    // Build JOIN to target resource
-                    joins.push(format!(
-                        "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
-                        target_table,
-                        alias,
-                        alias,
-                        capitalize_first(&target_table),
-                        reference_column,
-                        capitalize_first(&target_table)
-                    ));
+                let reference_type = capitalize_first(target_table);
+                let join_sql = format!(
+                    "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
+                    target_table,
+                    alias,
+                    alias,
+                    reference_type,
+                    reference_column,
+                    reference_type
+                );
+                joins.push(join_sql);
 
-                    bind_count += 1;
+                // Now recursively build the rest of the chain starting from the target resource
+                // Need to determine the reference field for the next level if the chain continues
+                let next_reference_field = if chain.chain.len() > 1 {
+                    // There's at least one more reference in the chain
+                    // Get the reference column for the first element of the remaining chain
+                    match get_reference_column(target_table, &chain.chain[0].param) {
+                        Ok(col) => format!("{}.{}", alias, col),
+                        Err(_) => String::new(), // Will be handled by recursive call
+                    }
+                } else {
+                    // Only one element left in chain - it's the final search parameter
+                    String::new()
+                };
 
-                    match search_param.as_str() {
-                        "family" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
-                                alias, bind_count
-                            ));
+                match build_chain_joins(
+                    &chain.chain,
+                    target_table,
+                    &alias,
+                    &next_reference_field,
+                    &mut join_counter,
+                    &mut bind_count,
+                    &chain.search_value,
+                ) {
+                    Ok((chain_joins, chain_where, _chain_binds)) => {
+                        joins.extend(chain_joins);
+                        if let Some(where_clause) = chain_where {
+                            sql.push_str(&format!(" AND {}", where_clause));
                         }
-                        "given" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
-                                alias, bind_count
-                            ));
-                        }
-                        "identifier" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
-                                alias, bind_count
-                            ));
-                        }
-                        "name" => {
-                            sql.push_str(&format!(
-                                " AND (EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) \
-                                 OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
-                                alias, bind_count, alias, bind_count
-                            ));
-                        }
-                        _ => {
-                            tracing::warn!(
-                                "Unsupported chained search parameter in observation count: {}",
-                                search_param
-                            );
-                            bind_count -= 1;
-                        }
+                        // Note: bind_values are not used in count_sql since we use the same bind_values from main search
+                    }
+                    Err(e) => {
+                        tracing::error!("Error building chain joins in count: {}", e);
+                        continue;
                     }
                 }
             }
