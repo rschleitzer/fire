@@ -967,6 +967,95 @@ impl ObservationRepository {
                     // Convert NaiveDate to string format (YYYY-MM-DD) - PostgreSQL will handle the comparison
                     bind_values.push(comparison.value.format("%Y-%m-%d").to_string());
                 }
+                SearchCondition::ObservationCodeValueQuantity(composite) => {
+                    // Composite search: code AND value-quantity
+                    let op = match composite.value_prefix {
+                        crate::search::QuantityPrefix::Eq => "=",
+                        crate::search::QuantityPrefix::Ne => "!=",
+                        crate::search::QuantityPrefix::Gt => ">",
+                        crate::search::QuantityPrefix::Lt => "<",
+                        crate::search::QuantityPrefix::Ge => ">=",
+                        crate::search::QuantityPrefix::Le => "<=",
+                    };
+                    if let Some(sys) = &composite.code_system {
+                        bind_count += 3; // system, code, value
+                        sql.push_str(&format!(
+                            " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
+                            bind_count - 2, bind_count - 1, op, bind_count
+                        ));
+                        bind_values.push(sys.clone());
+                        bind_values.push(composite.code.clone());
+                        bind_values.push(composite.value.to_string());
+                    } else {
+                        bind_count += 2; // code, value
+                        sql.push_str(&format!(
+                            " AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
+                            bind_count - 1, op, bind_count
+                        ));
+                        bind_values.push(composite.code.clone());
+                        bind_values.push(composite.value.to_string());
+                    }
+                }
+                SearchCondition::ObservationCodeValueConcept(composite) => {
+                    // Composite search: code AND value-codeable-concept
+                    if let Some(sys) = &composite.code_system {
+                        bind_count += 3; // code_system, code, value_code
+                        sql.push_str(&format!(
+                            " AND observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                            bind_count - 2, bind_count - 1, bind_count
+                        ));
+                        bind_values.push(sys.clone());
+                        bind_values.push(composite.code.clone());
+                        bind_values.push(composite.value_code.clone());
+                    } else {
+                        bind_count += 2; // code, value_code
+                        sql.push_str(&format!(
+                            " AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                            bind_count - 1, bind_count
+                        ));
+                        bind_values.push(composite.code.clone());
+                        bind_values.push(composite.value_code.clone());
+                    }
+                }
+                SearchCondition::ObservationComponentCodeValueQuantity(composite) => {
+                    // Component composite search: searches within component array in JSONB
+                    let op = match composite.value_prefix {
+                        crate::search::QuantityPrefix::Eq => "=",
+                        crate::search::QuantityPrefix::Ne => "!=",
+                        crate::search::QuantityPrefix::Gt => ">",
+                        crate::search::QuantityPrefix::Lt => "<",
+                        crate::search::QuantityPrefix::Ge => ">=",
+                        crate::search::QuantityPrefix::Le => "<=",
+                    };
+
+                    if let Some(sys) = &composite.component_code_system {
+                        bind_count += 3; // system, code, value
+                        sql.push_str(&format!(
+                            " AND EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
+                                WHERE comp->'code'->'coding'->0->>'system' = ${}
+                                AND comp->'code'->'coding'->0->>'code' = ${}
+                                AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
+                            )",
+                            bind_count - 2, bind_count - 1, op, bind_count
+                        ));
+                        bind_values.push(sys.clone());
+                        bind_values.push(composite.component_code.clone());
+                        bind_values.push(composite.value.to_string());
+                    } else {
+                        bind_count += 2; // code, value
+                        sql.push_str(&format!(
+                            " AND EXISTS (
+                                SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
+                                WHERE comp->'code'->'coding'->0->>'code' = ${}
+                                AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
+                            )",
+                            bind_count - 1, op, bind_count
+                        ));
+                        bind_values.push(composite.component_code.clone());
+                        bind_values.push(composite.value.to_string());
+                    }
+                }
                 SearchCondition::ForwardChain(chain) => {
                     // Forward chaining for Observation: follow subject reference to Patient
                     // Supports arbitrary depth: subject:Patient.family=Brown OR subject:Patient.general-practitioner.family=Smith
@@ -1379,6 +1468,80 @@ fn build_count_sql(query: &SearchQuery) -> String {
                     " AND observation.effective_datetime {} ${}::timestamptz",
                     op, bind_count
                 ));
+            }
+            SearchCondition::ObservationCodeValueQuantity(composite) => {
+                // Composite search in count query
+                let op = match composite.value_prefix {
+                    crate::search::QuantityPrefix::Eq => "=",
+                    crate::search::QuantityPrefix::Ne => "!=",
+                    crate::search::QuantityPrefix::Gt => ">",
+                    crate::search::QuantityPrefix::Lt => "<",
+                    crate::search::QuantityPrefix::Ge => ">=",
+                    crate::search::QuantityPrefix::Le => "<=",
+                };
+                if composite.code_system.is_some() {
+                    bind_count += 3;
+                    sql.push_str(&format!(
+                        " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
+                        bind_count - 2, bind_count - 1, op, bind_count
+                    ));
+                } else {
+                    bind_count += 2;
+                    sql.push_str(&format!(
+                        " AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
+                        bind_count - 1, op, bind_count
+                    ));
+                }
+            }
+            SearchCondition::ObservationCodeValueConcept(composite) => {
+                // Composite search in count query
+                if composite.code_system.is_some() {
+                    bind_count += 3;
+                    sql.push_str(&format!(
+                        " AND observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                        bind_count - 2, bind_count - 1, bind_count
+                    ));
+                } else {
+                    bind_count += 2;
+                    sql.push_str(&format!(
+                        " AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                        bind_count - 1, bind_count
+                    ));
+                }
+            }
+            SearchCondition::ObservationComponentCodeValueQuantity(composite) => {
+                // Component composite search in count query
+                let op = match composite.value_prefix {
+                    crate::search::QuantityPrefix::Eq => "=",
+                    crate::search::QuantityPrefix::Ne => "!=",
+                    crate::search::QuantityPrefix::Gt => ">",
+                    crate::search::QuantityPrefix::Lt => "<",
+                    crate::search::QuantityPrefix::Ge => ">=",
+                    crate::search::QuantityPrefix::Le => "<=",
+                };
+
+                if composite.component_code_system.is_some() {
+                    bind_count += 3;
+                    sql.push_str(&format!(
+                        " AND EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
+                            WHERE comp->'code'->'coding'->0->>'system' = ${}
+                            AND comp->'code'->'coding'->0->>'code' = ${}
+                            AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
+                        )",
+                        bind_count - 2, bind_count - 1, op, bind_count
+                    ));
+                } else {
+                    bind_count += 2;
+                    sql.push_str(&format!(
+                        " AND EXISTS (
+                            SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
+                            WHERE comp->'code'->'coding'->0->>'code' = ${}
+                            AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
+                        )",
+                        bind_count - 1, op, bind_count
+                    ));
+                }
             }
             SearchCondition::ForwardChain(chain) => {
                 // Forward chaining in count query - use same logic as main search

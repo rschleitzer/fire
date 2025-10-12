@@ -51,6 +51,10 @@ pub enum SearchCondition {
     ObservationPatient(String), // patient parameter (just ID)
     ObservationSubject(String), // subject parameter (full reference)
     ObservationDate(DateComparison),
+    // Composite search parameters
+    ObservationCodeValueQuantity(CompositeCodeValueQuantity),
+    ObservationCodeValueConcept(CompositeCodeValueConcept),
+    ObservationComponentCodeValueQuantity(CompositeComponentCodeValueQuantity),
     // Forward chaining: reference.parameter (e.g., general-practitioner.family=Smith)
     ForwardChain(ChainedSearch),
     // Reverse chaining: _has:ResourceType:reference:parameter (e.g., _has:Observation:subject:code=8867-4)
@@ -77,6 +81,44 @@ pub struct ReverseChainedSearch {
     pub reference_param: String, // e.g., "subject" (the reference field in target resource)
     pub search_param: String, // e.g., "code" (the search parameter on target resource)
     pub search_value: String, // The search value
+}
+
+#[derive(Debug, Clone)]
+pub struct CompositeCodeValueQuantity {
+    pub code_system: Option<String>,
+    pub code: String,
+    pub value_prefix: QuantityPrefix,
+    pub value: f64,
+    pub value_unit: Option<String>,
+    pub value_system: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompositeCodeValueConcept {
+    pub code_system: Option<String>,
+    pub code: String,
+    pub value_system: Option<String>,
+    pub value_code: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompositeComponentCodeValueQuantity {
+    pub component_code_system: Option<String>,
+    pub component_code: String,
+    pub value_prefix: QuantityPrefix,
+    pub value: f64,
+    pub value_unit: Option<String>,
+    pub value_system: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum QuantityPrefix {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Ge,
+    Le,
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +413,28 @@ impl SearchQuery {
             conditions.push(SearchCondition::ObservationDate(comparison));
         }
 
+        // Parse composite search parameters
+        // code-value-quantity: system|code$prefix_value
+        // Example: code-value-quantity=http://loinc.org|8480-6$gt150
+        if let Some(composite) = params.get("code-value-quantity") {
+            let parsed = parse_code_value_quantity(composite)?;
+            conditions.push(SearchCondition::ObservationCodeValueQuantity(parsed));
+        }
+
+        // code-value-concept: system|code$value_system|value_code
+        // Example: code-value-concept=http://loinc.org|8480-6$http://snomed.info/sct|371879000
+        if let Some(composite) = params.get("code-value-concept") {
+            let parsed = parse_code_value_concept(composite)?;
+            conditions.push(SearchCondition::ObservationCodeValueConcept(parsed));
+        }
+
+        // component-code-value-quantity: component_system|component_code$prefix_value
+        // Example: component-code-value-quantity=http://loinc.org|8480-6$gt150
+        if let Some(composite) = params.get("component-code-value-quantity") {
+            let parsed = parse_component_code_value_quantity(composite)?;
+            conditions.push(SearchCondition::ObservationComponentCodeValueQuantity(parsed));
+        }
+
         // Parse chained parameters (forward chaining)
         // Look for parameters containing "." (e.g., "general-practitioner.family")
         for (key, value) in params.iter() {
@@ -644,6 +708,56 @@ impl SearchQuery {
                     };
                     sql.push_str(&format!(" AND effective_datetime {} ${}::timestamptz", op, bind_count));
                 }
+                SearchCondition::ObservationCodeValueQuantity(composite) => {
+                    // Composite search: code AND value-quantity
+                    let op = match composite.value_prefix {
+                        QuantityPrefix::Eq => "=",
+                        QuantityPrefix::Ne => "!=",
+                        QuantityPrefix::Gt => ">",
+                        QuantityPrefix::Lt => "<",
+                        QuantityPrefix::Ge => ">=",
+                        QuantityPrefix::Le => "<=",
+                    };
+                    if composite.code_system.is_some() {
+                        bind_count += 3; // system, code, value
+                        sql.push_str(&format!(
+                            " AND code_system = ${} AND code_code = ${} AND value_quantity_value {} ${}",
+                            bind_count - 2, bind_count - 1, op, bind_count
+                        ));
+                    } else {
+                        bind_count += 2; // code, value
+                        sql.push_str(&format!(
+                            " AND code_code = ${} AND value_quantity_value {} ${}",
+                            bind_count - 1, op, bind_count
+                        ));
+                    }
+                }
+                SearchCondition::ObservationCodeValueConcept(composite) => {
+                    // Composite search: code AND value-codeable-concept
+                    if composite.code_system.is_some() && composite.value_system.is_some() {
+                        bind_count += 4; // code_system, code, value_system, value_code
+                        sql.push_str(&format!(
+                            " AND code_system = ${} AND code_code = ${} AND ${} = ANY(value_codeable_concept_code)",
+                            bind_count - 3, bind_count - 2, bind_count
+                        ));
+                    } else if composite.code_system.is_some() {
+                        bind_count += 3; // code_system, code, value_code
+                        sql.push_str(&format!(
+                            " AND code_system = ${} AND code_code = ${} AND ${} = ANY(value_codeable_concept_code)",
+                            bind_count - 2, bind_count - 1, bind_count
+                        ));
+                    } else {
+                        bind_count += 2; // code, value_code
+                        sql.push_str(&format!(
+                            " AND code_code = ${} AND ${} = ANY(value_codeable_concept_code)",
+                            bind_count - 1, bind_count
+                        ));
+                    }
+                }
+                SearchCondition::ObservationComponentCodeValueQuantity(_composite) => {
+                    // Component composite search - not implemented in build_sql (handled in repository)
+                    // This requires querying the component array which is stored in JSONB
+                }
                 SearchCondition::ForwardChain(_chain) => {
                     // Chaining is handled in the repository layer with proper JOINs
                     // This build_sql method is not used when chaining is present
@@ -848,5 +962,207 @@ fn parse_reverse_chain(key: &str, value: &str) -> Result<ReverseChainedSearch> {
         reference_param: parts[1].to_string(),
         search_param: parts[2].to_string(),
         search_value: value.to_string(),
+    })
+}
+
+fn parse_code_value_quantity(value: &str) -> Result<CompositeCodeValueQuantity> {
+    // Parse composite code-value-quantity parameter
+    // Format: [system|]code$[prefix]value[|unit[|system]]
+    // Examples:
+    //   8480-6$gt150
+    //   http://loinc.org|8480-6$gt150
+    //   http://loinc.org|8480-6$gt150|mm[Hg]
+    //   http://loinc.org|8480-6$gt150|mm[Hg]|http://unitsofmeasure.org
+
+    // Split on $ to separate code from value
+    let parts: Vec<&str> = value.split('$').collect();
+    if parts.len() != 2 {
+        return Err(FhirError::InvalidSearchParameter(format!(
+            "Invalid code-value-quantity format (expected code$value): {}",
+            value
+        )));
+    }
+
+    let code_part = parts[0];
+    let value_part = parts[1];
+
+    // Parse code part (may contain system|code)
+    let (code_system, code) = if code_part.contains('|') {
+        let code_parts: Vec<&str> = code_part.split('|').collect();
+        if code_parts.len() == 2 {
+            (Some(code_parts[0].to_string()), code_parts[1].to_string())
+        } else {
+            return Err(FhirError::InvalidSearchParameter(format!(
+                "Invalid code format in composite parameter: {}",
+                code_part
+            )));
+        }
+    } else {
+        (None, code_part.to_string())
+    };
+
+    // Parse value part (prefix + number + optional unit + optional system)
+    // May contain | separators for unit and system
+    let value_parts: Vec<&str> = value_part.split('|').collect();
+    let numeric_part = value_parts[0];
+    let value_unit = value_parts.get(1).map(|s| s.to_string());
+    let value_system = value_parts.get(2).map(|s| s.to_string());
+
+    // Extract prefix from numeric part
+    let (prefix, num_str) = if let Some(stripped) = numeric_part.strip_prefix("eq") {
+        (QuantityPrefix::Eq, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("ne") {
+        (QuantityPrefix::Ne, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("gt") {
+        (QuantityPrefix::Gt, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("ge") {
+        (QuantityPrefix::Ge, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("lt") {
+        (QuantityPrefix::Lt, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("le") {
+        (QuantityPrefix::Le, stripped)
+    } else {
+        (QuantityPrefix::Eq, numeric_part)
+    };
+
+    let num_value = num_str.parse::<f64>().map_err(|_| {
+        FhirError::InvalidSearchParameter(format!("Invalid numeric value in composite: {}", num_str))
+    })?;
+
+    Ok(CompositeCodeValueQuantity {
+        code_system,
+        code,
+        value_prefix: prefix,
+        value: num_value,
+        value_unit,
+        value_system,
+    })
+}
+
+fn parse_code_value_concept(value: &str) -> Result<CompositeCodeValueConcept> {
+    // Parse composite code-value-concept parameter
+    // Format: [system|]code$[value_system|]value_code
+    // Examples:
+    //   8480-6$high
+    //   http://loinc.org|8480-6$http://snomed.info/sct|371879000
+
+    // Split on $ to separate code from value
+    let parts: Vec<&str> = value.split('$').collect();
+    if parts.len() != 2 {
+        return Err(FhirError::InvalidSearchParameter(format!(
+            "Invalid code-value-concept format (expected code$value): {}",
+            value
+        )));
+    }
+
+    let code_part = parts[0];
+    let value_part = parts[1];
+
+    // Parse code part (may contain system|code)
+    let (code_system, code) = if code_part.contains('|') {
+        let code_parts: Vec<&str> = code_part.split('|').collect();
+        if code_parts.len() == 2 {
+            (Some(code_parts[0].to_string()), code_parts[1].to_string())
+        } else {
+            return Err(FhirError::InvalidSearchParameter(format!(
+                "Invalid code format in composite parameter: {}",
+                code_part
+            )));
+        }
+    } else {
+        (None, code_part.to_string())
+    };
+
+    // Parse value part (may contain system|code)
+    let (value_system, value_code) = if value_part.contains('|') {
+        let value_parts: Vec<&str> = value_part.split('|').collect();
+        if value_parts.len() == 2 {
+            (Some(value_parts[0].to_string()), value_parts[1].to_string())
+        } else {
+            return Err(FhirError::InvalidSearchParameter(format!(
+                "Invalid value format in composite parameter: {}",
+                value_part
+            )));
+        }
+    } else {
+        (None, value_part.to_string())
+    };
+
+    Ok(CompositeCodeValueConcept {
+        code_system,
+        code,
+        value_system,
+        value_code,
+    })
+}
+
+fn parse_component_code_value_quantity(value: &str) -> Result<CompositeComponentCodeValueQuantity> {
+    // Parse composite component-code-value-quantity parameter
+    // Format: [system|]component_code$[prefix]value[|unit[|system]]
+    // Examples:
+    //   8480-6$gt150
+    //   http://loinc.org|8480-6$gt150|mm[Hg]
+
+    // Split on $ to separate code from value
+    let parts: Vec<&str> = value.split('$').collect();
+    if parts.len() != 2 {
+        return Err(FhirError::InvalidSearchParameter(format!(
+            "Invalid component-code-value-quantity format (expected code$value): {}",
+            value
+        )));
+    }
+
+    let code_part = parts[0];
+    let value_part = parts[1];
+
+    // Parse code part (may contain system|code)
+    let (code_system, code) = if code_part.contains('|') {
+        let code_parts: Vec<&str> = code_part.split('|').collect();
+        if code_parts.len() == 2 {
+            (Some(code_parts[0].to_string()), code_parts[1].to_string())
+        } else {
+            return Err(FhirError::InvalidSearchParameter(format!(
+                "Invalid component code format in composite parameter: {}",
+                code_part
+            )));
+        }
+    } else {
+        (None, code_part.to_string())
+    };
+
+    // Parse value part (prefix + number + optional unit + optional system)
+    let value_parts: Vec<&str> = value_part.split('|').collect();
+    let numeric_part = value_parts[0];
+    let value_unit = value_parts.get(1).map(|s| s.to_string());
+    let value_system = value_parts.get(2).map(|s| s.to_string());
+
+    // Extract prefix from numeric part
+    let (prefix, num_str) = if let Some(stripped) = numeric_part.strip_prefix("eq") {
+        (QuantityPrefix::Eq, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("ne") {
+        (QuantityPrefix::Ne, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("gt") {
+        (QuantityPrefix::Gt, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("ge") {
+        (QuantityPrefix::Ge, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("lt") {
+        (QuantityPrefix::Lt, stripped)
+    } else if let Some(stripped) = numeric_part.strip_prefix("le") {
+        (QuantityPrefix::Le, stripped)
+    } else {
+        (QuantityPrefix::Eq, numeric_part)
+    };
+
+    let num_value = num_str.parse::<f64>().map_err(|_| {
+        FhirError::InvalidSearchParameter(format!("Invalid numeric value in component composite: {}", num_str))
+    })?;
+
+    Ok(CompositeComponentCodeValueQuantity {
+        component_code_system: code_system,
+        component_code: code,
+        value_prefix: prefix,
+        value: num_value,
+        value_unit,
+        value_system,
     })
 }

@@ -1406,7 +1406,10 @@ impl PatientRepository {
                 SearchCondition::ObservationCategory(_) |
                 SearchCondition::ObservationPatient(_) |
                 SearchCondition::ObservationSubject(_) |
-                SearchCondition::ObservationDate(_) => {
+                SearchCondition::ObservationDate(_) |
+                SearchCondition::ObservationCodeValueQuantity(_) |
+                SearchCondition::ObservationCodeValueConcept(_) |
+                SearchCondition::ObservationComponentCodeValueQuantity(_) => {
                     tracing::warn!("Observation-specific search condition not applicable for Patient search");
                 }
             }
@@ -1952,7 +1955,10 @@ fn build_count_sql(query: &SearchQuery) -> String {
             SearchCondition::ObservationCategory(_) |
             SearchCondition::ObservationPatient(_) |
             SearchCondition::ObservationSubject(_) |
-            SearchCondition::ObservationDate(_) => {
+            SearchCondition::ObservationDate(_) |
+            SearchCondition::ObservationCodeValueQuantity(_) |
+            SearchCondition::ObservationCodeValueConcept(_) |
+            SearchCondition::ObservationComponentCodeValueQuantity(_) => {
                 tracing::debug!("Observation-specific search condition not applicable for Patient count query");
             }
         }
