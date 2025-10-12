@@ -774,6 +774,7 @@ fn parse_chained_param(key: &str, value: &str) -> Result<ChainedSearch> {
     // Example: "general-practitioner.family" = "Smith"
     // Example: "subject:Patient.family" = "Brown"
     // Example: "subject:Patient.general-practitioner.family" = "Smith" (multi-level)
+    // Example: "general-practitioner.family" = "Smith,Johnson" (OR logic with comma)
 
     // Check for resource type modifier (e.g., "subject:Patient")
     let (base_param, resource_type) = if let Some(colon_pos) = key.find(':') {

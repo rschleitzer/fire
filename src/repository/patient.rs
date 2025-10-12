@@ -1212,36 +1212,85 @@ impl PatientRepository {
                         // Build JOIN to target resource only if this is a new join
                         // Use subquery with unnest to match on actual references
                         if is_new_join {
+                            // If user specified a resource type explicitly (e.g., :Organization), validate it matches the expected type
+                            let expected_resource_type = capitalize_first(&target_table);
+                            if let Some(requested_type) = &chain.resource_type {
+                                // User specified a type - only join if it matches the expected type for this reference
+                                if requested_type != &expected_resource_type {
+                                    // Type mismatch - add an impossible condition to return zero results
+                                    tracing::debug!("Resource type mismatch: requested {} but reference points to {}", requested_type, expected_resource_type);
+                                    sql.push_str(" AND 1=0");  // Impossible condition - no results
+                                    continue;  // Skip adding the JOIN
+                                }
+                            }
+
                             joins.push(format!(
                                 "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE '{}/%')",
                                 target_table,
                                 alias,
                                 alias,
-                                capitalize_first(&target_table),
+                                expected_resource_type,
                                 reference_column,
-                                capitalize_first(&target_table)
+                                expected_resource_type
                             ));
                         }
 
                         // Now add WHERE condition on the chained resource
-                        bind_count += 1;
+                        // Check if value contains comma (OR logic)
+                        let has_or_values = chain.search_value.contains(',');
 
                         match search_param.as_str() {
                             "family" => {
                                 // FHIR string search defaults to "starts with" not "contains"
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(format!("{}%", chain.search_value));
+                                if has_or_values {
+                                    // Split on comma and create OR conditions
+                                    let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                    let mut or_conditions = Vec::new();
+                                    for value in &values {
+                                        bind_count += 1;
+                                        or_conditions.push(format!("fn ILIKE ${}", bind_count));
+                                        bind_values.push(format!("{}%", value));
+                                    }
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE {})",
+                                        alias,
+                                        or_conditions.join(" OR ")
+                                    ));
+                                } else {
+                                    // Single value
+                                    bind_count += 1;
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                        alias, bind_count
+                                    ));
+                                    bind_values.push(format!("{}%", chain.search_value));
+                                }
                             }
                             "given" => {
                                 // FHIR string search defaults to "starts with" not "contains"
-                                sql.push_str(&format!(
-                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
-                                    alias, bind_count
-                                ));
-                                bind_values.push(format!("{}%", chain.search_value));
+                                if has_or_values {
+                                    // Split on comma and create OR conditions
+                                    let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                    let mut or_conditions = Vec::new();
+                                    for value in &values {
+                                        bind_count += 1;
+                                        or_conditions.push(format!("gn ILIKE ${}", bind_count));
+                                        bind_values.push(format!("{}%", value));
+                                    }
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE {})",
+                                        alias,
+                                        or_conditions.join(" OR ")
+                                    ));
+                                } else {
+                                    // Single value
+                                    bind_count += 1;
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                        alias, bind_count
+                                    ));
+                                    bind_values.push(format!("{}%", chain.search_value));
+                                }
                             }
                             "identifier" => {
                                 // Handle system|value format if present
@@ -1710,31 +1759,76 @@ fn build_count_sql(query: &SearchQuery) -> String {
 
                     // Only create JOIN if this is a new join
                     if is_new_join {
+                        // If user specified a resource type explicitly (e.g., :Organization), validate it matches the expected type
+                        let expected_resource_type = capitalize_first(&target_table);
+                        if let Some(requested_type) = &chain.resource_type {
+                            // User specified a type - only join if it matches the expected type for this reference
+                            if requested_type != &expected_resource_type {
+                                // Type mismatch - add an impossible condition to return zero results
+                                tracing::debug!("Resource type mismatch in count: requested {} but reference points to {}", requested_type, expected_resource_type);
+                                sql.push_str(" AND 1=0");  // Impossible condition - no results
+                                continue;  // Skip adding the JOIN
+                            }
+                        }
+
                         joins.push(format!(
                             "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest({}) AS refs(ref) WHERE ref LIKE '{}/%')",
                             target_table,
                             alias,
                             alias,
-                            capitalize_first(&target_table),
+                            expected_resource_type,
                             reference_column,
-                            capitalize_first(&target_table)
+                            expected_resource_type
                         ));
                     }
 
-                    bind_count += 1;
+                    // Check if value contains comma (OR logic)
+                    let has_or_values = chain.search_value.contains(',');
 
                     match search_param.as_str() {
                         "family" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
-                                alias, bind_count
-                            ));
+                            if has_or_values {
+                                // Split on comma and create OR conditions
+                                let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                let mut or_conditions = Vec::new();
+                                for value in &values {
+                                    bind_count += 1;
+                                    or_conditions.push(format!("fn ILIKE ${}", bind_count));
+                                }
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE {})",
+                                    alias,
+                                    or_conditions.join(" OR ")
+                                ));
+                            } else {
+                                bind_count += 1;
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                            }
                         }
                         "given" => {
-                            sql.push_str(&format!(
-                                " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
-                                alias, bind_count
-                            ));
+                            if has_or_values {
+                                // Split on comma and create OR conditions
+                                let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
+                                let mut or_conditions = Vec::new();
+                                for value in &values {
+                                    bind_count += 1;
+                                    or_conditions.push(format!("gn ILIKE ${}", bind_count));
+                                }
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE {})",
+                                    alias,
+                                    or_conditions.join(" OR ")
+                                ));
+                            } else {
+                                bind_count += 1;
+                                sql.push_str(&format!(
+                                    " AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
+                                    alias, bind_count
+                                ));
+                            }
                         }
                         "identifier" => {
                             sql.push_str(&format!(
