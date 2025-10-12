@@ -895,6 +895,33 @@ impl PractitionerRepository {
         Ok((practitioners, total))
     }
 
+    /// Find patients that reference a specific practitioner (for _revinclude support)
+    pub async fn find_patients_by_practitioner(
+        &self,
+        practitioner_id: &str,
+    ) -> Result<Vec<crate::models::patient::Patient>> {
+        use crate::models::patient::Patient;
+
+        let practitioner_ref = format!("Practitioner/{}", practitioner_id);
+
+        // Query patients WHERE practitioner_ref is in the general_practitioner_reference array
+        let patients = sqlx::query_as!(
+            Patient,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM patient
+            WHERE $1 = ANY(general_practitioner_reference)
+            "#,
+            practitioner_ref
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(patients)
+    }
+
     /// Purge all practitioner history records - FOR TESTING ONLY
     /// This removes ALL history records to ensure test isolation
     /// Note: This does NOT delete current (non-deleted) practitioner records

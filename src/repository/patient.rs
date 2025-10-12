@@ -1995,6 +1995,35 @@ impl PatientRepository {
         Ok(observations)
     }
 
+    /// Find practitioners by IDs (for _include support)
+    pub async fn find_practitioners_by_ids(
+        &self,
+        practitioner_ids: &[String],
+    ) -> Result<Vec<crate::models::practitioner::Practitioner>> {
+        use crate::models::practitioner::Practitioner;
+
+        if practitioner_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Query practitioners WHERE id IN (ids...)
+        let practitioners = sqlx::query_as!(
+            Practitioner,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM practitioner
+            WHERE id = ANY($1)
+            "#,
+            practitioner_ids
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(practitioners)
+    }
+
     /// Rollback a patient to a specific version (deletes all versions >= rollback_to_version)
     /// This is a destructive operation for dev/test purposes only
     pub async fn rollback(&self, id: &str, rollback_to_version: i32) -> Result<()> {

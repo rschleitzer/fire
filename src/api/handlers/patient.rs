@@ -314,6 +314,39 @@ pub async fn search_patients(
         ));
     }
 
+    // Handle _include parameter for Practitioner references
+    if let Some(include_param) = params.get("_include") {
+        if include_param == "Patient:general-practitioner" {
+            // Collect all unique practitioner IDs from all patients
+            let mut practitioner_ids = std::collections::HashSet::new();
+            for patient in &patients {
+                // Extract practitioner references from patient.content.generalPractitioner
+                if let Some(gp_array) = patient.content.get("generalPractitioner").and_then(|v| v.as_array()) {
+                    for gp in gp_array {
+                        if let Some(reference) = gp.get("reference").and_then(|r| r.as_str()) {
+                            // Reference format: "Practitioner/123"
+                            if let Some(id) = reference.strip_prefix("Practitioner/") {
+                                practitioner_ids.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fetch practitioners by IDs
+            if !practitioner_ids.is_empty() {
+                let ids: Vec<String> = practitioner_ids.into_iter().collect();
+                let practitioners = repo.find_practitioners_by_ids(&ids).await?;
+                for prac in practitioners {
+                    entries.push(format!(
+                        r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                        serde_json::to_string(&prac.content)?
+                    ));
+                }
+            }
+        }
+    }
+
     // Handle _revinclude parameter for Observation references
     if let Some(revinclude_param) = params.get("_revinclude") {
         if revinclude_param == "Observation:patient" || revinclude_param == "Observation:subject" {
