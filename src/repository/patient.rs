@@ -1298,7 +1298,7 @@ impl PatientRepository {
                                         " AND EXISTS (
                                             SELECT 1 FROM observation AS {}
                                             WHERE {}.patient_reference = 'Patient/' || patient.id
-                                            AND EXISTS (SELECT 1 FROM unnest({}.code_code) AS cc WHERE cc = ${})
+                                            AND {}.code_code = ${}
                                         )",
                                         alias, alias, alias, bind_count
                                     ));
@@ -1770,7 +1770,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                                     " AND EXISTS (
                                         SELECT 1 FROM observation AS {}
                                         WHERE {}.patient_reference = 'Patient/' || patient.id
-                                        AND EXISTS (SELECT 1 FROM unnest({}.code_code) AS cc WHERE cc = ${})
+                                        AND {}.code_code = ${}
                                     )",
                                     alias, alias, alias, bind_count
                                 ));

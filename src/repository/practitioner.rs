@@ -1,6 +1,6 @@
 use chrono::Utc;
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
@@ -775,46 +775,119 @@ impl PractitionerRepository {
         Ok(practitioner)
     }
 
-    /// Search for practitioners with pagination
+    /// Search for practitioners with pagination and filtering
     pub async fn search(
         &self,
         params: &std::collections::HashMap<String, String>,
         include_total: bool,
     ) -> Result<(Vec<Practitioner>, Option<i64>)> {
-        // For now, simple implementation - just get all practitioners
-        // Parse _count and _offset
-        let count = params
-            .get("_count")
-            .and_then(|c| c.parse::<i64>().ok())
-            .unwrap_or(50);
-        let offset = params
-            .get("_offset")
-            .and_then(|o| o.parse::<i64>().ok())
-            .unwrap_or(0);
+        use crate::search::{SearchCondition, SearchQuery};
 
-        let practitioners = sqlx::query_as!(
-            Practitioner,
-            r#"
-            SELECT
-                id, version_id, last_updated,
-                content as "content: Value"
-            FROM practitioner
-            ORDER BY last_updated DESC
-            LIMIT $1 OFFSET $2
-            "#,
-            count,
-            offset
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let query = SearchQuery::from_params(params)?;
 
+        let mut sql = String::from(
+            r#"SELECT practitioner.id, practitioner.version_id, practitioner.last_updated, practitioner.content
+               FROM practitioner WHERE 1=1"#,
+        );
+
+        let mut bind_values: Vec<String> = Vec::new();
+        let mut bind_count = 0;
+
+        for condition in &query.conditions {
+            match condition {
+                SearchCondition::ReverseChain(reverse) => {
+                    // Reverse chaining: find practitioners that are referenced by patients
+                    // Example: _has:Patient:general-practitioner:family=Brown
+                    //   Find Practitioners who are GPs for patients with family name Brown
+
+                    match reverse.target_resource_type.as_str() {
+                        "Patient" => {
+                            // Find practitioners that are general practitioners for patients matching the criteria
+                            bind_count += 1;
+
+                            match reverse.search_param.as_str() {
+                                "family" => {
+                                    sql.push_str(&format!(
+                                        " AND EXISTS (
+                                            SELECT 1 FROM patient
+                                            WHERE 'Practitioner/' || practitioner.id = ANY(patient.general_practitioner_reference)
+                                            AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})
+                                        )",
+                                        bind_count
+                                    ));
+                                    bind_values.push(format!("{}%", reverse.search_value));
+                                }
+                                _ => {
+                                    tracing::warn!("Unsupported reverse chain parameter for Patient: {}", reverse.search_param);
+                                    bind_count -= 1;
+                                }
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unsupported reverse chain resource type for Practitioner: {}", reverse.target_resource_type);
+                        }
+                    }
+                }
+                // Other search conditions can be added here as needed
+                _ => {
+                    tracing::debug!("Search condition not yet implemented for Practitioner: {:?}", condition);
+                }
+            }
+        }
+
+        // Build ORDER BY clause
+        if !query.sort.is_empty() {
+            sql.push_str(" ORDER BY ");
+            for (i, sort) in query.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&sort.field);
+                match sort.direction {
+                    crate::search::SortDirection::Ascending => sql.push_str(" ASC"),
+                    crate::search::SortDirection::Descending => sql.push_str(" DESC"),
+                }
+            }
+        } else {
+            // Default sort
+            sql.push_str(" ORDER BY last_updated DESC");
+        }
+
+        // Add LIMIT and OFFSET
+        sql.push_str(&format!(" LIMIT {}", query.limit));
+        sql.push_str(&format!(" OFFSET {}", query.offset));
+
+        // Debug logging
+        tracing::debug!("Generated SQL: {}", sql);
+        tracing::debug!("Bind values: {:?}", bind_values);
+
+        // Build dynamic query
+        let mut query_builder = sqlx::query(&sql);
+        for value in &bind_values {
+            query_builder = query_builder.bind(value);
+        }
+
+        let rows = query_builder.fetch_all(&self.pool).await?;
+
+        let practitioners = rows
+            .into_iter()
+            .map(|row| Practitioner {
+                id: row.get("id"),
+                version_id: row.get("version_id"),
+                last_updated: row.get("last_updated"),
+                content: row.get("content"),
+            })
+            .collect();
+
+        // Get total count if requested
         let total = if include_total {
-            let count_result = sqlx::query_scalar!(
-                r#"SELECT COUNT(*) as "count!" FROM practitioner"#
-            )
-            .fetch_one(&self.pool)
-            .await?;
-            Some(count_result)
+            let count_sql = build_practitioner_count_sql(&query);
+            let mut count_query_builder = sqlx::query(&count_sql);
+            for value in &bind_values {
+                count_query_builder = count_query_builder.bind(value);
+            }
+            let count_row = count_query_builder.fetch_one(&self.pool).await?;
+            Some(count_row.get::<i64, _>(0))
         } else {
             None
         };
@@ -834,4 +907,48 @@ impl PractitionerRepository {
 
         Ok(())
     }
+}
+
+fn build_practitioner_count_sql(query: &crate::search::SearchQuery) -> String {
+    use crate::search::SearchCondition;
+
+    let mut sql = String::from("SELECT COUNT(*) FROM practitioner WHERE 1=1");
+    let mut bind_count = 0;
+
+    for condition in &query.conditions {
+        match condition {
+            SearchCondition::ReverseChain(reverse) => {
+                match reverse.target_resource_type.as_str() {
+                    "Patient" => {
+                        bind_count += 1;
+
+                        match reverse.search_param.as_str() {
+                            "family" => {
+                                sql.push_str(&format!(
+                                    " AND EXISTS (
+                                        SELECT 1 FROM patient
+                                        WHERE 'Practitioner/' || practitioner.id = ANY(patient.general_practitioner_reference)
+                                        AND EXISTS (SELECT 1 FROM unnest(patient.family_name) AS fn WHERE fn ILIKE ${})
+                                    )",
+                                    bind_count
+                                ));
+                            }
+                            _ => {
+                                tracing::warn!("Unsupported reverse chain parameter for Patient in count: {}", reverse.search_param);
+                                bind_count -= 1;
+                            }
+                        }
+                    }
+                    _ => {
+                        tracing::warn!("Unsupported reverse chain resource type for Practitioner in count: {}", reverse.target_resource_type);
+                    }
+                }
+            }
+            _ => {
+                tracing::debug!("Search condition not yet implemented for Practitioner count: {:?}", condition);
+            }
+        }
+    }
+
+    sql
 }
