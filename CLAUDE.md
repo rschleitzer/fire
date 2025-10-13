@@ -159,7 +159,7 @@ let search_params = load_json("fhir-r5/search-parameters.json");
 let value_sets = load_json("fhir-r5/valuesets.json");
 
 // Outputs provisional model, curated incrementally as we go
-write_xml("model/fhir.xml", extract_and_curate(structure_defs, search_params));
+write_xml("fhir.xml", extract_and_curate(structure_defs, search_params));
 ```
 
 **Example XML Output:**
@@ -192,7 +192,7 @@ write_xml("model/fhir.xml", extract_and_curate(structure_defs, search_params));
 
 ### Phase 2: Manual Curation
 
-**File: `model/fhir.xml`** (version controlled)
+**File: `fhir.xml`** (version controlled, in repo root)
 
 - Fix FHIR spec inconsistencies
 - Correct misspecified search params
@@ -202,8 +202,8 @@ write_xml("model/fhir.xml", extract_and_curate(structure_defs, search_params));
 **Workflow:**
 1. Run generator → code doesn't compile
 2. Find issue in FHIR spec or generated code
-3. Edit `model/fhir.xml` (add `<note>` documenting fix), edit generator if applicable
-4. Validate XML with `onsgmls -s model/xml.dcl model/fhir.xml`
+3. Edit `fhir.xml` (add `<note>` documenting fix), edit generator if applicable
+4. Validate XML with `onsgmls -s xml.dcl fhir.xml`
 5. Re-run generator
 6. Repeat until all resources work
 7. Commit XML model, generator, and generated code
@@ -214,13 +214,26 @@ Use `onsgmls` (SGML parser from OpenSP) to validate XML against DTD:
 
 ```bash
 # Validate XML model - must pass with zero errors before code generation
-onsgmls -s model/xml.dcl model/fhir.xml
+onsgmls -s xml.dcl fhir.xml
+
+# Count errors
+onsgmls -s xml.dcl fhir.xml 2>&1 | grep "^onsgmls:" | wc -l
 
 # Expected output on success: (silent, no errors)
 # Common errors:
 #   - IDREF validation: "reference to non-existent ID 'foo'"
 #   - DTD violations: Element/attribute structure mismatches
 ```
+
+**Current Validation Status (as of contentReference implementation):**
+- **107 errors remaining** (down from 201 initial errors)
+- **94 errors fixed** (47% reduction through type resolution and composite search fixes)
+
+**Remaining Error Categories:**
+1. **Missing codesets** (~60 errors) - CodeSystem names that don't exist or have typos in FHIR R5
+2. **Special FHIR types** (7 errors) - `resourcetype`, `fhiralltypes` need stub codesets
+3. **ElementDefinition references** (~8 errors) - References to ElementDefinition properties
+4. **Complex contentReference cases** (~32 errors) - Nested or multi-level contentReferences
 
 Key validation rules enforced by DTD:
 - **IDREF integrity**: All `ref` attributes must point to valid `id` values
@@ -234,8 +247,10 @@ Key validation rules enforced by DTD:
 **Directory Structure:**
 ```
 fire/
-├── model/
-│   └── fhir.xml                   # Curated model (version controlled)
+├── fhir.xml                       # Curated model (version controlled, in root)
+├── fhirspec.dtd                   # DTD schema (from Telemed5000)
+├── xml.dcl                        # XML declaration for SGML parser
+├── catalog                        # SGML catalog file
 ├── codegen/
 │   ├── map.dsl                    # Main entry (includes all modules)
 │   ├── config.scm                 # Generation switches
@@ -247,8 +262,6 @@ fire/
 │   ├── repositories.scm           # Generate repository methods
 │   ├── handlers.scm               # Generate Axum handlers
 │   └── search-extractors.scm     # Generate search param extractors
-├── catalog                        # SGML catalog
-├── xml.dcl                        # XML declaration
 └── generate.sh                    # Generation script
 ```
 
@@ -294,16 +307,14 @@ set -e
 
 # Step 1: Convert FHIR JSONs to XML (if needed)
 if [ "$1" == "--rebuild-model" ]; then
-    cargo run --bin fhir-to-xml -- \
-        --input fhir-r5/ \
-        --output model/fhir.xml
+    cargo run --bin fhir-to-xml
 fi
 
 # Step 2: Run OpenJade
 export SGML_CATALOG_FILES="$(pwd)/catalog"
 export SP_CHARSET_FIXED="YES"
 export SP_ENCODING="XML"
-openjade -t sgml -d codegen/map.dsl model/fhir.xml
+openjade -t sgml -d codegen/map.dsl fhir.xml
 
 # Step 3: Format generated code
 cargo fmt

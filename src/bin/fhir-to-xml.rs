@@ -59,6 +59,8 @@ struct ElementDefinition {
     path: String,
     #[serde(rename = "type")]
     types: Option<Vec<ElementType>>,
+    #[serde(rename = "contentReference")]
+    content_reference: Option<String>,
     #[serde(rename = "short")]
     short_description: Option<String>,
     definition: Option<String>,
@@ -350,16 +352,31 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
             // Only include direct properties of the resource
             if elem.path.matches('.').count() == 1 {
                 let name = elem.path.split('.').last().unwrap_or("").to_string();
-                let types = elem.types.as_ref()
-                    .map(|t| t.iter().map(|et| TypeInfo {
-                        code: et.code.clone(),
-                        target_resources: et.target_profile.as_ref()
-                            .map(|profiles| profiles.iter()
-                                .filter_map(|url| url.split('/').last().map(String::from))
-                                .collect())
-                            .unwrap_or_default()
-                    }).collect())
-                    .unwrap_or_default();
+
+                // Handle contentReference for recursive structures
+                let types = if let Some(content_ref) = &elem.content_reference {
+                    // Parse contentReference: "#ResourceName.path.to.element" -> "resourcenamepath..."
+                    let referenced_path = content_ref.trim_start_matches('#');
+                    let element_id = referenced_path.replace(".", "").to_lowercase();
+
+                    // Create synthetic type pointing to the referenced element
+                    vec![TypeInfo {
+                        code: element_id,
+                        target_resources: vec![],
+                    }]
+                } else {
+                    // Normal type extraction
+                    elem.types.as_ref()
+                        .map(|t| t.iter().map(|et| TypeInfo {
+                            code: et.code.clone(),
+                            target_resources: et.target_profile.as_ref()
+                                .map(|profiles| profiles.iter()
+                                    .filter_map(|url| url.split('/').last().map(String::from))
+                                    .collect())
+                                .unwrap_or_default()
+                        }).collect())
+                        .unwrap_or_default()
+                };
 
                 let cardinality = format!("{}..{}",
                     elem.min.unwrap_or(0),
@@ -405,12 +422,11 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
     let mut backbone_elements = Vec::new();
 
     if let Some(snapshot) = &structure.snapshot {
-        // First pass: identify backbone elements (direct children with BackboneElement type)
+        // First pass: identify ALL backbone elements at any depth (not just direct children)
         let mut backbone_paths = Vec::new();
         for elem in &snapshot.element {
-            // Check if this is a direct child (e.g., Observation.component)
-            if elem.path.matches('.').count() == 1 && elem.path != structure.type_name {
-                // Check if it's a BackboneElement
+            // Check if this is a BackboneElement at any depth (excluding root)
+            if elem.path != structure.type_name {
                 if let Some(types) = &elem.types {
                     if types.len() == 1 && types[0].code == "BackboneElement" {
                         backbone_paths.push(elem.path.clone());
@@ -423,6 +439,7 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
         for backbone_path in backbone_paths {
             let backbone_name = backbone_path.split('.').last().unwrap_or("").to_string();
             let prefix = format!("{}.", backbone_path);
+            let depth = backbone_path.matches('.').count();
             let mut properties = Vec::new();
 
             // Find description
@@ -431,9 +448,10 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
                 .and_then(|e| e.definition.clone().or_else(|| e.short_description.clone()))
                 .unwrap_or_default();
 
-            // Extract properties (children of this backbone element)
+            // Extract properties (direct children of this backbone element)
             for elem in &snapshot.element {
-                if elem.path.starts_with(&prefix) && elem.path.matches('.').count() == 2 {
+                // Only include direct children (one level deeper than the backbone element)
+                if elem.path.starts_with(&prefix) && elem.path.matches('.').count() == depth + 1 {
                     // Skip extension fields
                     if elem.path.ends_with(".id")
                         || elem.path.ends_with(".extension")
@@ -442,16 +460,31 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
                     }
 
                     let name = elem.path.split('.').last().unwrap_or("").to_string();
-                    let types = elem.types.as_ref()
-                        .map(|t| t.iter().map(|et| TypeInfo {
-                            code: et.code.clone(),
-                            target_resources: et.target_profile.as_ref()
-                                .map(|profiles| profiles.iter()
-                                    .filter_map(|url| url.split('/').last().map(String::from))
-                                    .collect())
-                                .unwrap_or_default()
-                        }).collect())
-                        .unwrap_or_default();
+
+                    // Handle contentReference for recursive structures
+                    let types = if let Some(content_ref) = &elem.content_reference {
+                        // Parse contentReference: "#ResourceName.path.to.element" -> "resourcenamepath..."
+                        let referenced_path = content_ref.trim_start_matches('#');
+                        let element_id = referenced_path.replace(".", "").to_lowercase();
+
+                        // Create synthetic type pointing to the referenced element
+                        vec![TypeInfo {
+                            code: element_id,
+                            target_resources: vec![],
+                        }]
+                    } else {
+                        // Normal type extraction
+                        elem.types.as_ref()
+                            .map(|t| t.iter().map(|et| TypeInfo {
+                                code: et.code.clone(),
+                                target_resources: et.target_profile.as_ref()
+                                    .map(|profiles| profiles.iter()
+                                        .filter_map(|url| url.split('/').last().map(String::from))
+                                        .collect())
+                                    .unwrap_or_default()
+                            }).collect())
+                            .unwrap_or_default()
+                    };
 
                     let cardinality = format!("{}..{}",
                         elem.min.unwrap_or(0),
@@ -540,12 +573,91 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     xml.push_str("<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">\n\n");
 
+    // Build type lookup dictionaries (following Telemed5000's approach)
+    // Maps property ID (e.g., "appointment.reason") to its type reference (e.g., "codeablereference")
+    let mut property_type_map: HashMap<String, String> = HashMap::new();
+
+    // Add properties from resources
+    for resource in resources {
+        let resource_id = resource.name.to_lowercase();
+
+        // Build a map of backbone element names to their IDs for this resource
+        let mut backbone_map: HashMap<String, String> = HashMap::new();
+        for backbone in &resource.backbone_elements {
+            let element_id = backbone.path.replace(".", "").to_lowercase();
+            backbone_map.insert(backbone.name.clone(), element_id);
+        }
+
+        for element in &resource.elements {
+            let property_name_clean = element.name.replace("[x]", "");
+            let property_id = format!("{}.{}", resource_id, to_lowercase_preserve_digits(&property_name_clean));
+
+            // Store the type reference (use first type if multiple variants)
+            if !element.types.is_empty() {
+                let mut type_ref = fhir_type_to_element_ref(&element.types[0].code);
+
+                // Special case: if this is a BackboneElement, look up the specific backbone element ID
+                if element.types[0].code == "BackboneElement" {
+                    if let Some(backbone_id) = backbone_map.get(&element.name) {
+                        type_ref = backbone_id.clone();
+                    }
+                }
+
+                property_type_map.insert(property_id, type_ref);
+            }
+        }
+
+        // Add properties from backbone elements
+        // Use the full dotted path as property ID (e.g., "conceptmap.group.element")
+        // not the element ID (e.g., "conceptmapgroup.element")
+        for backbone in &resource.backbone_elements {
+            let backbone_path_lower = backbone.path.to_lowercase();
+            for property in &backbone.properties {
+                let property_name_clean = property.name.replace("[x]", "");
+                let property_id = format!("{}.{}", backbone_path_lower, to_lowercase_preserve_digits(&property_name_clean));
+
+                if !property.types.is_empty() {
+                    let mut type_ref = fhir_type_to_element_ref(&property.types[0].code);
+
+                    // Special case: if this is a nested BackboneElement, the type ref should be
+                    // the property path with dots removed (e.g., "ConceptMap.group.element" -> "conceptmapgroupelement")
+                    if property.types[0].code == "BackboneElement" {
+                        type_ref = property.path.replace(".", "").to_lowercase();
+                    }
+
+                    property_type_map.insert(property_id, type_ref);
+                }
+            }
+        }
+    }
+
+    // Add properties from complex types
+    for complex_type in all_complex_types {
+        let element_id = complex_type.type_name.to_lowercase();
+        if let Some(snapshot) = &complex_type.snapshot {
+            for elem in &snapshot.element {
+                // Only include direct properties (not nested or root)
+                if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
+                    let name = elem.path.split('.').last().unwrap_or("").to_string();
+                    let property_id = format!("{}.{}", element_id, to_lowercase_preserve_digits(&name));
+
+                    if let Some(types) = &elem.types {
+                        if !types.is_empty() {
+                            let type_ref = fhir_type_to_element_ref(&types[0].code);
+                            property_type_map.insert(property_id, type_ref);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Root element
     xml.push_str("<fhir name=\"Fire\" version=\"5.0.0\">\n");
     xml.push_str("  <resources>\n");
 
     for resource in resources {
-        generate_resource_xml(&mut xml, resource)?;
+        generate_resource_xml(&mut xml, resource, &property_type_map)?;
     }
 
     xml.push_str("  </resources>\n");
@@ -834,7 +946,7 @@ fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<()
     Ok(())
 }
 
-fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let resource_id = resource.name.to_lowercase();
 
     // Resources with reference implementations
@@ -877,7 +989,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Res
     if resource.name != "Bundle" {
         xml.push_str("      <searches>\n");
         for param in &resource.search_params {
-            generate_search_xml(xml, param, &resource.name)?;
+            generate_search_xml(xml, param, &resource.name, property_type_map)?;
         }
         xml.push_str("      </searches>\n");
     } else {
@@ -902,9 +1014,11 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
     // Properties
     xml.push_str("          <properties>\n");
     for property in &backbone.properties {
-        // Generate property XML with the element_id as the parent
-        // e.g., "observationcomponent.code"
-        generate_property_xml_with_parent(xml, property, &element_id)?;
+        // Generate property XML with the full dotted path as the parent
+        // Following Telemed5000 convention: property IDs use full dotted path from resource root
+        // e.g., "ConceptMap.group.element" property has ID "conceptmap.group.element"
+        let parent_path_lower = backbone.path.to_lowercase();
+        generate_property_xml_with_parent(xml, property, &parent_path_lower)?;
     }
     xml.push_str("          </properties>\n");
 
@@ -1161,7 +1275,7 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
     Ok(())
 }
 
-fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str, property_type_map: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the expression to generate paths
     // Handle OR expressions by splitting on "|"
     let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
@@ -1229,7 +1343,7 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
         xml.push_str("              <parts>\n");
 
         // Parse the expression and generate parts and casts
-        let (parts, casts) = parse_fhirpath_expression(expr);
+        let (parts, casts) = parse_fhirpath_expression(expr, property_type_map);
         for part_ref in parts {
             xml.push_str(&format!("                <part ref=\"{}\"/>\n", part_ref));
         }
@@ -1264,17 +1378,17 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
 
             for component in &param.components {
                 // Parse component expression to build property ref
+                // Component refs must use the full dotted path from resource root
                 // Examples:
-                //   "code" -> "observationcomponent.code"
-                //   "value.ofType(CodeableConcept)" -> "observationcomponent.value" (strip ofType)
+                //   base_path="observation.component", expression="code" -> "observation.component.code"
+                //   base_path="observation.component", expression="value.ofType(CodeableConcept)" -> "observation.component.value"
                 let component_path = parse_component_path(&component.expression);
                 let component_ref = if base_path.is_empty() {
                     component_path
                 } else {
-                    // Convert path to element ID format by removing dots
-                    // e.g., "observation.component" -> "observationcomponent"
-                    let element_id = base_path.replace(".", "");
-                    format!("{}.{}", element_id, component_path)
+                    // Use full dotted path, not element ID format
+                    // e.g., "observation.component" + "code" -> "observation.component.code"
+                    format!("{}.{}", base_path, component_path)
                 };
 
                 xml.push_str(&format!("                <component ref=\"{}\"/>\n", component_ref));
@@ -1425,6 +1539,11 @@ fn map_property_to_type(property_name: &str) -> String {
         "signature" => "signature".to_string(),
         "timing" => "timing".to_string(),
         "dosage" => "dosage".to_string(),
+        "codeablereference" => "codeablereference".to_string(),
+        "codeableconcept" => "codeableconcept".to_string(),
+        "humanname" => "humanname".to_string(),
+        "contactpoint" => "contactpoint".to_string(),
+        "extension" => "extension".to_string(),
         _ => property_name.to_string(),  // Default: use property name as type name
     }
 }
@@ -1439,7 +1558,7 @@ fn map_property_to_type(property_name: &str) -> String {
 ///   "Observation.code" -> (["observation.code"], [])
 ///   "Observation.value.ofType(Quantity)" -> (["observation.value"], ["Quantity"])
 ///   "instance as Reference" -> (["adverseevent.suspectentity.instance"], ["Reference"])
-fn parse_fhirpath_expression(expression: &str) -> (Vec<String>, Vec<String>) {
+fn parse_fhirpath_expression(expression: &str, property_type_map: &HashMap<String, String>) -> (Vec<String>, Vec<String>) {
     let mut parts = Vec::new();
     let mut casts = Vec::new();
 
@@ -1487,17 +1606,13 @@ fn parse_fhirpath_expression(expression: &str) -> (Vec<String>, Vec<String>) {
     // First segment is the resource name (e.g., "Patient", "Observation")
     let resource_name = segments[0].to_lowercase();
 
-    // Build paths following FHIR model rules:
+    // Build paths following FHIR model rules, using Telemed5000's approach:
     // 1. First level is always resource.property: ["patient.address"]
-    // 2. For subsequent levels, check if previous property is a complex type or backbone element:
-    //    - Complex types (Address, HumanName, etc.) start a new ID path: ["address.city"]
-    //    - Backbone elements continue the resource path: ["observation.component.code"]
-    //
-    // Complex types are reusable across resources and defined in <elements>
-    // Backbone elements are resource-specific and we generate flattened properties for them
+    // 2. For subsequent levels, look up the property type from the type map
+    // 3. If the type is a complex type (not a backbone element), use the type as the prefix
+    // 4. If the type starts with the current element ID, it's a backbone element, use property ID
 
     let mut current_prefix = resource_name.clone();
-    let mut prev_property = String::new();
 
     for i in 1..segments.len() {
         let segment = segments[i];
@@ -1550,28 +1665,32 @@ fn parse_fhirpath_expression(expression: &str) -> (Vec<String>, Vec<String>) {
 
         let property_name_lower = property_name.to_lowercase();
 
-        if i == 1 {
-            // First level: always resource.property
-            parts.push(format!("{}.{}", current_prefix, property_name_lower));
-            prev_property = property_name_lower.clone();
-            // For next iteration, determine if this property is a complex type or backbone
-            current_prefix = if is_complex_type(&property_name_lower) {
-                // Complex type: next level uses type name
-                map_property_to_type(&property_name_lower)
+        // Build the property ID for this level
+        let property_id = format!("{}.{}", current_prefix, property_name_lower);
+
+        // Add this part to the result
+        parts.push(property_id.clone());
+
+        // Look up the property type from the map to determine the next prefix
+        // Following Telemed5000's approach (lines 1258-1270 in Program.cs):
+        if let Some(type_ref) = property_type_map.get(&property_id) {
+            // Check if this type reference is a backbone element or a complex type
+            // Backbone elements: type ref starts with the resource name (e.g., "conceptmapgroup", "observationcomponent")
+            // Complex types: type ref is independent of resource (e.g., "humanname", "codeablereference")
+
+            if type_ref.starts_with(&resource_name) {
+                // Backbone element: continue building the dotted path
+                // e.g., "conceptmap.group" → next is "conceptmap.group.element"
+                current_prefix = property_id;
             } else {
-                // Backbone element or continuation: next level extends resource path
-                format!("{}.{}", current_prefix, property_name_lower)
-            };
+                // Complex type: use the type reference as the next prefix
+                // e.g., "patient.name" (type="humanname") → next is "humanname.family"
+                current_prefix = type_ref.clone();
+            }
         } else {
-            // Subsequent levels: use the determined prefix
-            parts.push(format!("{}.{}", current_prefix, property_name_lower));
-            prev_property = property_name_lower.clone();
-            // Update prefix for next iteration
-            current_prefix = if is_complex_type(&property_name_lower) {
-                map_property_to_type(&property_name_lower)
-            } else {
-                format!("{}.{}", current_prefix, property_name_lower)
-            };
+            // No type information available - assume it's a continuation of the current path
+            // This fallback ensures we don't break on missing type information
+            current_prefix = property_id;
         }
     }
 
