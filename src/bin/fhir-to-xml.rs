@@ -61,9 +61,14 @@ struct ElementDefinition {
     types: Option<Vec<ElementType>>,
     #[serde(rename = "short")]
     short_description: Option<String>,
+    definition: Option<String>,
     min: Option<u32>,
     max: Option<String>,
     binding: Option<ElementBinding>,
+    #[serde(rename = "isSummary")]
+    is_summary: Option<bool>,
+    #[serde(rename = "isModifier")]
+    is_modifier: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +101,7 @@ struct SearchParameter {
     #[serde(rename = "multipleAnd")]
     multiple_and: Option<bool>,
     component: Option<Vec<SearchComponent>>,
+    target: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -246,17 +252,34 @@ struct ResourceDefinition {
     name: String,
     description: String,
     elements: Vec<ElementInfo>,
+    backbone_elements: Vec<BackboneElementInfo>,
     search_params: Vec<SearchParamInfo>,
 }
 
 #[derive(Debug)]
+struct BackboneElementInfo {
+    name: String,
+    path: String,
+    description: String,
+    properties: Vec<ElementInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct TypeInfo {
+    code: String,
+    target_resources: Vec<String>,  // For Reference types
+}
+
+#[derive(Debug, Clone)]
 struct ElementInfo {
     name: String,
     path: String,
-    types: Vec<String>,
+    types: Vec<TypeInfo>,
     description: String,
     cardinality: String,
     binding_name: Option<String>, // ValueSet binding name (e.g., "AdministrativeGender")
+    is_summary: bool,
+    is_modifier: bool,
 }
 
 #[derive(Debug)]
@@ -266,7 +289,13 @@ struct SearchParamInfo {
     param_type: String,
     expression: String,
     is_composite: bool,
-    components: Vec<String>,
+    components: Vec<ComponentInfo>,
+    targets: Vec<String>,
+}
+
+#[derive(Debug)]
+struct ComponentInfo {
+    expression: String,
 }
 
 fn extract_resources(
@@ -285,12 +314,14 @@ fn extract_resources(
         }
 
         let elements = extract_elements(structure);
+        let backbone_elements = extract_backbone_elements(structure);
         let search = extract_search_params(&structure.name, search_params);
 
         resources.push(ResourceDefinition {
             name: structure.name.clone(),
             description: structure.description.clone().unwrap_or_default(),
             elements,
+            backbone_elements,
             search_params: search,
         });
     }
@@ -303,13 +334,15 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
 
     if let Some(snapshot) = &structure.snapshot {
         for elem in &snapshot.element {
-            // Skip root element and meta fields
+            // Skip root element and certain infrastructure field children (but include id, meta, implicitRules, language, text!)
+            // Use exact match or match with trailing dot to avoid false positives
+            // e.g., "Patient.id" should not match "Patient.identifier"
             if elem.path == structure.type_name
-                || elem.path.starts_with(&format!("{}.id", structure.type_name))
-                || elem.path.starts_with(&format!("{}.meta", structure.type_name))
-                || elem.path.starts_with(&format!("{}.implicitRules", structure.type_name))
-                || elem.path.starts_with(&format!("{}.language", structure.type_name))
-                || elem.path.starts_with(&format!("{}.text", structure.type_name))
+                || elem.path.starts_with(&format!("{}.id.", structure.type_name))  // Skip id children (e.g., Patient.id.extension)
+                || elem.path.starts_with(&format!("{}.meta.", structure.type_name))  // Skip meta children
+                || elem.path.starts_with(&format!("{}.implicitRules.", structure.type_name))  // Skip implicitRules children, but include implicitRules itself
+                || elem.path.starts_with(&format!("{}.language.", structure.type_name))  // Skip language children, but include language itself
+                || elem.path.starts_with(&format!("{}.text.", structure.type_name))  // Skip text children, but include text itself
             {
                 continue;
             }
@@ -318,7 +351,14 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
             if elem.path.matches('.').count() == 1 {
                 let name = elem.path.split('.').last().unwrap_or("").to_string();
                 let types = elem.types.as_ref()
-                    .map(|t| t.iter().map(|et| et.code.clone()).collect())
+                    .map(|t| t.iter().map(|et| TypeInfo {
+                        code: et.code.clone(),
+                        target_resources: et.target_profile.as_ref()
+                            .map(|profiles| profiles.iter()
+                                .filter_map(|url| url.split('/').last().map(String::from))
+                                .collect())
+                            .unwrap_or_default()
+                    }).collect())
                     .unwrap_or_default();
 
                 let cardinality = format!("{}..{}",
@@ -346,15 +386,119 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
                     name,
                     path: elem.path.clone(),
                     types,
-                    description: elem.short_description.clone().unwrap_or_default(),
+                    description: elem.definition.clone()
+                        .or_else(|| elem.short_description.clone())
+                        .unwrap_or_default(),
                     cardinality,
                     binding_name,
+                    is_summary: elem.is_summary.unwrap_or(false),
+                    is_modifier: elem.is_modifier.unwrap_or(false),
                 });
             }
         }
     }
 
     elements
+}
+
+fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneElementInfo> {
+    let mut backbone_elements = Vec::new();
+
+    if let Some(snapshot) = &structure.snapshot {
+        // First pass: identify backbone elements (direct children with BackboneElement type)
+        let mut backbone_paths = Vec::new();
+        for elem in &snapshot.element {
+            // Check if this is a direct child (e.g., Observation.component)
+            if elem.path.matches('.').count() == 1 && elem.path != structure.type_name {
+                // Check if it's a BackboneElement
+                if let Some(types) = &elem.types {
+                    if types.len() == 1 && types[0].code == "BackboneElement" {
+                        backbone_paths.push(elem.path.clone());
+                    }
+                }
+            }
+        }
+
+        // Second pass: extract properties for each backbone element
+        for backbone_path in backbone_paths {
+            let backbone_name = backbone_path.split('.').last().unwrap_or("").to_string();
+            let prefix = format!("{}.", backbone_path);
+            let mut properties = Vec::new();
+
+            // Find description
+            let description = snapshot.element.iter()
+                .find(|e| e.path == backbone_path)
+                .and_then(|e| e.definition.clone().or_else(|| e.short_description.clone()))
+                .unwrap_or_default();
+
+            // Extract properties (children of this backbone element)
+            for elem in &snapshot.element {
+                if elem.path.starts_with(&prefix) && elem.path.matches('.').count() == 2 {
+                    // Skip extension fields
+                    if elem.path.ends_with(".id")
+                        || elem.path.ends_with(".extension")
+                        || elem.path.ends_with(".modifierExtension") {
+                        continue;
+                    }
+
+                    let name = elem.path.split('.').last().unwrap_or("").to_string();
+                    let types = elem.types.as_ref()
+                        .map(|t| t.iter().map(|et| TypeInfo {
+                            code: et.code.clone(),
+                            target_resources: et.target_profile.as_ref()
+                                .map(|profiles| profiles.iter()
+                                    .filter_map(|url| url.split('/').last().map(String::from))
+                                    .collect())
+                                .unwrap_or_default()
+                        }).collect())
+                        .unwrap_or_default();
+
+                    let cardinality = format!("{}..{}",
+                        elem.min.unwrap_or(0),
+                        elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
+                    );
+
+                    // Extract binding name
+                    let binding_name = elem.binding.as_ref().and_then(|binding| {
+                        binding.extension.as_ref().and_then(|extensions| {
+                            for ext in extensions {
+                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                            return Some(value.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                            None
+                        })
+                    });
+
+                    properties.push(ElementInfo {
+                        name,
+                        path: elem.path.clone(),
+                        types,
+                        description: elem.definition.clone()
+                            .or_else(|| elem.short_description.clone())
+                            .unwrap_or_default(),
+                        cardinality,
+                        binding_name,
+                        is_summary: elem.is_summary.unwrap_or(false),
+                        is_modifier: elem.is_modifier.unwrap_or(false),
+                    });
+                }
+            }
+
+            backbone_elements.push(BackboneElementInfo {
+                name: backbone_name,
+                path: backbone_path,
+                description,
+                properties,
+            });
+        }
+    }
+
+    backbone_elements
 }
 
 fn extract_search_params(
@@ -367,8 +511,12 @@ fn extract_search_params(
         for param in resource_params {
             let is_composite = param.component.is_some();
             let components = param.component.as_ref()
-                .map(|comps| comps.iter().map(|c| c.definition.clone()).collect())
+                .map(|comps| comps.iter().map(|c| ComponentInfo {
+                    expression: c.expression.clone(),
+                }).collect())
                 .unwrap_or_default();
+
+            let targets = param.target.clone().unwrap_or_default();
 
             params.push(SearchParamInfo {
                 name: param.name.clone(),
@@ -377,6 +525,7 @@ fn extract_search_params(
                 expression: param.expression.clone().unwrap_or_default(),
                 is_composite,
                 components,
+                targets,
             });
         }
     }
@@ -408,11 +557,11 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     // Start with types referenced by resources
     for resource in resources {
         for element in &resource.elements {
-            for type_name in &element.types {
-                let dtd_type = map_fhir_type_to_dtd(type_name);
+            for type_info in &element.types {
+                let dtd_type = map_fhir_type_to_dtd(&type_info.code);
                 if dtd_type == "element" {
-                    if referenced_types.insert(type_name.as_str()) {
-                        to_process.push(type_name.as_str());
+                    if referenced_types.insert(type_info.code.as_str()) {
+                        to_process.push(type_info.code.as_str());
                     }
                 }
             }
@@ -452,12 +601,11 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     xml.push_str("    <element id=\"resource\" name=\"Resource\">\n");
     xml.push_str("      <description>Base Resource (abstract)</description>\n");
     xml.push_str("      <properties>\n");
-    xml.push_str("        <property id=\"resource.id\" name=\"id\" type=\"id\" iscollection=\"false\" notnull=\"false\">\n");
-    xml.push_str("          <description>Logical id of this artifact</description>\n");
-    xml.push_str("        </property>\n");
-    xml.push_str("        <property id=\"resource.meta\" name=\"meta\" type=\"element\" ref=\"meta\" iscollection=\"false\" notnull=\"false\">\n");
-    xml.push_str("          <description>Metadata about the resource</description>\n");
-    xml.push_str("        </property>\n");
+    // Suppress defaults: type="string" becomes type="id", iscollection="false", notnull="false"
+    // Output on one line with id last
+    xml.push_str("        <property name=\"id\" type=\"id\" id=\"resource.id\"><description>Logical id of this artifact</description></property>\n");
+    // type="element" is not default, ref is required, suppress iscollection and notnull defaults
+    xml.push_str("        <property name=\"meta\" type=\"element\" ref=\"meta\" id=\"resource.meta\"><description>Metadata about the resource</description></property>\n");
     xml.push_str("      </properties>\n");
     xml.push_str("      <elements/>\n");
     xml.push_str("      <codesets/>\n");
@@ -489,6 +637,15 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
                 referenced_codesets.insert(to_lowercase_preserve_digits(binding));
             }
         }
+
+        // From backbone elements
+        for backbone in &resource.backbone_elements {
+            for property in &backbone.properties {
+                if let Some(binding) = &property.binding_name {
+                    referenced_codesets.insert(to_lowercase_preserve_digits(binding));
+                }
+            }
+        }
     }
 
     // From elements
@@ -515,14 +672,25 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     // Generate codesets
     xml.push_str("  <codesets>\n");
 
-    // Create a map for quick lookup
-    let codeset_map: HashMap<String, &CodeSystem> = all_code_systems
+    // Create multiple maps for different lookup strategies
+    // 1. By normalized ID (e.g., "observation-triggeredbytype" -> "observationtriggeredbytype")
+    let codeset_map_by_id: HashMap<String, &CodeSystem> = all_code_systems
         .iter()
         .map(|cs| (cs.id.replace("-", "").to_lowercase(), cs))
         .collect();
 
+    // 2. By normalized name (e.g., "TriggeredBytype" -> "triggeredbytype")
+    let codeset_map_by_name: HashMap<String, &CodeSystem> = all_code_systems
+        .iter()
+        .map(|cs| (to_lowercase_preserve_digits(&cs.name), cs))
+        .collect();
+
     for codeset_id in referenced_codesets.iter() {
-        if let Some(code_system) = codeset_map.get(codeset_id.as_str()) {
+        // Try lookup by name first (binding name), then by ID
+        let code_system = codeset_map_by_name.get(codeset_id.as_str())
+            .or_else(|| codeset_map_by_id.get(codeset_id.as_str()));
+
+        if let Some(code_system) = code_system {
             generate_codeset_xml(&mut xml, code_system)?;
         }
     }
@@ -636,7 +804,10 @@ fn add_stub_codesets(xml: &mut String) {
 }
 
 fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<(), Box<dyn std::error::Error>> {
-    let codeset_id = code_system.id.replace("-", "").to_lowercase();
+    // Use the CodeSystem.name (binding name) as the ID, not the CodeSystem.id
+    // This matches how properties reference codesets via binding names
+    // e.g., binding name "TriggeredByType" -> id "triggeredbytype"
+    let codeset_id = to_lowercase_preserve_digits(&code_system.name);
 
     xml.push_str(&format!("    <codeset name=\"{}\" id=\"{}\">\n", code_system.name, codeset_id));
     xml.push_str(&format!("      <description>{}</description>\n",
@@ -662,18 +833,37 @@ fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<()
 fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Result<(), Box<dyn std::error::Error>> {
     let resource_id = resource.name.to_lowercase();
 
-    xml.push_str(&format!("    <resource id=\"{}\" name=\"{}\" active=\"true\">\n", resource_id, resource.name));
+    // Resources with reference implementations
+    let implemented_resources = ["Patient", "Observation", "Practitioner"];
+    let is_active = implemented_resources.contains(&resource.name.as_str());
+
+    // Only output active="true" if resource has a reference implementation (default is "false")
+    let active_attr = if is_active {
+        " active=\"true\" "
+    } else {
+        " "  // Just a space before id
+    };
+
+    xml.push_str(&format!("    <resource name=\"{}\"{}id=\"{}\">\n", resource.name, active_attr, resource_id));
     xml.push_str(&format!("      <description>{}</description>\n", escape_xml(&resource.description)));
 
     // Properties (resource-level attributes)
     xml.push_str("      <properties>\n");
     for element in &resource.elements {
-        generate_property_xml(xml, element, &resource.name)?;
+        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements)?;
     }
     xml.push_str("      </properties>\n");
 
-    // Elements (nested complex types)
-    xml.push_str("      <elements/>\n"); // TODO: Handle backbone elements
+    // Elements (backbone elements - nested complex types)
+    if resource.backbone_elements.is_empty() {
+        xml.push_str("      <elements/>\n");
+    } else {
+        xml.push_str("      <elements>\n");
+        for backbone in &resource.backbone_elements {
+            generate_backbone_element_xml(xml, backbone, &resource.name)?;
+        }
+        xml.push_str("      </elements>\n");
+    }
 
     // Codesets (local ValueSets)
     xml.push_str("      <codesets/>\n");
@@ -681,11 +871,37 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Res
     // Search parameters
     xml.push_str("      <searches>\n");
     for param in &resource.search_params {
-        generate_search_xml(xml, param)?;
+        generate_search_xml(xml, param, &resource.name)?;
     }
     xml.push_str("      </searches>\n");
 
     xml.push_str("    </resource>\n");
+
+    Ok(())
+}
+
+fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Generate element ID following Telemed5000 convention
+    // e.g., "Observation.component" -> ID "observationcomponent"
+    let element_id = backbone.path.replace(".", "").to_lowercase();
+    let element_name = capitalize_first(&backbone.name);
+
+    // Only output backbone="true" since default is "false"
+    xml.push_str(&format!("        <element id=\"{}\" name=\"{}\" backbone=\"true\">\n", element_id, element_name));
+    xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&backbone.description)));
+
+    // Properties
+    xml.push_str("          <properties>\n");
+    for property in &backbone.properties {
+        // Generate property XML with the element_id as the parent
+        // e.g., "observationcomponent.code"
+        generate_property_xml_with_parent(xml, property, &element_id)?;
+    }
+    xml.push_str("          </properties>\n");
+
+    xml.push_str("          <elements/>\n");
+    xml.push_str("          <codesets/>\n");
+    xml.push_str("        </element>\n");
 
     Ok(())
 }
@@ -704,7 +920,14 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
             if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
                 let name = elem.path.split('.').last().unwrap_or("").to_string();
                 let types = elem.types.as_ref()
-                    .map(|t| t.iter().map(|et| et.code.clone()).collect())
+                    .map(|t| t.iter().map(|et| TypeInfo {
+                        code: et.code.clone(),
+                        target_resources: et.target_profile.as_ref()
+                            .map(|profiles| profiles.iter()
+                                .filter_map(|url| url.split('/').last().map(String::from))
+                                .collect())
+                            .unwrap_or_default()
+                    }).collect())
                     .unwrap_or_default();
 
                 let cardinality = format!("{}..{}",
@@ -732,9 +955,13 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
                     name,
                     path: elem.path.clone(),
                     types,
-                    description: elem.short_description.clone().unwrap_or_default(),
+                    description: elem.definition.clone()
+                        .or_else(|| elem.short_description.clone())
+                        .unwrap_or_default(),
                     cardinality,
                     binding_name,
+                    is_summary: elem.is_summary.unwrap_or(false),
+                    is_modifier: elem.is_modifier.unwrap_or(false),
                 };
 
                 generate_property_xml(xml, &element_info, &complex_type.name)?;
@@ -752,10 +979,36 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
 
 fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Follow Telemed5000 naming convention: {resource_lowercase}.{property_lowercase}
+    let parent_id = resource_name.to_lowercase();
+    generate_property_xml_with_parent(xml, element, &parent_id)
+}
+
+fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo]) -> Result<(), Box<dyn std::error::Error>> {
+    // Check if this property refers to a BackboneElement
+    // If so, replace "BackboneElement" with the specific backbone element ID
+    if element.types.len() == 1 && element.types[0].code == "BackboneElement" {
+        // Find the matching backbone element
+        if let Some(backbone) = backbone_elements.iter().find(|b| b.name == element.name) {
+            // Create a modified element with the specific backbone element ref
+            let backbone_element_id = backbone.path.replace(".", "").to_lowercase();
+            let mut modified_element = element.clone();
+            modified_element.types = vec![TypeInfo {
+                code: backbone_element_id,
+                target_resources: vec![],
+            }];
+            return generate_property_xml(xml, &modified_element, resource_name);
+        }
+    }
+
+    // Not a backbone element, generate normally
+    generate_property_xml(xml, element, resource_name)
+}
+
+fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     // Remove [x] suffix from choice types (e.g., deceased[x] -> deceased)
     let property_name_clean = element.name.replace("[x]", "");
     let property_id = format!("{}.{}",
-        resource_name.to_lowercase(),
+        parent_id,
         to_lowercase_preserve_digits(&property_name_clean)
     );
     let is_collection = element.cardinality.ends_with("*");
@@ -765,21 +1018,38 @@ fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name:
 
     if is_variant {
         // Choice type (e.g., value[x], deceased[x]) - use type="variant" and <variants>
+        // Suppress default values: type="string" (but variant is not default), iscollection="false", notnull="false", summary="false", modifier="false"
+        // Output id last, and use cleaned name (without [x])
         xml.push_str(&format!(
-            "        <property id=\"{}\" name=\"{}\" type=\"variant\" iscollection=\"{}\" notnull=\"false\">\n",
-            property_id,
-            element.name,
-            is_collection
+            "        <property name=\"{}\" type=\"variant\"{}{}{}{} id=\"{}\">\n",
+            property_name_clean,
+            attr_bool_if_not_default("iscollection", is_collection, false),
+            attr_bool_if_not_default("notnull", false, false),
+            attr_bool_if_not_default("summary", element.is_summary, false),
+            attr_bool_if_not_default("modifier", element.is_modifier, false),
+            property_id
         ));
         xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&element.description)));
 
         xml.push_str("          <variants>\n");
-        for type_name in &element.types {
-            let dtd_type = map_fhir_type_to_dtd(type_name);
+        for type_info in &element.types {
+            let dtd_type = map_fhir_type_to_dtd(&type_info.code);
             if dtd_type == "element" {
                 // Complex type - add ref attribute
-                let element_ref = fhir_type_to_element_ref(type_name);
-                xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, element_ref));
+                let element_ref = fhir_type_to_element_ref(&type_info.code);
+
+                // Check if this is a Reference with target resources
+                if type_info.code == "Reference" && !type_info.target_resources.is_empty() {
+                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\">\n", dtd_type, element_ref));
+                    xml.push_str("              <targets>\n");
+                    for target in &type_info.target_resources {
+                        xml.push_str(&format!("                <target resource=\"{}\"/>\n", target));
+                    }
+                    xml.push_str("              </targets>\n");
+                    xml.push_str("            </variant>\n");
+                } else {
+                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, element_ref));
+                }
             } else if dtd_type == "code" && element.binding_name.is_some() {
                 // Code with binding - add ref to codeset
                 let binding_ref = to_lowercase_preserve_digits(element.binding_name.as_ref().unwrap());
@@ -790,82 +1060,168 @@ fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name:
             }
         }
         xml.push_str("          </variants>\n");
+        xml.push_str("        </property>\n");
     } else if element.types.len() == 1 {
         // Single type - flatten by putting type directly on property
-        let fhir_type = map_fhir_type_to_dtd(&element.types[0]);
+        // Output on one line: <property ...><description>...</description></property>
+        let fhir_type = map_fhir_type_to_dtd(&element.types[0].code);
 
         if fhir_type == "element" {
             // Complex type - add ref attribute
-            let element_ref = fhir_type_to_element_ref(&element.types[0]);
+            let element_ref = fhir_type_to_element_ref(&element.types[0].code);
             xml.push_str(&format!(
-                "        <property id=\"{}\" name=\"{}\" type=\"{}\" ref=\"{}\" iscollection=\"{}\" notnull=\"false\">\n",
-                property_id,
+                "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
                 element.name,
-                fhir_type,
-                element_ref,
-                is_collection
+                attr_if_not_default("type", fhir_type, "string"),
+                format!(" ref=\"{}\"", element_ref),  // ref is always required when type="element"
+                attr_bool_if_not_default("iscollection", is_collection, false),
+                attr_bool_if_not_default("notnull", false, false),
+                attr_bool_if_not_default("summary", element.is_summary, false),
+                attr_bool_if_not_default("modifier", element.is_modifier, false),
+                property_id,
+                escape_xml(&element.description)
             ));
         } else if fhir_type == "code" && element.binding_name.is_some() {
             // Code type with ValueSet binding - add ref to codeset
             let binding_ref = to_lowercase_preserve_digits(element.binding_name.as_ref().unwrap());
             xml.push_str(&format!(
-                "        <property id=\"{}\" name=\"{}\" type=\"{}\" ref=\"{}\" iscollection=\"{}\" notnull=\"false\">\n",
-                property_id,
+                "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
                 element.name,
-                fhir_type,
-                binding_ref,
-                is_collection
+                attr_if_not_default("type", fhir_type, "string"),
+                format!(" ref=\"{}\"", binding_ref),  // ref is always required when type="code" with binding
+                attr_bool_if_not_default("iscollection", is_collection, false),
+                attr_bool_if_not_default("notnull", false, false),
+                attr_bool_if_not_default("summary", element.is_summary, false),
+                attr_bool_if_not_default("modifier", element.is_modifier, false),
+                property_id,
+                escape_xml(&element.description)
             ));
         } else {
             // Primitive type - no ref
             xml.push_str(&format!(
-                "        <property id=\"{}\" name=\"{}\" type=\"{}\" iscollection=\"{}\" notnull=\"false\">\n",
-                property_id,
+                "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
                 element.name,
-                fhir_type,
-                is_collection
+                attr_if_not_default("type", fhir_type, "string"),
+                attr_bool_if_not_default("iscollection", is_collection, false),
+                attr_bool_if_not_default("notnull", false, false),
+                attr_bool_if_not_default("summary", element.is_summary, false),
+                attr_bool_if_not_default("modifier", element.is_modifier, false),
+                property_id,
+                escape_xml(&element.description)
             ));
         }
-        xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&element.description)));
     } else {
         // No type info - default to element without ref (will need manual curation)
         xml.push_str(&format!(
-            "        <property id=\"{}\" name=\"{}\" type=\"element\" iscollection=\"{}\" notnull=\"false\">\n",
-            property_id,
+            "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
             element.name,
-            is_collection
+            attr_if_not_default("type", "element", "string"),
+            attr_bool_if_not_default("iscollection", is_collection, false),
+            attr_bool_if_not_default("notnull", false, false),
+            attr_bool_if_not_default("summary", element.is_summary, false),
+            attr_bool_if_not_default("modifier", element.is_modifier, false),
+            property_id,
+            escape_xml(&element.description)
         ));
-        xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&element.description)));
     }
-
-    xml.push_str("        </property>\n");
 
     Ok(())
 }
 
-fn generate_search_xml(xml: &mut String, param: &SearchParamInfo) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Convert parameter code to PascalCase for Rust-friendly query attribute
+    // e.g., "address-city" -> "AddressCity", "email" -> "Email"
+    let query_name = param.code
+        .split('-')
+        .map(|part| capitalize_first(part))
+        .collect::<Vec<_>>()
+        .join("");
+
+    // Suppress default type="string"
     xml.push_str(&format!(
-        "        <search name=\"{}\" query=\"{}\" type=\"{}\">\n",
+        "        <search name=\"{}\" query=\"{}\"{}>\n",
         param.name,
-        param.code,
-        param.param_type
+        query_name,
+        attr_if_not_default("type", &param.param_type, "string")
     ));
 
     xml.push_str("          <paths>\n");
-    xml.push_str("            <path>\n");
-    xml.push_str("              <parts>\n");
-    xml.push_str("                <!-- TODO: Parse expression and generate parts -->\n");
-    xml.push_str("              </parts>\n");
 
-    if param.is_composite {
-        xml.push_str("              <components>\n");
-        for component in &param.components {
-            xml.push_str(&format!("                <!-- Component: {} -->\n", component));
+    // Parse the expression to generate paths
+    // Handle OR expressions by splitting on "|"
+    let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
+
+    // Filter branches to only include paths starting with the current resource
+    // This prevents multi-resource search parameters (e.g., "email" on Patient, Person, Practitioner)
+    // from generating paths for other resources in the current resource's definition
+    let resource_prefix = resource_name.to_lowercase();
+
+    for expr in expression_branches {
+        if expr.is_empty() {
+            continue;
         }
-        xml.push_str("              </components>\n");
+
+        // Check if this expression starts with the current resource
+        // Handle parentheses: "(Patient.deceased.ofType(dateTime))" -> "Patient"
+        let expr_trimmed = expr.trim_start_matches('(').trim();
+        let expr_resource = expr_trimmed.split('.').next().unwrap_or("").to_lowercase();
+
+        if expr_resource != resource_prefix {
+            // Skip this branch - it's for a different resource
+            continue;
+        }
+
+        xml.push_str("            <path>\n");
+        xml.push_str("              <parts>\n");
+
+        // Parse the expression and generate parts
+        let parts = parse_fhirpath_expression(expr);
+        for part_ref in parts {
+            xml.push_str(&format!("                <part ref=\"{}\"/>\n", part_ref));
+        }
+
+        xml.push_str("              </parts>\n");
+
+        // Generate targets for reference search parameters
+        if param.param_type == "reference" && !param.targets.is_empty() {
+            xml.push_str("              <targets>\n");
+            for target in &param.targets {
+                xml.push_str(&format!("                <target resource=\"{}\"/>\n", target));
+            }
+            xml.push_str("              </targets>\n");
+        }
+
+        // Generate components for composite search parameters
+        if param.is_composite && !param.components.is_empty() {
+            xml.push_str("              <components>\n");
+
+            // The base expression (e.g., "Observation.component") gives us the starting path
+            // Each component expression (e.g., "code" or "value.ofType(CodeableConcept)") extends it
+            let base_path = parse_base_path(&param.expression);
+
+            for component in &param.components {
+                // Parse component expression to build property ref
+                // Examples:
+                //   "code" -> "observationcomponent.code"
+                //   "value.ofType(CodeableConcept)" -> "observationcomponent.value" (strip ofType)
+                let component_path = parse_component_path(&component.expression);
+                let component_ref = if base_path.is_empty() {
+                    component_path
+                } else {
+                    // Convert path to element ID format by removing dots
+                    // e.g., "observation.component" -> "observationcomponent"
+                    let element_id = base_path.replace(".", "");
+                    format!("{}.{}", element_id, component_path)
+                };
+
+                xml.push_str(&format!("                <component ref=\"{}\"/>\n", component_ref));
+            }
+            xml.push_str("              </components>\n");
+        }
+
+        xml.push_str("            </path>\n");
     }
 
-    xml.push_str("            </path>\n");
     xml.push_str("          </paths>\n");
     xml.push_str("        </search>\n");
 
@@ -896,10 +1252,236 @@ fn to_lowercase_preserve_digits(s: &str) -> String {
     s.chars().map(|c| c.to_ascii_lowercase()).collect()
 }
 
+/// Capitalize first letter of a string
+/// Examples: component -> Component, name -> Name
+fn capitalize_first(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+    }
+}
+
 /// Map FHIR complex type names to their lowercase element ref
 /// Examples: HumanName -> humanname, ContactPoint -> contactpoint, Reference -> reference
 fn fhir_type_to_element_ref(fhir_type: &str) -> String {
     to_lowercase_preserve_digits(fhir_type)
+}
+
+/// Parse base path from search parameter expression
+/// Examples:
+///   "Observation.component" -> "observation.component"
+///   "Patient" -> "patient"
+///   "Observation | Observation.component" -> "observation.component" (takes last OR branch)
+fn parse_base_path(expression: &str) -> String {
+    // Simple implementation: convert to lowercase and return
+    // More complex expressions would need proper FHIRPath parsing
+    if expression.is_empty() {
+        return String::new();
+    }
+
+    // For OR expressions (e.g., "Observation | Observation.component"), take the more specific path (last one)
+    // TODO: Properly handle OR expressions by generating multiple paths
+    let or_parts: Vec<&str> = expression.split('|').map(|s| s.trim()).collect();
+    let selected = or_parts.last().unwrap_or(&"");
+
+    // Strip any parentheses or filters (e.g., "Observation.component.where(...)")
+    let clean = selected.split(".where(").next().unwrap_or(selected);
+
+    clean.to_lowercase()
+}
+
+/// Parse component expression to property path
+/// Examples:
+///   "code" -> "code"
+///   "value.ofType(CodeableConcept)" -> "value"
+///   "value.ofType(Quantity)" -> "value"
+fn parse_component_path(expression: &str) -> String {
+    if expression.is_empty() {
+        return String::new();
+    }
+
+    // Strip ofType() casts
+    let without_oftype = expression.split(".ofType(").next().unwrap_or(expression);
+
+    // Strip as() casts
+    let without_as = without_oftype.split(" as ").next().unwrap_or(without_oftype);
+
+    without_as.trim().to_lowercase()
+}
+
+/// Check if a property name refers to a complex type (vs backbone element)
+/// Complex types are reusable across resources (Address, HumanName, etc.)
+/// Backbone elements are resource-specific (component, link, qualification, etc.)
+fn is_complex_type(property_name: &str) -> bool {
+    matches!(
+        property_name,
+        "name" | "address" | "telecom" | "identifier" | "code" | "value" |
+        "meta" | "extension" | "period" | "range" | "ratio" | "reference" |
+        "annotation" | "attachment" | "coding" | "contactpoint" | "humanname" |
+        "quantity" | "duration" | "distance" | "count" | "age" | "money" |
+        "sampleddata" | "signature" | "timing" | "dosage" | "codeableconcept" |
+        "codeablereference"
+    )
+}
+
+/// Map FHIR property names to their type names
+/// This is used when a property is identified as a complex type
+/// Examples: "name" -> "humanname", "address" -> "address", "telecom" -> "contactpoint"
+fn map_property_to_type(property_name: &str) -> String {
+    match property_name {
+        "name" => "humanname".to_string(),
+        "address" => "address".to_string(),
+        "telecom" => "contactpoint".to_string(),
+        "identifier" => "identifier".to_string(),
+        "code" => "codeableconcept".to_string(),
+        "value" => "value".to_string(),  // Value is choice type, may need refinement
+        "meta" => "meta".to_string(),
+        "period" => "period".to_string(),
+        "range" => "range".to_string(),
+        "ratio" => "ratio".to_string(),
+        "reference" => "reference".to_string(),
+        "annotation" => "annotation".to_string(),
+        "attachment" => "attachment".to_string(),
+        "coding" => "coding".to_string(),
+        "quantity" => "quantity".to_string(),
+        "duration" => "duration".to_string(),
+        "distance" => "distance".to_string(),
+        "count" => "count".to_string(),
+        "age" => "age".to_string(),
+        "money" => "money".to_string(),
+        "sampleddata" => "sampleddata".to_string(),
+        "signature" => "signature".to_string(),
+        "timing" => "timing".to_string(),
+        "dosage" => "dosage".to_string(),
+        _ => property_name.to_string(),  // Default: use property name as type name
+    }
+}
+
+/// Parse a FHIRPath expression and convert it to property references
+/// Examples:
+///   "Patient.birthDate" -> ["patient.birthdate"]
+///   "Patient.name.family" -> ["patient.name", "humanname.family"]
+///   "Observation.code" -> ["observation.code"]
+///   "Observation.value.ofType(Quantity)" -> ["observation.value"]
+///   "Observation.subject.where(resolve() is Patient)" -> ["observation.subject"]
+fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    if expression.is_empty() {
+        return parts;
+    }
+
+    // Clean up the expression
+    // Remove boolean logic - e.g., "Patient.deceased.exists() and Patient.deceased != false" -> "Patient.deceased"
+    let clean_expr = expression
+        .split(" and ")
+        .next()
+        .unwrap_or(expression)
+        .split(" or ")
+        .next()
+        .unwrap_or(expression)
+        .trim();
+
+    // Remove .exists() calls
+    let clean_expr = clean_expr
+        .replace(".exists()", "");
+
+    // Remove leading/trailing parentheses - e.g., "(Patient.deceased.ofType(dateTime))" -> "Patient.deceased.ofType(dateTime)"
+    let clean_expr = clean_expr.trim_matches(|c| c == '(' || c == ')');
+
+    // Remove .where() filters - e.g., "Patient.subject.where(resolve() is Patient)" -> "Patient.subject"
+    let clean_expr = clean_expr
+        .split(".where(")
+        .next()
+        .unwrap_or(&clean_expr);
+
+    // Remove .first() calls
+    let clean_expr = clean_expr
+        .split(".first(")
+        .next()
+        .unwrap_or(clean_expr);
+
+    // Split by dots to get path segments
+    let segments: Vec<&str> = clean_expr.split('.').collect();
+
+    if segments.is_empty() {
+        return parts;
+    }
+
+    // First segment is the resource name (e.g., "Patient", "Observation")
+    let resource_name = segments[0].to_lowercase();
+
+    // Build paths following FHIR model rules:
+    // 1. First level is always resource.property: ["patient.address"]
+    // 2. For subsequent levels, check if previous property is a complex type or backbone element:
+    //    - Complex types (Address, HumanName, etc.) start a new ID path: ["address.city"]
+    //    - Backbone elements continue the resource path: ["observation.component.code"]
+    //
+    // Complex types are reusable across resources and defined in <elements>
+    // Backbone elements are resource-specific and we generate flattened properties for them
+
+    let mut current_prefix = resource_name.clone();
+    let mut prev_property = String::new();
+
+    for i in 1..segments.len() {
+        let segment = segments[i];
+
+        // Handle .ofType() casts - extract the type and use it as the prefix for subsequent properties
+        // e.g., "Observation.value.ofType(CodeableConcept).text" -> use CodeableConcept as prefix for .text
+        if segment.starts_with("ofType(") {
+            // Extract type from ofType(TypeName)
+            let type_name = segment
+                .trim_start_matches("ofType(")
+                .trim_end_matches(")")
+                .trim()
+                .to_lowercase();
+
+            // Update current_prefix to this type for the next iteration
+            current_prefix = type_name;
+            continue;
+        }
+
+        // Strip parentheses and other noise
+        let property_name = segment
+            .split("(")
+            .next()
+            .unwrap_or(segment)
+            .trim()
+            .replace("[x]", "");
+
+        if property_name.is_empty() {
+            continue;
+        }
+
+        let property_name_lower = property_name.to_lowercase();
+
+        if i == 1 {
+            // First level: always resource.property
+            parts.push(format!("{}.{}", current_prefix, property_name_lower));
+            prev_property = property_name_lower.clone();
+            // For next iteration, determine if this property is a complex type or backbone
+            current_prefix = if is_complex_type(&property_name_lower) {
+                // Complex type: next level uses type name
+                map_property_to_type(&property_name_lower)
+            } else {
+                // Backbone element or continuation: next level extends resource path
+                format!("{}.{}", current_prefix, property_name_lower)
+            };
+        } else {
+            // Subsequent levels: use the determined prefix
+            parts.push(format!("{}.{}", current_prefix, property_name_lower));
+            prev_property = property_name_lower.clone();
+            // Update prefix for next iteration
+            current_prefix = if is_complex_type(&property_name_lower) {
+                map_property_to_type(&property_name_lower)
+            } else {
+                format!("{}.{}", current_prefix, property_name_lower)
+            };
+        }
+    }
+
+    parts
 }
 
 fn escape_xml(text: &str) -> String {
@@ -908,6 +1490,9 @@ fn escape_xml(text: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+        // Replace line breaks with spaces
+        .replace('\n', " ")
+        .replace('\r', " ")
         // Replace smart quotes with regular quotes
         .replace('\u{201C}', "\"")  // Left double quote
         .replace('\u{201D}', "\"")  // Right double quote
@@ -917,4 +1502,22 @@ fn escape_xml(text: &str) -> String {
         .replace('\u{2013}', "-")   // En dash
         .replace('\u{2014}', "-")   // Em dash
         .replace('\u{2026}', "...")  // Ellipsis
+}
+
+/// Helper to conditionally output an attribute only if it differs from the default value
+fn attr_if_not_default(name: &str, value: &str, default: &str) -> String {
+    if value == default {
+        String::new()
+    } else {
+        format!(" {}=\"{}\"", name, value)
+    }
+}
+
+/// Helper to conditionally output a boolean attribute only if it differs from the default
+fn attr_bool_if_not_default(name: &str, value: bool, default: bool) -> String {
+    if value == default {
+        String::new()
+    } else {
+        format!(" {}=\"{}\"", name, if value { "true" } else { "false" })
+    }
 }

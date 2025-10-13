@@ -203,9 +203,31 @@ write_xml("model/fhir.xml", extract_and_curate(structure_defs, search_params));
 1. Run generator → code doesn't compile
 2. Find issue in FHIR spec or generated code
 3. Edit `model/fhir.xml` (add `<note>` documenting fix), edit generator if applicable
-4. Re-run generator
-5. Repeat until all resources work
-6. Commit XML model, generator, and generated code
+4. Validate XML with `onsgmls -s model/xml.dcl model/fhir.xml`
+5. Re-run generator
+6. Repeat until all resources work
+7. Commit XML model, generator, and generated code
+
+**XML Validation (without OpenJade):**
+
+Use `onsgmls` (SGML parser from OpenSP) to validate XML against DTD:
+
+```bash
+# Validate XML model - must pass with zero errors before code generation
+onsgmls -s model/xml.dcl model/fhir.xml
+
+# Expected output on success: (silent, no errors)
+# Common errors:
+#   - IDREF validation: "reference to non-existent ID 'foo'"
+#   - DTD violations: Element/attribute structure mismatches
+```
+
+Key validation rules enforced by DTD:
+- **IDREF integrity**: All `ref` attributes must point to valid `id` values
+- **Property references**: Must use binding names (e.g., `ref="triggeredbytype"`)
+- **Codeset IDs**: Generated from CodeSystem.name, not CodeSystem.id
+- **Backbone elements**: IDs are path with dots removed (e.g., `Observation.component` → `observationcomponent`)
+- **Component refs**: Point to property IDs within backbone elements (e.g., `observationcomponent.code`)
 
 ### Phase 3: DSSSL Code Generation
 
