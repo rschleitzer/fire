@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 3: Extract and organize data
     println!("\n🔨 Extracting resource definitions...");
-    let resources = extract_resources(&structures, &search_params, &resource_filter)?;
+    let resources = extract_resources(&structures, &search_params, &resource_filter, &code_systems)?;
     println!("   Extracted {} resources", resources.len());
 
     // Step 4: Generate XML
@@ -256,6 +256,15 @@ struct ResourceDefinition {
     elements: Vec<ElementInfo>,
     backbone_elements: Vec<BackboneElementInfo>,
     search_params: Vec<SearchParamInfo>,
+    local_codesets: Vec<LocalCodeSet>,
+}
+
+#[derive(Debug)]
+struct LocalCodeSet {
+    name: String,
+    id: String,
+    description: String,
+    codes: Vec<(String, String, String)>, // (code, display, definition)
 }
 
 #[derive(Debug)]
@@ -280,6 +289,7 @@ struct ElementInfo {
     description: String,
     cardinality: String,
     binding_name: Option<String>, // ValueSet binding name (e.g., "AdministrativeGender")
+    value_set_url: Option<String>, // ValueSet canonical URL (e.g., "http://hl7.org/fhir/ValueSet/administrative-gender")
     is_summary: bool,
     is_modifier: bool,
 }
@@ -304,6 +314,7 @@ fn extract_resources(
     structures: &[StructureDefinition],
     search_params: &HashMap<String, Vec<SearchParameter>>,
     filter: &Option<Vec<String>>,
+    all_code_systems: &[CodeSystem],
 ) -> Result<Vec<ResourceDefinition>, Box<dyn std::error::Error>> {
     let mut resources = Vec::new();
 
@@ -318,6 +329,7 @@ fn extract_resources(
         let elements = extract_elements(structure);
         let backbone_elements = extract_backbone_elements(structure);
         let search = extract_search_params(&structure.name, search_params);
+        let local_codesets = extract_local_codesets(&structure.name, &elements, &backbone_elements, all_code_systems);
 
         resources.push(ResourceDefinition {
             name: structure.name.clone(),
@@ -325,6 +337,7 @@ fn extract_resources(
             elements,
             backbone_elements,
             search_params: search,
+            local_codesets,
         });
     }
 
@@ -383,21 +396,25 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
                     elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
                 );
 
-                // Extract binding name from elementdefinition-bindingName extension
-                let binding_name = elem.binding.as_ref().and_then(|binding| {
-                    binding.extension.as_ref().and_then(|extensions| {
-                        for ext in extensions {
-                            if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                    if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                        return Some(value.to_string());
+                // Extract binding name and ValueSet URL
+                let (binding_name, value_set_url) = elem.binding.as_ref()
+                    .map(|binding| {
+                        let name = binding.extension.as_ref().and_then(|extensions| {
+                            for ext in extensions {
+                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                            return Some(value.to_string());
+                                        }
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        });
+                        let url = binding.value_set.clone();
+                        (name, url)
                     })
-                });
+                    .unwrap_or((None, None));
 
                 elements.push(ElementInfo {
                     name,
@@ -408,6 +425,7 @@ fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
                         .unwrap_or_default(),
                     cardinality,
                     binding_name,
+                    value_set_url,
                     is_summary: elem.is_summary.unwrap_or(false),
                     is_modifier: elem.is_modifier.unwrap_or(false),
                 });
@@ -491,21 +509,25 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
                         elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
                     );
 
-                    // Extract binding name
-                    let binding_name = elem.binding.as_ref().and_then(|binding| {
-                        binding.extension.as_ref().and_then(|extensions| {
-                            for ext in extensions {
-                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                            return Some(value.to_string());
+                    // Extract binding name and ValueSet URL
+                    let (binding_name, value_set_url) = elem.binding.as_ref()
+                        .map(|binding| {
+                            let name = binding.extension.as_ref().and_then(|extensions| {
+                                for ext in extensions {
+                                    if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                        if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                            if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                                return Some(value.to_string());
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            None
+                                None
+                            });
+                            let url = binding.value_set.clone();
+                            (name, url)
                         })
-                    });
+                        .unwrap_or((None, None));
 
                     properties.push(ElementInfo {
                         name,
@@ -516,6 +538,7 @@ fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneEle
                             .unwrap_or_default(),
                         cardinality,
                         binding_name,
+                        value_set_url,
                         is_summary: elem.is_summary.unwrap_or(false),
                         is_modifier: elem.is_modifier.unwrap_or(false),
                     });
@@ -566,12 +589,86 @@ fn extract_search_params(
     params
 }
 
+fn extract_local_codesets(
+    resource_name: &str,
+    elements: &[ElementInfo],
+    backbone_elements: &[BackboneElementInfo],
+    all_code_systems: &[CodeSystem],
+) -> Vec<LocalCodeSet> {
+    let mut local_codesets = Vec::new();
+    let resource_prefix = resource_name.to_lowercase();
+
+    // Collect all binding names from elements and backbone elements
+    let mut binding_names = HashSet::new();
+    for element in elements {
+        if let Some(binding) = &element.binding_name {
+            binding_names.insert(binding.clone());
+        }
+    }
+    for backbone in backbone_elements {
+        for property in &backbone.properties {
+            if let Some(binding) = &property.binding_name {
+                binding_names.insert(binding.clone());
+            }
+        }
+    }
+
+    // Find CodeSystems whose IDs start with the resource name (resource-local codesets)
+    // Examples:
+    //   - "observation-triggeredbytype" for Observation resource
+    //   - "observationworkflowstatus" for Observation resource
+    //   - "location-mode" for Location resource
+    for code_system in all_code_systems {
+        // Check if the CodeSystem ID starts with the resource name (case-insensitive)
+        let cs_id_lower = code_system.id.to_lowercase();
+        let cs_id_normalized = cs_id_lower.replace("-", "");
+
+        // Match if ID starts with resource name (with or without dash separator)
+        // e.g., "observation-triggeredbytype" or "observationworkflowstatus"
+        if cs_id_lower.starts_with(&format!("{}-", resource_prefix))
+            || cs_id_normalized.starts_with(&resource_prefix) {
+
+            // Check if this codeset is actually referenced by properties in this resource
+            let binding_id = to_lowercase_preserve_digits(&code_system.name);
+            if binding_names.contains(&code_system.name) || binding_names.iter().any(|b| to_lowercase_preserve_digits(b) == binding_id) {
+                let codes = code_system.concept.as_ref()
+                    .map(|concepts| concepts.iter().map(|c| {
+                        (
+                            c.code.clone(),
+                            c.display.clone(),
+                            c.definition.clone().unwrap_or_else(|| c.display.clone())
+                        )
+                    }).collect())
+                    .unwrap_or_default();
+
+                local_codesets.push(LocalCodeSet {
+                    name: code_system.name.clone(),
+                    id: to_lowercase_preserve_digits(&code_system.name),
+                    description: code_system.description.clone().unwrap_or_default(),
+                    codes,
+                });
+            }
+        }
+    }
+
+    local_codesets
+}
+
 fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem]) -> Result<String, Box<dyn std::error::Error>> {
     let mut xml = String::new();
 
     // XML header and DTD reference
     xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     xml.push_str("<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">\n\n");
+
+    // Build CodeSystem ID → CodeSystem name mapping for resolving binding references
+    // This is needed because FHIR R5 binding names often don't match CodeSystem names
+    // We resolve via ValueSet URL → CodeSystem ID → CodeSystem name
+    // Example: ValueSet URL "http://hl7.org/fhir/ValueSet/fm-status|5.0.0" → ID "fm-status" → name "FinancialResourceStatusCodes"
+    let mut codeset_id_to_name: HashMap<String, String> = HashMap::new();
+    for code_system in all_code_systems {
+        codeset_id_to_name.insert(code_system.id.clone(), code_system.name.clone());
+    }
 
     // Build type lookup dictionaries (following Telemed5000's approach)
     // Maps property ID (e.g., "appointment.reason") to its type reference (e.g., "codeablereference")
@@ -657,7 +754,7 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     xml.push_str("  <resources>\n");
 
     for resource in resources {
-        generate_resource_xml(&mut xml, resource, &property_type_map)?;
+        generate_resource_xml(&mut xml, resource, &property_type_map, &codeset_id_to_name)?;
     }
 
     xml.push_str("  </resources>\n");
@@ -719,7 +816,7 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
 
             // Skip if already generated (e.g., MoneyQuantity and SimpleQuantity duplicate Quantity)
             if generated_ids.insert(element_id.clone()) {
-                generate_element_xml(&mut xml, complex_type)?;
+                generate_element_xml(&mut xml, complex_type, &codeset_id_to_name)?;
             }
         }
     }
@@ -792,7 +889,20 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     // Add element IDs (from complex types)
     all_used_ids.extend(generated_ids.iter().cloned());
 
+    // Collect IDs of all resource-local codesets to exclude them from global section
+    let mut local_codeset_ids: HashSet<String> = HashSet::new();
+    for resource in resources {
+        for codeset in &resource.local_codesets {
+            local_codeset_ids.insert(codeset.id.clone());
+        }
+    }
+
     for codeset_id in referenced_codesets.iter() {
+        // Skip if this codeset is resource-local (already in resource's <codesets> section)
+        if local_codeset_ids.contains(codeset_id) {
+            continue;
+        }
+
         // Try lookup by name first (binding name), then by ID
         let code_system = codeset_map_by_name.get(codeset_id.as_str())
             .or_else(|| codeset_map_by_id.get(codeset_id.as_str()));
@@ -946,7 +1056,7 @@ fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<()
     Ok(())
 }
 
-fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let resource_id = resource.name.to_lowercase();
 
     // Resources with reference implementations
@@ -966,7 +1076,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     // Properties (resource-level attributes)
     xml.push_str("      <properties>\n");
     for element in &resource.elements {
-        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements)?;
+        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, codeset_id_to_name)?;
     }
     xml.push_str("      </properties>\n");
 
@@ -976,13 +1086,32 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     } else {
         xml.push_str("      <elements>\n");
         for backbone in &resource.backbone_elements {
-            generate_backbone_element_xml(xml, backbone, &resource.name)?;
+            generate_backbone_element_xml(xml, backbone, &resource.name, codeset_id_to_name)?;
         }
         xml.push_str("      </elements>\n");
     }
 
     // Codesets (local ValueSets)
-    xml.push_str("      <codesets/>\n");
+    if resource.local_codesets.is_empty() {
+        xml.push_str("      <codesets/>\n");
+    } else {
+        xml.push_str("      <codesets>\n");
+        for codeset in &resource.local_codesets {
+            xml.push_str(&format!("        <codeset name=\"{}\" id=\"{}\">\n", codeset.name, codeset.id));
+            xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&codeset.description)));
+            xml.push_str("          <codes>\n");
+            for (code, display, definition) in &codeset.codes {
+                xml.push_str(&format!("            <code name=\"{}\" value=\"{}\">\n",
+                    escape_xml(display),
+                    escape_xml(code)));
+                xml.push_str(&format!("              <description>{}</description>\n", escape_xml(definition)));
+                xml.push_str("            </code>\n");
+            }
+            xml.push_str("          </codes>\n");
+            xml.push_str("        </codeset>\n");
+        }
+        xml.push_str("      </codesets>\n");
+    }
 
     // Search parameters
     // Skip search parameters for Bundle - bundles are never stored in the database
@@ -1001,7 +1130,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     Ok(())
 }
 
-fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Generate element ID following Telemed5000 convention
     // e.g., "Observation.component" -> ID "observationcomponent"
     let element_id = backbone.path.replace(".", "").to_lowercase();
@@ -1018,7 +1147,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
         // Following Telemed5000 convention: property IDs use full dotted path from resource root
         // e.g., "ConceptMap.group.element" property has ID "conceptmap.group.element"
         let parent_path_lower = backbone.path.to_lowercase();
-        generate_property_xml_with_parent(xml, property, &parent_path_lower)?;
+        generate_property_xml_with_parent(xml, property, &parent_path_lower, codeset_id_to_name)?;
     }
     xml.push_str("          </properties>\n");
 
@@ -1029,7 +1158,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
     Ok(())
 }
 
-fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let element_id = complex_type.type_name.to_lowercase();
 
     xml.push_str(&format!("    <element id=\"{}\" name=\"{}\">\n", element_id, complex_type.name));
@@ -1058,21 +1187,25 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
                     elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
                 );
 
-                // Extract binding name
-                let binding_name = elem.binding.as_ref().and_then(|binding| {
-                    binding.extension.as_ref().and_then(|extensions| {
-                        for ext in extensions {
-                            if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                    if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                        return Some(value.to_string());
+                // Extract binding name and ValueSet URL
+                let (binding_name, value_set_url) = elem.binding.as_ref()
+                    .map(|binding| {
+                        let name = binding.extension.as_ref().and_then(|extensions| {
+                            for ext in extensions {
+                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
+                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
+                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
+                                            return Some(value.to_string());
+                                        }
                                     }
                                 }
                             }
-                        }
-                        None
+                            None
+                        });
+                        let url = binding.value_set.clone();
+                        (name, url)
                     })
-                });
+                    .unwrap_or((None, None));
 
                 let element_info = ElementInfo {
                     name,
@@ -1083,11 +1216,12 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
                         .unwrap_or_default(),
                     cardinality,
                     binding_name,
+                    value_set_url,
                     is_summary: elem.is_summary.unwrap_or(false),
                     is_modifier: elem.is_modifier.unwrap_or(false),
                 };
 
-                generate_property_xml(xml, &element_info, &complex_type.name)?;
+                generate_property_xml(xml, &element_info, &complex_type.name, codeset_id_to_name)?;
             }
         }
     }
@@ -1100,13 +1234,13 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition) ->
     Ok(())
 }
 
-fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Follow Telemed5000 naming convention: {resource_lowercase}.{property_lowercase}
     let parent_id = resource_name.to_lowercase();
-    generate_property_xml_with_parent(xml, element, &parent_id)
+    generate_property_xml_with_parent(xml, element, &parent_id, codeset_id_to_name)
 }
 
-fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo]) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this property refers to a BackboneElement
     // If so, replace "BackboneElement" with the specific backbone element ID
     if element.types.len() == 1 && element.types[0].code == "BackboneElement" {
@@ -1119,15 +1253,15 @@ fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, 
                 code: backbone_element_id,
                 target_resources: vec![],
             }];
-            return generate_property_xml(xml, &modified_element, resource_name);
+            return generate_property_xml(xml, &modified_element, resource_name, codeset_id_to_name);
         }
     }
 
     // Not a backbone element, generate normally
-    generate_property_xml(xml, element, resource_name)
+    generate_property_xml(xml, element, resource_name, codeset_id_to_name)
 }
 
-fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Remove [x] suffix from choice types (e.g., deceased[x] -> deceased)
     let property_name_clean = element.name.replace("[x]", "");
     let property_id = format!("{}.{}",
@@ -1135,6 +1269,13 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
         to_lowercase_preserve_digits(&property_name_clean)
     );
     let is_collection = element.cardinality.ends_with("*");
+
+    // Resolve binding name using ValueSet URL if available
+    let resolved_binding = resolve_binding_name(
+        element.binding_name.as_ref(),
+        element.value_set_url.as_ref(),
+        codeset_id_to_name
+    );
 
     // Check if this is a true variant type (choice type with multiple types)
     let is_variant = element.types.len() > 1;
@@ -1173,10 +1314,9 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
                 } else {
                     xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, element_ref));
                 }
-            } else if dtd_type == "code" && element.binding_name.is_some() {
-                // Code with binding - add ref to codeset
-                // Skip ref if binding name is "??" (FHIR spec quality issue)
-                let binding_name = element.binding_name.as_ref().unwrap();
+            } else if dtd_type == "code" && resolved_binding.is_some() {
+                // Code with binding - add ref to codeset using resolved binding
+                let binding_name = resolved_binding.as_ref().unwrap();
                 if binding_name != "??" {
                     let binding_ref = to_lowercase_preserve_digits(binding_name);
                     xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, binding_ref));
@@ -1211,10 +1351,9 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
                 property_id,
                 escape_xml(&element.description)
             ));
-        } else if fhir_type == "code" && element.binding_name.is_some() {
-            // Code type with ValueSet binding - add ref to codeset
-            // Skip if binding name is "??" (FHIR spec quality issue - missing/invalid binding)
-            let binding_name = element.binding_name.as_ref().unwrap();
+        } else if fhir_type == "code" && resolved_binding.is_some() {
+            // Code type with ValueSet binding - add ref to codeset using resolved binding
+            let binding_name = resolved_binding.as_ref().unwrap();
             if binding_name == "??" {
                 // Treat as code without binding (no ref attribute)
                 xml.push_str(&format!(
@@ -1745,4 +1884,54 @@ fn attr_bool_if_not_default(name: &str, value: bool, default: bool) -> String {
     } else {
         format!(" {}=\"{}\"", name, if value { "true" } else { "false" })
     }
+}
+
+/// Extract CodeSystem ID from ValueSet canonical URL
+/// Examples:
+///   "http://hl7.org/fhir/ValueSet/fm-status|5.0.0" -> Some("fm-status")
+///   "http://hl7.org/fhir/ValueSet/administrative-gender" -> Some("administrative-gender")
+///   "http://terminology.hl7.org/ValueSet/v3-ActCode" -> Some("v3-ActCode")
+fn extract_codeset_id_from_valueset_url(url: &str) -> Option<String> {
+    // ValueSet URLs typically follow this pattern:
+    // http://hl7.org/fhir/ValueSet/{id}|{version}
+    // or
+    // http://hl7.org/fhir/ValueSet/{id}
+
+    // Split off version if present
+    let url_without_version = url.split('|').next().unwrap_or(url);
+
+    // Extract the last path segment after "ValueSet/"
+    if let Some(valueset_pos) = url_without_version.rfind("/ValueSet/") {
+        let id_start = valueset_pos + "/ValueSet/".len();
+        let id = &url_without_version[id_start..];
+        if !id.is_empty() {
+            return Some(id.to_string());
+        }
+    }
+
+    None
+}
+
+/// Resolve binding name to correct CodeSystem name using ValueSet URL
+/// Following Telemed5000's approach: Use ValueSet URL to look up CodeSystem ID, then use ID to get name
+/// This fixes FHIR R5 data quality issues where binding names don't match CodeSystem names
+/// Examples:
+///   binding_name="EnrollmentRequestStatus", value_set_url="http://hl7.org/fhir/ValueSet/fm-status|5.0.0"
+///     → CodeSystem ID "fm-status" → CodeSystem name "FinancialResourceStatusCodes"
+fn resolve_binding_name(
+    binding_name: Option<&String>,
+    value_set_url: Option<&String>,
+    codeset_id_to_name: &HashMap<String, String>,
+) -> Option<String> {
+    // Strategy 1: If we have a ValueSet URL, use it to resolve the CodeSystem name
+    if let Some(url) = value_set_url {
+        if let Some(codeset_id) = extract_codeset_id_from_valueset_url(url) {
+            if let Some(codeset_name) = codeset_id_to_name.get(&codeset_id) {
+                return Some(codeset_name.clone());
+            }
+        }
+    }
+
+    // Strategy 2: Fall back to binding name if no ValueSet URL or lookup failed
+    binding_name.cloned()
 }
