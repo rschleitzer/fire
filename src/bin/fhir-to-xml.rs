@@ -15,7 +15,7 @@ struct Args {
     input: PathBuf,
 
     /// Output XML file path
-    #[arg(short, long, default_value = "model/fhir.xml")]
+    #[arg(short, long, default_value = "fhir.xml")]
     output: PathBuf,
 
     /// Resources to process (comma-separated, default: all)
@@ -869,11 +869,16 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition) -> Res
     xml.push_str("      <codesets/>\n");
 
     // Search parameters
-    xml.push_str("      <searches>\n");
-    for param in &resource.search_params {
-        generate_search_xml(xml, param, &resource.name)?;
+    // Skip search parameters for Bundle - bundles are never stored in the database
+    if resource.name != "Bundle" {
+        xml.push_str("      <searches>\n");
+        for param in &resource.search_params {
+            generate_search_xml(xml, param, &resource.name)?;
+        }
+        xml.push_str("      </searches>\n");
+    } else {
+        xml.push_str("      <searches/>\n");
     }
-    xml.push_str("      </searches>\n");
 
     xml.push_str("    </resource>\n");
 
@@ -1129,6 +1134,41 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
 }
 
 fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse the expression to generate paths
+    // Handle OR expressions by splitting on "|"
+    let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
+
+    // Filter branches to only include paths starting with the current resource
+    // This prevents multi-resource search parameters (e.g., "email" on Patient, Person, Practitioner)
+    // from generating paths for other resources in the current resource's definition
+    let resource_prefix = resource_name.to_lowercase();
+
+    // Collect valid paths first to check if we have any
+    let mut valid_paths = Vec::new();
+
+    for expr in expression_branches {
+        if expr.is_empty() {
+            continue;
+        }
+
+        // Check if this expression starts with the current resource
+        // Handle parentheses: "(Patient.deceased.ofType(dateTime))" -> "Patient"
+        let expr_trimmed = expr.trim_start_matches('(').trim();
+        let expr_resource = expr_trimmed.split('.').next().unwrap_or("").to_lowercase();
+
+        if expr_resource != resource_prefix {
+            // Skip this branch - it's for a different resource
+            continue;
+        }
+
+        valid_paths.push(expr);
+    }
+
+    // Skip this search parameter entirely if there are no valid paths
+    if valid_paths.is_empty() {
+        return Ok(());
+    }
+
     // Convert parameter code to PascalCase for Rust-friendly query attribute
     // e.g., "address-city" -> "AddressCity", "email" -> "Email"
     let query_name = param.code
@@ -1147,40 +1187,26 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
 
     xml.push_str("          <paths>\n");
 
-    // Parse the expression to generate paths
-    // Handle OR expressions by splitting on "|"
-    let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
-
-    // Filter branches to only include paths starting with the current resource
-    // This prevents multi-resource search parameters (e.g., "email" on Patient, Person, Practitioner)
-    // from generating paths for other resources in the current resource's definition
-    let resource_prefix = resource_name.to_lowercase();
-
-    for expr in expression_branches {
-        if expr.is_empty() {
-            continue;
-        }
-
-        // Check if this expression starts with the current resource
-        // Handle parentheses: "(Patient.deceased.ofType(dateTime))" -> "Patient"
-        let expr_trimmed = expr.trim_start_matches('(').trim();
-        let expr_resource = expr_trimmed.split('.').next().unwrap_or("").to_lowercase();
-
-        if expr_resource != resource_prefix {
-            // Skip this branch - it's for a different resource
-            continue;
-        }
-
+    for expr in valid_paths {
         xml.push_str("            <path>\n");
         xml.push_str("              <parts>\n");
 
-        // Parse the expression and generate parts
-        let parts = parse_fhirpath_expression(expr);
+        // Parse the expression and generate parts and casts
+        let (parts, casts) = parse_fhirpath_expression(expr);
         for part_ref in parts {
             xml.push_str(&format!("                <part ref=\"{}\"/>\n", part_ref));
         }
 
         xml.push_str("              </parts>\n");
+
+        // Generate casts if any were found
+        if !casts.is_empty() {
+            xml.push_str("              <casts>\n");
+            for cast_type in casts {
+                xml.push_str(&format!("                <cast to=\"{}\"/>\n", cast_type));
+            }
+            xml.push_str("              </casts>\n");
+        }
 
         // Generate targets for reference search parameters
         if param.param_type == "reference" && !param.targets.is_empty() {
@@ -1359,17 +1385,21 @@ fn map_property_to_type(property_name: &str) -> String {
 }
 
 /// Parse a FHIRPath expression and convert it to property references
+/// Returns (parts, casts) tuple where:
+///   - parts: Vec of property references (e.g., ["patient.birthdate"])
+///   - casts: Vec of cast type names (e.g., ["Reference", "CodeableConcept"])
 /// Examples:
-///   "Patient.birthDate" -> ["patient.birthdate"]
-///   "Patient.name.family" -> ["patient.name", "humanname.family"]
-///   "Observation.code" -> ["observation.code"]
-///   "Observation.value.ofType(Quantity)" -> ["observation.value"]
-///   "Observation.subject.where(resolve() is Patient)" -> ["observation.subject"]
-fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
+///   "Patient.birthDate" -> (["patient.birthdate"], [])
+///   "Patient.name.family" -> (["patient.name", "humanname.family"], [])
+///   "Observation.code" -> (["observation.code"], [])
+///   "Observation.value.ofType(Quantity)" -> (["observation.value"], ["Quantity"])
+///   "instance as Reference" -> (["adverseevent.suspectentity.instance"], ["Reference"])
+fn parse_fhirpath_expression(expression: &str) -> (Vec<String>, Vec<String>) {
     let mut parts = Vec::new();
+    let mut casts = Vec::new();
 
     if expression.is_empty() {
-        return parts;
+        return (parts, casts);
     }
 
     // Clean up the expression
@@ -1406,7 +1436,7 @@ fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
     let segments: Vec<&str> = clean_expr.split('.').collect();
 
     if segments.is_empty() {
-        return parts;
+        return (parts, casts);
     }
 
     // First segment is the resource name (e.g., "Patient", "Observation")
@@ -1434,11 +1464,13 @@ fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
             let type_name = segment
                 .trim_start_matches("ofType(")
                 .trim_end_matches(")")
-                .trim()
-                .to_lowercase();
+                .trim();
+
+            // Store the cast (preserve original case for type name)
+            casts.push(type_name.to_string());
 
             // Update current_prefix to this type for the next iteration
-            current_prefix = type_name;
+            current_prefix = type_name.to_lowercase();
             continue;
         }
 
@@ -1447,8 +1479,25 @@ fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
             .split("(")
             .next()
             .unwrap_or(segment)
-            .trim()
-            .replace("[x]", "");
+            .trim();
+
+        // Handle " as TypeName" casts - e.g., "instance as Reference"
+        // Extract the cast type and store it, then strip from property name
+        let property_name = if let Some(as_pos) = property_name.find(" as ") {
+            let parts: Vec<&str> = property_name.split(" as ").collect();
+            if parts.len() >= 2 {
+                // Store the cast (preserve original case for type name)
+                casts.push(parts[1].trim().to_string());
+                parts[0].trim()
+            } else {
+                property_name
+            }
+        } else {
+            property_name
+        };
+
+        // Remove [x] suffix from choice types
+        let property_name = property_name.replace("[x]", "");
 
         if property_name.is_empty() {
             continue;
@@ -1481,7 +1530,7 @@ fn parse_fhirpath_expression(expression: &str) -> Vec<String> {
         }
     }
 
-    parts
+    (parts, casts)
 }
 
 fn escape_xml(text: &str) -> String {

@@ -1,2 +1,1 @@
-SGMLDECL "model/xml.dcl"
-DOCTYPE fhir model/fhirspec.dtd
+SGMLDECL xml.dcl

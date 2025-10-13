@@ -397,6 +397,35 @@ echo "✅ Generation complete!"
         (make formatting-instruction data: contents)))
 ```
 
+### Angular Bracket Escaping in DSSSL
+
+When writing DSSSL code generators that output code containing angular brackets, you need to prevent OpenJade from interpreting them as SGML tags. This affects:
+- Generic types (e.g., `Option<String>`, `Vec<T>`)
+- Any other code containing `<` characters
+
+**Problem**: OpenJade treats `<` as the start of an SGML tag, causing parsing errors.
+
+**Solution: Double-Quote Escaping**
+
+Within a `($...)` function, write two double quotes immediately after an opening angular bracket:
+
+```scheme
+($ "Option<""String>")
+```
+
+The first `"` ends the current string and prevents OpenJade from recognizing `<` as a tag opener. The second `"` immediately begins a new string, continuing the text.
+
+**Examples**:
+```scheme
+;; Wrong - will cause OpenJade parsing errors:
+($ "pub id: Option<String>")
+($ "pub items: Vec<Item>")
+
+;; Correct - escapes the < characters:
+($ "pub id: Option<""String>")
+($ "pub items: Vec<""Item>")
+```
+
 ### Type Mapping
 
 ```scheme

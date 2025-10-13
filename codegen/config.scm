@@ -1,0 +1,5 @@
+(define generate-rust-models #t)
+(define generate-sql-migrations #f)
+(define generate-repositories #f)
+(define generate-handlers #f)
+(define generate-search-extractors #f)
