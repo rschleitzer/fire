@@ -123,7 +123,7 @@ FHIR R5 JSONs ──────► Curated XML Model ──────► Gene
 
 ### Phase 0: DTD Schema (Completed ✅)
 
-**File: `model/fhirspec.dtd`**
+**File: `fhirspec.dtd` (in repo root)**
 
 Defines the structure of the intermediate XML model. Key elements:
 
