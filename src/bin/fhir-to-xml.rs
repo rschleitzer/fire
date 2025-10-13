@@ -597,20 +597,6 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     // Generate element definitions for all referenced types
     xml.push_str("  <elements>\n");
 
-    // Add hardcoded Resource element (abstract base type)
-    xml.push_str("    <element id=\"resource\" name=\"Resource\">\n");
-    xml.push_str("      <description>Base Resource (abstract)</description>\n");
-    xml.push_str("      <properties>\n");
-    // Suppress defaults: type="string" becomes type="id", iscollection="false", notnull="false"
-    // Output on one line with id last
-    xml.push_str("        <property name=\"id\" type=\"id\" id=\"resource.id\"><description>Logical id of this artifact</description></property>\n");
-    // type="element" is not default, ref is required, suppress iscollection and notnull defaults
-    xml.push_str("        <property name=\"meta\" type=\"element\" ref=\"meta\" id=\"resource.meta\"><description>Metadata about the resource</description></property>\n");
-    xml.push_str("      </properties>\n");
-    xml.push_str("      <elements/>\n");
-    xml.push_str("      <codesets/>\n");
-    xml.push_str("    </element>\n");
-
     // Track generated IDs to avoid duplicates
     let mut generated_ids = HashSet::new();
 
@@ -1057,8 +1043,15 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
                 }
             } else if dtd_type == "code" && element.binding_name.is_some() {
                 // Code with binding - add ref to codeset
-                let binding_ref = to_lowercase_preserve_digits(element.binding_name.as_ref().unwrap());
-                xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, binding_ref));
+                // Skip ref if binding name is "??" (FHIR spec quality issue)
+                let binding_name = element.binding_name.as_ref().unwrap();
+                if binding_name != "??" {
+                    let binding_ref = to_lowercase_preserve_digits(binding_name);
+                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, binding_ref));
+                } else {
+                    // No ref attribute for invalid binding
+                    xml.push_str(&format!("            <variant type=\"{}\"/>\n", dtd_type));
+                }
             } else {
                 // Primitive type - no ref
                 xml.push_str(&format!("            <variant type=\"{}\"/>\n", dtd_type));
@@ -1088,19 +1081,36 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
             ));
         } else if fhir_type == "code" && element.binding_name.is_some() {
             // Code type with ValueSet binding - add ref to codeset
-            let binding_ref = to_lowercase_preserve_digits(element.binding_name.as_ref().unwrap());
-            xml.push_str(&format!(
-                "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-                element.name,
-                attr_if_not_default("type", fhir_type, "string"),
-                format!(" ref=\"{}\"", binding_ref),  // ref is always required when type="code" with binding
-                attr_bool_if_not_default("iscollection", is_collection, false),
-                attr_bool_if_not_default("notnull", false, false),
-                attr_bool_if_not_default("summary", element.is_summary, false),
-                attr_bool_if_not_default("modifier", element.is_modifier, false),
-                property_id,
-                escape_xml(&element.description)
-            ));
+            // Skip if binding name is "??" (FHIR spec quality issue - missing/invalid binding)
+            let binding_name = element.binding_name.as_ref().unwrap();
+            if binding_name == "??" {
+                // Treat as code without binding (no ref attribute)
+                xml.push_str(&format!(
+                    "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
+                    element.name,
+                    attr_if_not_default("type", fhir_type, "string"),
+                    attr_bool_if_not_default("iscollection", is_collection, false),
+                    attr_bool_if_not_default("notnull", false, false),
+                    attr_bool_if_not_default("summary", element.is_summary, false),
+                    attr_bool_if_not_default("modifier", element.is_modifier, false),
+                    property_id,
+                    escape_xml(&element.description)
+                ));
+            } else {
+                let binding_ref = to_lowercase_preserve_digits(binding_name);
+                xml.push_str(&format!(
+                    "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
+                    element.name,
+                    attr_if_not_default("type", fhir_type, "string"),
+                    format!(" ref=\"{}\"", binding_ref),  // ref is always required when type="code" with binding
+                    attr_bool_if_not_default("iscollection", is_collection, false),
+                    attr_bool_if_not_default("notnull", false, false),
+                    attr_bool_if_not_default("summary", element.is_summary, false),
+                    attr_bool_if_not_default("modifier", element.is_modifier, false),
+                    property_id,
+                    escape_xml(&element.description)
+                ));
+            }
         } else {
             // Primitive type - no ref
             xml.push_str(&format!(
@@ -1148,6 +1158,15 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
 
     for expr in expression_branches {
         if expr.is_empty() {
+            continue;
+        }
+
+        // Skip expressions with .extension() calls - too complex to parse (URLs with dots/slashes)
+        // Following Telemed5000's approach: omit extension paths, keep only primary paths
+        // Examples skipped:
+        //   - CareTeam.extension('http://hl7.org/fhir/StructureDefinition/careteam-alias').value
+        //   - Location.extension('http://hl7.org/fhir/StructureDefinition/location-boundary-geojson').value
+        if expr.contains(".extension(") {
             continue;
         }
 
@@ -1299,6 +1318,7 @@ fn fhir_type_to_element_ref(fhir_type: &str) -> String {
 ///   "Observation.component" -> "observation.component"
 ///   "Patient" -> "patient"
 ///   "Observation | Observation.component" -> "observation.component" (takes last OR branch)
+///   "Ingredient.substance.strength.concentration.ofType(Ratio)" -> "ingredient.substance.strength.concentration"
 fn parse_base_path(expression: &str) -> String {
     // Simple implementation: convert to lowercase and return
     // More complex expressions would need proper FHIRPath parsing
@@ -1314,6 +1334,9 @@ fn parse_base_path(expression: &str) -> String {
     // Strip any parentheses or filters (e.g., "Observation.component.where(...)")
     let clean = selected.split(".where(").next().unwrap_or(selected);
 
+    // Strip .ofType() casts - e.g., "Ingredient.substance.strength.concentration.ofType(Ratio)" -> "Ingredient.substance.strength.concentration"
+    let clean = clean.split(".ofType(").next().unwrap_or(clean);
+
     clean.to_lowercase()
 }
 
@@ -1321,14 +1344,18 @@ fn parse_base_path(expression: &str) -> String {
 /// Examples:
 ///   "code" -> "code"
 ///   "value.ofType(CodeableConcept)" -> "value"
-///   "value.ofType(Quantity)" -> "value"
+///   "(value.ofType(Quantity))" -> "value"
+///   "value.ofType(boolean)" -> "value"
 fn parse_component_path(expression: &str) -> String {
     if expression.is_empty() {
         return String::new();
     }
 
+    // Strip leading/trailing parentheses - e.g., "(value.ofType(CodeableConcept))" -> "value.ofType(CodeableConcept)"
+    let clean = expression.trim().trim_matches(|c| c == '(' || c == ')');
+
     // Strip ofType() casts
-    let without_oftype = expression.split(".ofType(").next().unwrap_or(expression);
+    let without_oftype = clean.split(".ofType(").next().unwrap_or(clean);
 
     // Strip as() casts
     let without_as = without_oftype.split(" as ").next().unwrap_or(without_oftype);
@@ -1534,6 +1561,11 @@ fn parse_fhirpath_expression(expression: &str) -> (Vec<String>, Vec<String>) {
 }
 
 fn escape_xml(text: &str) -> String {
+    // First fix double-encoded UTF-8 (common FHIR R5 data quality issue)
+    // "â€"" should be em-dash (these appear in source FHIR R5 JSON as corrupted UTF-8)
+    let text = text.replace("\u{00E2}\u{20AC}\u{201D}", "\u{2014}");  // â€" -> em dash
+    let text = text.replace("\u{00E2}\u{20AC}\u{201C}", "\u{2013}");  // â€œ -> en dash (if present)
+
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -1548,9 +1580,16 @@ fn escape_xml(text: &str) -> String {
         .replace('\u{2018}', "'")   // Left single quote
         .replace('\u{2019}', "'")   // Right single quote
         // Replace other special characters
+        .replace('\u{2011}', "-")   // Non-breaking hyphen
         .replace('\u{2013}', "-")   // En dash
         .replace('\u{2014}', "-")   // Em dash
         .replace('\u{2026}', "...")  // Ellipsis
+        .replace('\u{2265}', "&gt;=")  // Greater than or equal (≥)
+        .replace('\u{2264}', "&lt;=")  // Less than or equal (≤)
+        // Replace Windows-1252 control characters that sometimes appear in FHIR data
+        .replace('\u{0091}', "'")   // Windows-1252 0x91 (left single quote)
+        .replace('\u{0082}', ",")   // Windows-1252 0x82 (low double quote, use comma)
+        .replace('\u{0089}', "per-mille")  // Windows-1252 0x89 (per-mille sign)
 }
 
 /// Helper to conditionally output an attribute only if it differs from the default value
