@@ -142,11 +142,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let complex_types = load_complex_types(&args.input)?;
     let search_params = load_search_parameters(&args.input)?;
     let code_systems = load_code_systems(&args.input)?;
+    let valueset_to_codesystem = build_valueset_to_codesystem_map(&args.input)?;
 
     println!("   Found {} structure definitions", structures.len());
     println!("   Found {} complex type definitions", complex_types.len());
     println!("   Found {} search parameters", search_params.len());
     println!("   Found {} code systems", code_systems.len());
+    println!("   Found {} valueset mappings", valueset_to_codesystem.len());
 
     // Step 2: Filter resources if specified
     let resource_filter: Option<Vec<String>> = args.resources.map(|r| {
@@ -160,7 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 4: Generate XML
     println!("\n📝 Generating XML model...");
-    let xml = generate_xml(&resources, &complex_types, &code_systems)?;
+    let xml = generate_xml(&resources, &complex_types, &code_systems, &valueset_to_codesystem)?;
 
     // Step 5: Write output
     if let Some(parent) = args.output.parent() {
@@ -247,6 +249,51 @@ fn load_code_systems(input_dir: &PathBuf) -> Result<Vec<CodeSystem>, Box<dyn std
     }
 
     Ok(code_systems)
+}
+
+/// Build a mapping from ValueSet ID to CodeSystem ID
+/// This is needed because ValueSets often have different IDs than the CodeSystems they reference
+/// Example: ValueSet "request-resource-types" → CodeSystem URL "http://hl7.org/fhir/fhir-types" → CodeSystem ID "fhir-types"
+fn build_valueset_to_codesystem_map(input_dir: &PathBuf) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    let valuesets_path = input_dir.join("valuesets.json");
+    let content = fs::read_to_string(&valuesets_path)?;
+    let bundle: Value = serde_json::from_str(&content)?;
+
+    let mut valueset_to_codesystem: HashMap<String, String> = HashMap::new();
+
+    if let Some(entries) = bundle.get("entry").and_then(|e| e.as_array()) {
+        for entry in entries {
+            if let Some(resource) = entry.get("resource") {
+                // Check if this is a ValueSet
+                if resource.get("resourceType").and_then(|rt| rt.as_str()) == Some("ValueSet") {
+                    let valueset_id = resource.get("id").and_then(|id| id.as_str());
+
+                    // Extract the CodeSystem URL from compose.include[0].system
+                    let codesystem_url = resource
+                        .get("compose")
+                        .and_then(|compose| compose.get("include"))
+                        .and_then(|include| include.as_array())
+                        .and_then(|arr| arr.get(0))
+                        .and_then(|first| first.get("system"))
+                        .and_then(|sys| sys.as_str());
+
+                    if let (Some(vs_id), Some(cs_url)) = (valueset_id, codesystem_url) {
+                        // Extract CodeSystem ID from URL
+                        // Examples:
+                        //   "http://hl7.org/fhir/fhir-types" → "fhir-types"
+                        //   "http://hl7.org/fhir/fm-status" → "fm-status"
+                        //   "http://terminology.hl7.org/CodeSystem/v3-ActCode" → "v3-ActCode"
+                        let cs_id = cs_url.split('/').last().unwrap_or("");
+                        if !cs_id.is_empty() {
+                            valueset_to_codesystem.insert(vs_id.to_string(), cs_id.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(valueset_to_codesystem)
 }
 
 #[derive(Debug)]
@@ -654,7 +701,7 @@ fn extract_local_codesets(
     local_codesets
 }
 
-fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem]) -> Result<String, Box<dyn std::error::Error>> {
+fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem], valueset_to_codesystem: &HashMap<String, String>) -> Result<String, Box<dyn std::error::Error>> {
     let mut xml = String::new();
 
     // XML header and DTD reference
@@ -663,8 +710,11 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
 
     // Build CodeSystem ID → CodeSystem name mapping for resolving binding references
     // This is needed because FHIR R5 binding names often don't match CodeSystem names
-    // We resolve via ValueSet URL → CodeSystem ID → CodeSystem name
-    // Example: ValueSet URL "http://hl7.org/fhir/ValueSet/fm-status|5.0.0" → ID "fm-status" → name "FinancialResourceStatusCodes"
+    // We resolve via: ValueSet URL → ValueSet ID → CodeSystem ID → CodeSystem name
+    // Example: ValueSet URL "http://hl7.org/fhir/ValueSet/request-resource-types|5.0.0"
+    //          → ValueSet ID "request-resource-types"
+    //          → CodeSystem ID "fhir-types" (via valueset_to_codesystem map)
+    //          → CodeSystem name "FHIRTypes"
     let mut codeset_id_to_name: HashMap<String, String> = HashMap::new();
     for code_system in all_code_systems {
         codeset_id_to_name.insert(code_system.id.clone(), code_system.name.clone());
@@ -754,7 +804,7 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     xml.push_str("  <resources>\n");
 
     for resource in resources {
-        generate_resource_xml(&mut xml, resource, &property_type_map, &codeset_id_to_name)?;
+        generate_resource_xml(&mut xml, resource, &property_type_map, valueset_to_codesystem, &codeset_id_to_name)?;
     }
 
     xml.push_str("  </resources>\n");
@@ -816,7 +866,7 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
 
             // Skip if already generated (e.g., MoneyQuantity and SimpleQuantity duplicate Quantity)
             if generated_ids.insert(element_id.clone()) {
-                generate_element_xml(&mut xml, complex_type, &codeset_id_to_name)?;
+                generate_element_xml(&mut xml, complex_type, valueset_to_codesystem, &codeset_id_to_name)?;
             }
         }
     }
@@ -828,16 +878,30 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     // From resources
     for resource in resources {
         for element in &resource.elements {
-            if let Some(binding) = &element.binding_name {
-                referenced_codesets.insert(to_lowercase_preserve_digits(binding));
+            // Resolve binding name via ValueSet URL to get actual CodeSystem name
+            let resolved = resolve_binding_name(
+                element.binding_name.as_ref(),
+                element.value_set_url.as_ref(),
+                valueset_to_codesystem,
+                &codeset_id_to_name
+            );
+            if let Some(binding) = resolved {
+                referenced_codesets.insert(to_lowercase_preserve_digits(&binding));
             }
         }
 
         // From backbone elements
         for backbone in &resource.backbone_elements {
             for property in &backbone.properties {
-                if let Some(binding) = &property.binding_name {
-                    referenced_codesets.insert(to_lowercase_preserve_digits(binding));
+                // Resolve binding name via ValueSet URL to get actual CodeSystem name
+                let resolved = resolve_binding_name(
+                    property.binding_name.as_ref(),
+                    property.value_set_url.as_ref(),
+                    valueset_to_codesystem,
+                    &codeset_id_to_name
+                );
+                if let Some(binding) = resolved {
+                    referenced_codesets.insert(to_lowercase_preserve_digits(&binding));
                 }
             }
         }
@@ -908,16 +972,12 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
             .or_else(|| codeset_map_by_id.get(codeset_id.as_str()));
 
         if let Some(code_system) = code_system {
-            let normalized_id = to_lowercase_preserve_digits(&code_system.name);
+            // Generate codeset with collision detection
+            // The function will add "codes" suffix if needed and return the actual ID used
+            let actual_id = generate_codeset_xml(&mut xml, code_system, &all_used_ids)?;
 
-            // Skip if this ID would collide with a resource or element ID
-            // This prevents errors like "deviceassociation" codeset colliding with DeviceAssociation resource
-            if !all_used_ids.contains(&normalized_id) {
-                // Only generate if we haven't already used this ID
-                if all_used_ids.insert(normalized_id.clone()) {
-                    generate_codeset_xml(&mut xml, code_system)?;
-                }
-            }
+            // Track the ID to prevent future collisions
+            all_used_ids.insert(actual_id);
         }
     }
 
@@ -1029,11 +1089,20 @@ fn add_stub_codesets(xml: &mut String) {
     xml.push_str("    </codeset>\n");
 }
 
-fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem, all_used_ids: &HashSet<String>) -> Result<String, Box<dyn std::error::Error>> {
     // Use the CodeSystem.name (binding name) as the ID, not the CodeSystem.id
     // This matches how properties reference codesets via binding names
     // e.g., binding name "TriggeredByType" -> id "triggeredbytype"
-    let codeset_id = to_lowercase_preserve_digits(&code_system.name);
+    let mut codeset_id = to_lowercase_preserve_digits(&code_system.name);
+
+    // Following Telemed5000's approach (lines 1565-1570, 1669-1670 in Program.cs):
+    // Add "codes" suffix if ID collides with a resource or element ID
+    // Examples:
+    //   - "SubscriptionStatus" resource + "SubscriptionStatus" codeset → rename codeset to "subscriptionstatuscodes"
+    //   - "BiologicallyDerivedProductDispense" codeset → "biologicallyderivedproductdispensecodes" (avoids resource collision)
+    if all_used_ids.contains(&codeset_id) {
+        codeset_id = format!("{}codes", codeset_id);
+    }
 
     xml.push_str(&format!("    <codeset name=\"{}\" id=\"{}\">\n", code_system.name, codeset_id));
     xml.push_str(&format!("      <description>{}</description>\n",
@@ -1053,10 +1122,10 @@ fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem) -> Result<()
     xml.push_str("      </codes>\n");
     xml.push_str("    </codeset>\n");
 
-    Ok(())
+    Ok(codeset_id)
 }
 
-fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let resource_id = resource.name.to_lowercase();
 
     // Resources with reference implementations
@@ -1076,7 +1145,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     // Properties (resource-level attributes)
     xml.push_str("      <properties>\n");
     for element in &resource.elements {
-        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, codeset_id_to_name)?;
+        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, valueset_to_codesystem, codeset_id_to_name)?;
     }
     xml.push_str("      </properties>\n");
 
@@ -1086,7 +1155,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     } else {
         xml.push_str("      <elements>\n");
         for backbone in &resource.backbone_elements {
-            generate_backbone_element_xml(xml, backbone, &resource.name, codeset_id_to_name)?;
+            generate_backbone_element_xml(xml, backbone, &resource.name, valueset_to_codesystem, codeset_id_to_name)?;
         }
         xml.push_str("      </elements>\n");
     }
@@ -1130,7 +1199,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     Ok(())
 }
 
-fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Generate element ID following Telemed5000 convention
     // e.g., "Observation.component" -> ID "observationcomponent"
     let element_id = backbone.path.replace(".", "").to_lowercase();
@@ -1147,7 +1216,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
         // Following Telemed5000 convention: property IDs use full dotted path from resource root
         // e.g., "ConceptMap.group.element" property has ID "conceptmap.group.element"
         let parent_path_lower = backbone.path.to_lowercase();
-        generate_property_xml_with_parent(xml, property, &parent_path_lower, codeset_id_to_name)?;
+        generate_property_xml_with_parent(xml, property, &parent_path_lower, valueset_to_codesystem, codeset_id_to_name)?;
     }
     xml.push_str("          </properties>\n");
 
@@ -1158,7 +1227,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
     Ok(())
 }
 
-fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     let element_id = complex_type.type_name.to_lowercase();
 
     xml.push_str(&format!("    <element id=\"{}\" name=\"{}\">\n", element_id, complex_type.name));
@@ -1221,7 +1290,7 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, co
                     is_modifier: elem.is_modifier.unwrap_or(false),
                 };
 
-                generate_property_xml(xml, &element_info, &complex_type.name, codeset_id_to_name)?;
+                generate_property_xml(xml, &element_info, &complex_type.name, valueset_to_codesystem, codeset_id_to_name)?;
             }
         }
     }
@@ -1234,13 +1303,13 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, co
     Ok(())
 }
 
-fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Follow Telemed5000 naming convention: {resource_lowercase}.{property_lowercase}
     let parent_id = resource_name.to_lowercase();
-    generate_property_xml_with_parent(xml, element, &parent_id, codeset_id_to_name)
+    generate_property_xml_with_parent(xml, element, &parent_id, valueset_to_codesystem, codeset_id_to_name)
 }
 
-fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this property refers to a BackboneElement
     // If so, replace "BackboneElement" with the specific backbone element ID
     if element.types.len() == 1 && element.types[0].code == "BackboneElement" {
@@ -1253,15 +1322,15 @@ fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, 
                 code: backbone_element_id,
                 target_resources: vec![],
             }];
-            return generate_property_xml(xml, &modified_element, resource_name, codeset_id_to_name);
+            return generate_property_xml(xml, &modified_element, resource_name, valueset_to_codesystem, codeset_id_to_name);
         }
     }
 
     // Not a backbone element, generate normally
-    generate_property_xml(xml, element, resource_name, codeset_id_to_name)
+    generate_property_xml(xml, element, resource_name, valueset_to_codesystem, codeset_id_to_name)
 }
 
-fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
     // Remove [x] suffix from choice types (e.g., deceased[x] -> deceased)
     let property_name_clean = element.name.replace("[x]", "");
     let property_id = format!("{}.{}",
@@ -1274,6 +1343,7 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
     let resolved_binding = resolve_binding_name(
         element.binding_name.as_ref(),
         element.value_set_url.as_ref(),
+        valueset_to_codesystem,
         codeset_id_to_name
     );
 
@@ -1483,7 +1553,7 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
 
         // Parse the expression and generate parts and casts
         let (parts, casts) = parse_fhirpath_expression(expr, property_type_map);
-        for part_ref in parts {
+        for part_ref in &parts {
             xml.push_str(&format!("                <part ref=\"{}\"/>\n", part_ref));
         }
 
@@ -1492,7 +1562,7 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
         // Generate casts if any were found
         if !casts.is_empty() {
             xml.push_str("              <casts>\n");
-            for cast_type in casts {
+            for cast_type in &casts {
                 xml.push_str(&format!("                <cast to=\"{}\"/>\n", cast_type));
             }
             xml.push_str("              </casts>\n");
@@ -1511,23 +1581,27 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
         if param.is_composite && !param.components.is_empty() {
             xml.push_str("              <components>\n");
 
-            // The base expression (e.g., "Observation.component") gives us the starting path
-            // Each component expression (e.g., "code" or "value.ofType(CodeableConcept)") extends it
-            let base_path = parse_base_path(&param.expression);
+            // Determine the prefix for component refs based on cast types
+            // If the base expression has a cast (e.g., ".ofType(Ratio)"), the component refs
+            // are relative to the cast type, not the base path.
+            // Examples:
+            //   - "Observation.component" → components are "observation.component.code", "observation.component.value"
+            //   - "Ingredient.substance.strength.presentation.ofType(Ratio)" → components are "ratio.numerator", "ratio.denominator"
+            let component_prefix = if !casts.is_empty() {
+                // Use the last cast type as the prefix (lowercased)
+                casts.last().unwrap().to_lowercase()
+            } else {
+                // No casts, use the base path
+                parse_base_path(&param.expression)
+            };
 
             for component in &param.components {
                 // Parse component expression to build property ref
-                // Component refs must use the full dotted path from resource root
-                // Examples:
-                //   base_path="observation.component", expression="code" -> "observation.component.code"
-                //   base_path="observation.component", expression="value.ofType(CodeableConcept)" -> "observation.component.value"
                 let component_path = parse_component_path(&component.expression);
-                let component_ref = if base_path.is_empty() {
+                let component_ref = if component_prefix.is_empty() {
                     component_path
                 } else {
-                    // Use full dotted path, not element ID format
-                    // e.g., "observation.component" + "code" -> "observation.component.code"
-                    format!("{}.{}", base_path, component_path)
+                    format!("{}.{}", component_prefix, component_path)
                 };
 
                 xml.push_str(&format!("                <component ref=\"{}\"/>\n", component_ref));
@@ -1916,18 +1990,29 @@ fn extract_codeset_id_from_valueset_url(url: &str) -> Option<String> {
 /// Following Telemed5000's approach: Use ValueSet URL to look up CodeSystem ID, then use ID to get name
 /// This fixes FHIR R5 data quality issues where binding names don't match CodeSystem names
 /// Examples:
-///   binding_name="EnrollmentRequestStatus", value_set_url="http://hl7.org/fhir/ValueSet/fm-status|5.0.0"
-///     → CodeSystem ID "fm-status" → CodeSystem name "FinancialResourceStatusCodes"
+///   binding_name="ActivityDefinitionKind", value_set_url="http://hl7.org/fhir/ValueSet/request-resource-types|5.0.0"
+///     → ValueSet ID "request-resource-types"
+///     → CodeSystem ID "fhir-types" (via valueset_to_codesystem map)
+///     → CodeSystem name "FHIRTypes"
 fn resolve_binding_name(
     binding_name: Option<&String>,
     value_set_url: Option<&String>,
+    valueset_to_codesystem: &HashMap<String, String>,
     codeset_id_to_name: &HashMap<String, String>,
 ) -> Option<String> {
     // Strategy 1: If we have a ValueSet URL, use it to resolve the CodeSystem name
     if let Some(url) = value_set_url {
-        if let Some(codeset_id) = extract_codeset_id_from_valueset_url(url) {
-            if let Some(codeset_name) = codeset_id_to_name.get(&codeset_id) {
+        if let Some(valueset_id) = extract_codeset_id_from_valueset_url(url) {
+            // First try direct CodeSystem lookup (for ValueSets where ID == CodeSystem ID)
+            if let Some(codeset_name) = codeset_id_to_name.get(&valueset_id) {
                 return Some(codeset_name.clone());
+            }
+
+            // Then try via ValueSet → CodeSystem mapping (for ValueSets with different IDs)
+            if let Some(codesystem_id) = valueset_to_codesystem.get(&valueset_id) {
+                if let Some(codeset_name) = codeset_id_to_name.get(codesystem_id) {
+                    return Some(codeset_name.clone());
+                }
             }
         }
     }
