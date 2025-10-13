@@ -4,6 +4,7 @@
 <!ENTITY config         SYSTEM "config.scm">
 <!ENTITY utilities      SYSTEM "utilities.scm">
 <!ENTITY general        SYSTEM "general.scm">
+<!ENTITY migration      SYSTEM "migration.scm">
 <!ENTITY rules          SYSTEM "rules.scm">
 
 ]>
@@ -11,4 +12,5 @@
 &config;
 &utilities;
 &general;
+&migration;
 &rules;

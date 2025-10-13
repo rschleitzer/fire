@@ -242,8 +242,8 @@ fire/
 │   ├── utilities.scm              # String helpers, flow objects
 │   ├── general.scm                # Cross-cutting functions
 │   ├── rules.scm                  # Element processing rules
+│   ├── migration.scm              # Generate SQL migrations
 │   ├── rust-structs.scm           # Generate Rust models
-│   ├── sql-tables.scm             # Generate migrations
 │   ├── repositories.scm           # Generate repository methods
 │   ├── handlers.scm               # Generate Axum handlers
 │   └── search-extractors.scm     # Generate search param extractors
@@ -259,6 +259,32 @@ fire/
 - File generation with flow objects
 - Type mapping (FHIR → Rust, FHIR → PostgreSQL)
 - Conditional generation
+
+**Adding a New Generator Module:**
+
+When adding a new code generator (e.g., `migration.scm`):
+
+1. **Declare entity in `map.dsl`:**
+```xml
+<!ENTITY migration      SYSTEM "migration.scm">
+```
+
+2. **Include entity in `map.dsl`:**
+```xml
+&migration;
+```
+
+3. **Add element rule in `rules.scm`:**
+```scheme
+(element resources
+  (sosofo-append
+    (migration)           ; Call your generator function
+    (process-children)))  ; Continue processing children
+```
+
+4. **Create generator file** (e.g., `codegen/migration.scm`)
+
+**Order matters:** Entities must be declared before being included, and included before the rules that use them.
 
 ### Phase 4: Generation Script
 
@@ -330,6 +356,43 @@ echo "✅ Generation complete!"
 6. **Version controlled** - Both model and generated code in git
 
 ## DSSSL Pattern Library
+
+### Learning DSSSL: Start with a Dumb Template
+
+When building a new DSSSL generator from scratch, start with a **dumb template** approach:
+
+1. **Copy existing output** - Take the exact file you want to generate (e.g., `migrations/001_initial_schema.sql`)
+2. **Paste into string literal** - Put it between `($"...")` in your DSSSL function
+3. **Escape the content** - Apply three transformations:
+   - Replace `\` with `\\` (escape backslashes)
+   - Replace `"` with `\"` (escape double quotes)
+   - Replace `<` with `<""` (escape angle brackets for OpenJade)
+4. **Verify generation** - Run OpenJade and confirm it produces identical output
+5. **Then make it dynamic** - Incrementally replace hardcoded parts with XML-driven logic
+
+**Why this works:**
+- Proves your file generation plumbing works
+- Gives you a working baseline to diff against
+- Makes debugging easier (you can see exactly what changed)
+- Reduces cognitive load (syntax escaping separate from logic)
+
+**Example workflow:**
+```scheme
+; Step 1: Dumb template (hardcoded SQL)
+(define (migration)
+  (file "migrations/001_initial_schema.sql"
+        ($"CREATE TABLE patient (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    -- ... rest of hardcoded SQL ...
+")))
+
+; Step 2: Make dynamic (replace one table at a time)
+(define (migration)
+  (file "migrations/001_initial_schema.sql"
+        (apply $ (map generate-table-sql
+                      (node-list->list (select-elements (children (current-node)) "resource"))))))
+```
 
 ### Core String Manipulation
 
@@ -407,13 +470,13 @@ When writing DSSSL code generators that output code containing angular brackets,
 
 **Solution: Double-Quote Escaping**
 
-Within a `($...)` function, write two double quotes immediately after an opening angular bracket:
+Within a `($...)` function, write the `<` character followed immediately by two double quotes:
 
 ```scheme
 ($ "Option<""String>")
 ```
 
-The first `"` ends the current string and prevents OpenJade from recognizing `<` as a tag opener. The second `"` immediately begins a new string, continuing the text.
+The `<` is followed by `""` which breaks the sequence: the first `"` ends the current string, and the second `"` immediately begins a new string, preventing OpenJade from recognizing `<` as a tag opener.
 
 **Examples**:
 ```scheme

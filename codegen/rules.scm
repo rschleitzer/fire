@@ -1,10 +1,16 @@
 (element fhir
   (process-children))
 
+(element resources
+  (sosofo-append
+    (migration)
+    (process-children)))
+
 (element resource
   (if (true? "active" (current-node))
       (sosofo-append
-        (generate-rust-model))
+        ;; (generate-rust-model)
+        (empty-sosofo))
       (empty-sosofo)))
 
 (define (generate-rust-model)

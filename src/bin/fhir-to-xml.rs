@@ -671,13 +671,31 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
         .map(|cs| (to_lowercase_preserve_digits(&cs.name), cs))
         .collect();
 
+    // Track all IDs already used in the document to prevent collisions
+    // Start with resource IDs and element IDs
+    let mut all_used_ids: HashSet<String> = resources.iter()
+        .map(|r| r.name.to_lowercase())
+        .collect();
+
+    // Add element IDs (from complex types)
+    all_used_ids.extend(generated_ids.iter().cloned());
+
     for codeset_id in referenced_codesets.iter() {
         // Try lookup by name first (binding name), then by ID
         let code_system = codeset_map_by_name.get(codeset_id.as_str())
             .or_else(|| codeset_map_by_id.get(codeset_id.as_str()));
 
         if let Some(code_system) = code_system {
-            generate_codeset_xml(&mut xml, code_system)?;
+            let normalized_id = to_lowercase_preserve_digits(&code_system.name);
+
+            // Skip if this ID would collide with a resource or element ID
+            // This prevents errors like "deviceassociation" codeset colliding with DeviceAssociation resource
+            if !all_used_ids.contains(&normalized_id) {
+                // Only generate if we haven't already used this ID
+                if all_used_ids.insert(normalized_id.clone()) {
+                    generate_codeset_xml(&mut xml, code_system)?;
+                }
+            }
         }
     }
 
