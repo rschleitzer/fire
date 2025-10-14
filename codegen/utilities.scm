@@ -211,8 +211,8 @@
     ($ (case identifier (("event" "operator" "abstract" "class" "base" "params" "short" "for" "ref" "double" "case" "const" "object") "@") (else "")) identifier)
 )
 
-; Check if a search parameter references a collection property
-(define (search-is-collection? search)
+; Get the property node referenced by a search parameter
+(define (search-property search)
     (let* ((paths-node (select-children "paths" search))
            (path-nodes (if (node-list-empty? paths-node)
                           (empty-node-list)
@@ -227,8 +227,22 @@
            (first-part (if (node-list-empty? part-nodes)
                           #f
                           (node-list-first part-nodes)))
-           (part-ref (if first-part (% "ref" first-part) #f))
-           (property (if part-ref (element-with-id part-ref) #f)))
+           (part-ref (if first-part (% "ref" first-part) #f)))
+      (if part-ref (element-with-id part-ref) #f)))
+
+; Check if a search parameter references a collection property
+(define (search-is-collection? search)
+    (let ((property (search-property search)))
       (if property
           (true? "iscollection" property)
+          #f)))
+
+; Check if a search parameter references an Identifier datatype (use _value vs _code)
+(define (search-is-identifier? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "identifier" ref-attr)
+                #f))
           #f)))

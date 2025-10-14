@@ -21,9 +21,10 @@ CREATE TABLE "table-name" (
               ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
-    "(string-replace search-name "-" "_")"_code TEXT"(if is-collection "[]" "")",
-"))
+              (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+                ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+")))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
@@ -58,9 +59,10 @@ CREATE TABLE "table-name"_history (
               ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
-    "(string-replace search-name "-" "_")"_code TEXT"(if is-collection "[]" "")",
-"))
+              (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+                ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+")))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
