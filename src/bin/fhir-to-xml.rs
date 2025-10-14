@@ -702,6 +702,123 @@ fn extract_local_codesets(
 }
 
 fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem], valueset_to_codesystem: &HashMap<String, String>) -> Result<String, Box<dyn std::error::Error>> {
+    // FIRST: Collect all referenced element types (needed to know which complex types will be generated)
+    let mut referenced_types = HashSet::new();
+    let mut to_process = Vec::new();
+
+    // Start with types referenced by resources
+    for resource in resources {
+        for element in &resource.elements {
+            for type_info in &element.types {
+                let dtd_type = map_fhir_type_to_dtd(&type_info.code);
+                if dtd_type == "element" {
+                    if referenced_types.insert(type_info.code.as_str()) {
+                        to_process.push(type_info.code.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    // Create a map for quick lookup
+    let type_map: HashMap<&str, &StructureDefinition> = all_complex_types
+        .iter()
+        .map(|t| (t.type_name.as_str(), t))
+        .collect();
+
+    // Recursively follow references
+    while let Some(type_name) = to_process.pop() {
+        if let Some(complex_type) = type_map.get(type_name) {
+            if let Some(snapshot) = &complex_type.snapshot {
+                for elem in &snapshot.element {
+                    if let Some(types) = &elem.types {
+                        for elem_type in types {
+                            let dtd_type = map_fhir_type_to_dtd(&elem_type.code);
+                            if dtd_type == "element" {
+                                if referenced_types.insert(elem_type.code.as_str()) {
+                                    to_process.push(elem_type.code.as_str());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // SECOND PASS: Collect all valid XML IDs that will be generated
+    // This allows us to comment out references to non-existent IDs
+    let mut valid_ids: HashSet<String> = HashSet::new();
+
+    // Add resource IDs
+    for resource in resources {
+        valid_ids.insert(resource.name.to_lowercase());
+
+        // Add property IDs
+        for element in &resource.elements {
+            let property_name_clean = element.name.replace("[x]", "");
+            let property_id = format!("{}.{}", resource.name.to_lowercase(), to_lowercase_preserve_digits(&property_name_clean));
+            valid_ids.insert(property_id);
+        }
+
+        // Add backbone element IDs and their properties
+        for backbone in &resource.backbone_elements {
+            let backbone_id = backbone.path.replace(".", "").to_lowercase();
+            valid_ids.insert(backbone_id.clone());
+
+            // Properties within backbone elements use dotted path
+            let backbone_path_lower = backbone.path.to_lowercase();
+            for property in &backbone.properties {
+                let property_name_clean = property.name.replace("[x]", "");
+                let property_id = format!("{}.{}", backbone_path_lower, to_lowercase_preserve_digits(&property_name_clean));
+                valid_ids.insert(property_id);
+            }
+        }
+    }
+
+    // Add referenced complex type IDs (now that we know which types will be generated)
+    for complex_type in all_complex_types {
+        let type_name = complex_type.type_name.as_str();
+        if referenced_types.contains(type_name) {
+            let type_id = type_name.to_lowercase();
+            valid_ids.insert(type_id.clone());
+
+            if let Some(snapshot) = &complex_type.snapshot {
+                for elem in &snapshot.element {
+                    // Only include direct properties (not nested or root)
+                    if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
+                        let name = elem.path.split('.').last().unwrap_or("").to_string();
+                        let property_id = format!("{}.{}", type_id, to_lowercase_preserve_digits(&name));
+                        valid_ids.insert(property_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Add codeset IDs (with collision detection logic matching what will be generated)
+    let mut codeset_ids_used: HashSet<String> = HashSet::new();
+    for code_system in all_code_systems {
+        let mut codeset_id = to_lowercase_preserve_digits(&code_system.name);
+
+        // Apply same collision detection as during generation
+        if valid_ids.contains(&codeset_id) {
+            codeset_id = format!("{}codes", codeset_id);
+        }
+
+        // Handle duplicate codeset names
+        let base_id = codeset_id.clone();
+        let mut counter = 2;
+        while codeset_ids_used.contains(&codeset_id) {
+            codeset_id = format!("{}{}", base_id, counter);
+            counter += 1;
+        }
+
+        codeset_ids_used.insert(codeset_id.clone());
+        valid_ids.insert(codeset_id);
+    }
+
+    // SECOND PASS: Generate XML
     let mut xml = String::new();
 
     // XML header and DTD reference
@@ -804,56 +921,12 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
     xml.push_str("  <resources>\n");
 
     for resource in resources {
-        generate_resource_xml(&mut xml, resource, &property_type_map, valueset_to_codesystem, &codeset_id_to_name)?;
+        generate_resource_xml(&mut xml, resource, &property_type_map, valueset_to_codesystem, &codeset_id_to_name, &valid_ids)?;
     }
 
     xml.push_str("  </resources>\n");
 
-    // Collect all referenced element types recursively
-    let mut referenced_types = HashSet::new();
-    let mut to_process = Vec::new();
-
-    // Start with types referenced by resources
-    for resource in resources {
-        for element in &resource.elements {
-            for type_info in &element.types {
-                let dtd_type = map_fhir_type_to_dtd(&type_info.code);
-                if dtd_type == "element" {
-                    if referenced_types.insert(type_info.code.as_str()) {
-                        to_process.push(type_info.code.as_str());
-                    }
-                }
-            }
-        }
-    }
-
-    // Create a map for quick lookup
-    let type_map: HashMap<&str, &StructureDefinition> = all_complex_types
-        .iter()
-        .map(|t| (t.type_name.as_str(), t))
-        .collect();
-
-    // Recursively follow references
-    while let Some(type_name) = to_process.pop() {
-        if let Some(complex_type) = type_map.get(type_name) {
-            if let Some(snapshot) = &complex_type.snapshot {
-                for elem in &snapshot.element {
-                    if let Some(types) = &elem.types {
-                        for elem_type in types {
-                            let dtd_type = map_fhir_type_to_dtd(&elem_type.code);
-                            if dtd_type == "element" {
-                                if referenced_types.insert(elem_type.code.as_str()) {
-                                    to_process.push(elem_type.code.as_str());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Generate element definitions for all referenced types
+    // Generate element definitions for all referenced types (referenced_types already collected earlier)
     xml.push_str("  <elements>\n");
 
     // Track generated IDs to avoid duplicates
@@ -866,7 +939,7 @@ fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[Structure
 
             // Skip if already generated (e.g., MoneyQuantity and SimpleQuantity duplicate Quantity)
             if generated_ids.insert(element_id.clone()) {
-                generate_element_xml(&mut xml, complex_type, valueset_to_codesystem, &codeset_id_to_name)?;
+                generate_element_xml(&mut xml, complex_type, valueset_to_codesystem, &codeset_id_to_name, &valid_ids)?;
             }
         }
     }
@@ -1087,6 +1160,53 @@ fn add_stub_codesets(xml: &mut String) {
     xml.push_str("        </code>\n");
     xml.push_str("      </codes>\n");
     xml.push_str("    </codeset>\n");
+
+    // NameLanguage - BCP 47 (alias for Language)
+    xml.push_str("    <codeset name=\"NameLanguage\" id=\"namelanguage\">\n");
+    xml.push_str("      <description>BCP 47 language codes for item names (placeholder - references urn:ietf:bcp:47)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"English\" value=\"en\">\n");
+    xml.push_str("          <description>English</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
+    xml.push_str("          <description>English (United States)</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // ItemDescriptionLanguage - BCP 47 (alias for Language)
+    xml.push_str("    <codeset name=\"ItemDescriptionLanguage\" id=\"itemdescriptionlanguage\">\n");
+    xml.push_str("      <description>BCP 47 language codes for item descriptions (placeholder - references urn:ietf:bcp:47)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"English\" value=\"en\">\n");
+    xml.push_str("          <description>English</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
+    xml.push_str("          <description>English (United States)</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    // UseContext values - external terminology (HL7 v3)
+    // Note: These are actually complex types (CodeableConcept) not simple codes
+    // Leaving as placeholder stubs - proper implementation would need external terminology
+    xml.push_str("    <codeset name=\"UseContextCode\" id=\"valueset.usecontext.code\">\n");
+    xml.push_str("      <description>UseContext code types (placeholder - references external v3 vocabulary)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"Clinical Focus\" value=\"focus\">\n");
+    xml.push_str("          <description>Clinical context focus</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
+
+    xml.push_str("    <codeset name=\"UseContextValue\" id=\"valueset.usecontext.value\">\n");
+    xml.push_str("      <description>UseContext values (placeholder - references external vocabularies)</description>\n");
+    xml.push_str("      <codes>\n");
+    xml.push_str("        <code name=\"Example Value\" value=\"example\">\n");
+    xml.push_str("          <description>Example value</description>\n");
+    xml.push_str("        </code>\n");
+    xml.push_str("      </codes>\n");
+    xml.push_str("    </codeset>\n");
 }
 
 fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem, all_used_ids: &HashSet<String>) -> Result<String, Box<dyn std::error::Error>> {
@@ -1125,7 +1245,18 @@ fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem, all_used_ids
     Ok(codeset_id)
 }
 
-fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+/// Helper function to wrap an XML element in an SGML comment if its ref doesn't exist
+fn maybe_comment_invalid_ref(element: &str, ref_value: &str, valid_ids: &HashSet<String>) -> String {
+    if valid_ids.contains(ref_value) {
+        element.to_string()
+    } else {
+        // Comment out the entire element by wrapping it in SGML comment delimiters
+        format!("<!-- INVALID REF: {} - {}", ref_value, element.trim_end().replace("-->", ""))
+            + " -->\n"
+    }
+}
+
+fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     let resource_id = resource.name.to_lowercase();
 
     // Resources with reference implementations
@@ -1145,7 +1276,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     // Properties (resource-level attributes)
     xml.push_str("      <properties>\n");
     for element in &resource.elements {
-        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, valueset_to_codesystem, codeset_id_to_name)?;
+        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
     }
     xml.push_str("      </properties>\n");
 
@@ -1155,7 +1286,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     } else {
         xml.push_str("      <elements>\n");
         for backbone in &resource.backbone_elements {
-            generate_backbone_element_xml(xml, backbone, &resource.name, valueset_to_codesystem, codeset_id_to_name)?;
+            generate_backbone_element_xml(xml, backbone, &resource.name, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
         }
         xml.push_str("      </elements>\n");
     }
@@ -1165,8 +1296,29 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
         xml.push_str("      <codesets/>\n");
     } else {
         xml.push_str("      <codesets>\n");
+
+        // Track codeset IDs used within this resource to detect duplicates
+        let mut used_codeset_ids: HashSet<String> = HashSet::new();
+
         for codeset in &resource.local_codesets {
-            xml.push_str(&format!("        <codeset name=\"{}\" id=\"{}\">\n", codeset.name, codeset.id));
+            let mut codeset_id = codeset.id.clone();
+
+            // Avoid collision with resource ID
+            if codeset_id == resource_id {
+                codeset_id = format!("{}codes", codeset_id);
+            }
+
+            // Avoid collisions with other codesets in this resource (duplicate codeset names)
+            // Add numeric suffix (2, 3, ...) if needed
+            let base_id = codeset_id.clone();
+            let mut counter = 2;
+            while used_codeset_ids.contains(&codeset_id) {
+                codeset_id = format!("{}{}", base_id, counter);
+                counter += 1;
+            }
+            used_codeset_ids.insert(codeset_id.clone());
+
+            xml.push_str(&format!("        <codeset name=\"{}\" id=\"{}\">\n", codeset.name, codeset_id));
             xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&codeset.description)));
             xml.push_str("          <codes>\n");
             for (code, display, definition) in &codeset.codes {
@@ -1187,7 +1339,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     if resource.name != "Bundle" {
         xml.push_str("      <searches>\n");
         for param in &resource.search_params {
-            generate_search_xml(xml, param, &resource.name, property_type_map)?;
+            generate_search_xml(xml, param, &resource.name, property_type_map, valid_ids)?;
         }
         xml.push_str("      </searches>\n");
     } else {
@@ -1199,7 +1351,7 @@ fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, proper
     Ok(())
 }
 
-fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Generate element ID following Telemed5000 convention
     // e.g., "Observation.component" -> ID "observationcomponent"
     let element_id = backbone.path.replace(".", "").to_lowercase();
@@ -1216,7 +1368,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
         // Following Telemed5000 convention: property IDs use full dotted path from resource root
         // e.g., "ConceptMap.group.element" property has ID "conceptmap.group.element"
         let parent_path_lower = backbone.path.to_lowercase();
-        generate_property_xml_with_parent(xml, property, &parent_path_lower, valueset_to_codesystem, codeset_id_to_name)?;
+        generate_property_xml_with_parent(xml, property, &parent_path_lower, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
     }
     xml.push_str("          </properties>\n");
 
@@ -1227,7 +1379,7 @@ fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInf
     Ok(())
 }
 
-fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     let element_id = complex_type.type_name.to_lowercase();
 
     xml.push_str(&format!("    <element id=\"{}\" name=\"{}\">\n", element_id, complex_type.name));
@@ -1290,7 +1442,7 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, va
                     is_modifier: elem.is_modifier.unwrap_or(false),
                 };
 
-                generate_property_xml(xml, &element_info, &complex_type.name, valueset_to_codesystem, codeset_id_to_name)?;
+                generate_property_xml(xml, &element_info, &complex_type.name, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
             }
         }
     }
@@ -1303,13 +1455,13 @@ fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, va
     Ok(())
 }
 
-fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Follow Telemed5000 naming convention: {resource_lowercase}.{property_lowercase}
     let parent_id = resource_name.to_lowercase();
-    generate_property_xml_with_parent(xml, element, &parent_id, valueset_to_codesystem, codeset_id_to_name)
+    generate_property_xml_with_parent(xml, element, &parent_id, valueset_to_codesystem, codeset_id_to_name, valid_ids)
 }
 
-fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Check if this property refers to a BackboneElement
     // If so, replace "BackboneElement" with the specific backbone element ID
     if element.types.len() == 1 && element.types[0].code == "BackboneElement" {
@@ -1322,15 +1474,15 @@ fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, 
                 code: backbone_element_id,
                 target_resources: vec![],
             }];
-            return generate_property_xml(xml, &modified_element, resource_name, valueset_to_codesystem, codeset_id_to_name);
+            return generate_property_xml(xml, &modified_element, resource_name, valueset_to_codesystem, codeset_id_to_name, valid_ids);
         }
     }
 
     // Not a backbone element, generate normally
-    generate_property_xml(xml, element, resource_name, valueset_to_codesystem, codeset_id_to_name)
+    generate_property_xml(xml, element, resource_name, valueset_to_codesystem, codeset_id_to_name, valid_ids)
 }
 
-fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Remove [x] suffix from choice types (e.g., deceased[x] -> deceased)
     let property_name_clean = element.name.replace("[x]", "");
     let property_id = format!("{}.{}",
@@ -1409,7 +1561,7 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
         if fhir_type == "element" {
             // Complex type - add ref attribute
             let element_ref = fhir_type_to_element_ref(&element.types[0].code);
-            xml.push_str(&format!(
+            let property_element = format!(
                 "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
                 element.name,
                 attr_if_not_default("type", fhir_type, "string"),
@@ -1420,7 +1572,8 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
                 attr_bool_if_not_default("modifier", element.is_modifier, false),
                 property_id,
                 escape_xml(&element.description)
-            ));
+            );
+            xml.push_str(&maybe_comment_invalid_ref(&property_element, &element_ref, valid_ids));
         } else if fhir_type == "code" && resolved_binding.is_some() {
             // Code type with ValueSet binding - add ref to codeset using resolved binding
             let binding_name = resolved_binding.as_ref().unwrap();
@@ -1484,7 +1637,7 @@ fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, pa
     Ok(())
 }
 
-fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str, property_type_map: &HashMap<String, String>) -> Result<(), Box<dyn std::error::Error>> {
+fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str, property_type_map: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the expression to generate paths
     // Handle OR expressions by splitting on "|"
     let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
@@ -1554,7 +1707,8 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
         // Parse the expression and generate parts and casts
         let (parts, casts) = parse_fhirpath_expression(expr, property_type_map);
         for part_ref in &parts {
-            xml.push_str(&format!("                <part ref=\"{}\"/>\n", part_ref));
+            let part_element = format!("                <part ref=\"{}\"/>\n", part_ref);
+            xml.push_str(&maybe_comment_invalid_ref(&part_element, part_ref, valid_ids));
         }
 
         xml.push_str("              </parts>\n");
@@ -1579,8 +1733,6 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
 
         // Generate components for composite search parameters
         if param.is_composite && !param.components.is_empty() {
-            xml.push_str("              <components>\n");
-
             // Determine the prefix for component refs based on cast types
             // If the base expression has a cast (e.g., ".ofType(Ratio)"), the component refs
             // are relative to the cast type, not the base path.
@@ -1595,18 +1747,34 @@ fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name:
                 parse_base_path(&param.expression)
             };
 
-            for component in &param.components {
-                // Parse component expression to build property ref
+            // Check if any components are valid first
+            let component_refs: Vec<_> = param.components.iter().map(|component| {
                 let component_path = parse_component_path(&component.expression);
-                let component_ref = if component_prefix.is_empty() {
+                if component_prefix.is_empty() {
                     component_path
                 } else {
                     format!("{}.{}", component_prefix, component_path)
-                };
+                }
+            }).collect();
 
-                xml.push_str(&format!("                <component ref=\"{}\"/>\n", component_ref));
+            let has_valid_component = component_refs.iter().any(|ref_id| valid_ids.contains(ref_id));
+
+            if has_valid_component {
+                // Generate normal <components> block with individual comments for invalid refs
+                xml.push_str("              <components>\n");
+                for (component, component_ref) in param.components.iter().zip(component_refs.iter()) {
+                    let component_element = format!("                <component ref=\"{}\"/>\n", component_ref);
+                    xml.push_str(&maybe_comment_invalid_ref(&component_element, component_ref, valid_ids));
+                }
+                xml.push_str("              </components>\n");
+            } else {
+                // Comment out entire components block (no nested comments)
+                xml.push_str("              <!-- INVALID COMPONENTS BLOCK - all refs invalid:\n");
+                for component_ref in &component_refs {
+                    xml.push_str(&format!("                INVALID REF: {} - <component ref=\"{}\"/>\n", component_ref, component_ref));
+                }
+                xml.push_str("              -->\n");
             }
-            xml.push_str("              </components>\n");
         }
 
         xml.push_str("            </path>\n");
