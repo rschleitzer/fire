@@ -13,21 +13,22 @@ CREATE TABLE "table-name" (
     -- Extracted search parameters (indexed)
 "(for-selected-children-of searches "search" (lambda (search)
     (let ((search-name (% "name" search))
-          (search-type (% "type" search)))
+          (search-type (% "type" search))
+          (is-collection (search-is-collection? search)))
       (if (not (string=? "_lastUpdated" search-name))
           (case search-type
             (("string")
-              ($"    "(string-replace search-name "-" "_")"_name TEXT[],
+              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              ($"    "(string-replace search-name "-" "_")"_system TEXT[],
-    "(string-replace search-name "-" "_")"_code TEXT[],
+              ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")"_code TEXT"(if is-collection "[]" "")",
 "))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
             (("reference")
-              ($"    "(string-replace search-name "-" "_")"_reference TEXT[] DEFAULT '{}',
+              ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
 "))
             (else ""))
           ""))))
@@ -49,21 +50,22 @@ CREATE TABLE "table-name"_history (
     -- Same search parameters as current
 "(for-selected-children-of searches "search" (lambda (search)
     (let ((search-name (% "name" search))
-          (search-type (% "type" search)))
+          (search-type (% "type" search))
+          (is-collection (search-is-collection? search)))
       (if (not (string=? "_lastUpdated" search-name))
           (case search-type
             (("string")
-              ($"    "(string-replace search-name "-" "_")"_name TEXT[],
+              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              ($"    "(string-replace search-name "-" "_")"_system TEXT[],
-    "(string-replace search-name "-" "_")"_code TEXT[],
+              ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")"_code TEXT"(if is-collection "[]" "")",
 "))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
             (("reference")
-              ($"    "(string-replace search-name "-" "_")"_reference TEXT[] DEFAULT '{}',
+              ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
 "))
             (else ""))
           ""))))
