@@ -390,20 +390,343 @@ When building a new DSSSL generator from scratch, start with a **dumb template**
 
 **Example workflow:**
 ```scheme
-; Step 1: Dumb template (hardcoded SQL)
+; Step 1: Dumb template (hardcoded SQL for all 3 resources)
 (define (migration)
   (file "migrations/001_initial_schema.sql"
-        ($"CREATE TABLE patient (
+        ($"CREATE TABLE patient (...);")))
+
+; Step 2: Keep only most feature-rich resource (Observation)
+; Step 3: Make dynamic with resource iteration
+; Step 4: Make columns dynamic from XML search parameters
+```
+
+#### Step 1: Choose the Most Feature-Rich Resource as Template
+
+After creating the dumb template with hardcoded SQL, analyze which resource has the most diverse features to use as the template:
+
+```bash
+# Count search parameters per resource
+Patient: 9 search parameters (family, given, identifier, birthdate, gender, active, etc.)
+Observation: 18 search parameters (status, category, code, subject, value, effective, etc.)
+Practitioner: 8 search parameters (family, given, identifier, telecom, active, etc.)
+
+# Decision: Keep Observation (most feature-rich)
+```
+
+**Why keep the most feature-rich resource:**
+- If template handles Observation (complex), it can handle simpler resources
+- Tests all feature types: multiple arrays, dates, references, tokens
+- Reduces risk of missing edge cases
+- Observation has twice as many search params as the others
+
+**Action**: Remove Patient and Practitioner sections from the dumb template, keeping only Observation.
+
+```scheme
+(define (migration)
+  (file "migrations/001_initial_schema.sql"
+        ($"-- Create observation current table
+CREATE TABLE observation (
     id TEXT PRIMARY KEY,
     version_id INTEGER NOT NULL DEFAULT 1,
-    -- ... rest of hardcoded SQL ...
-")))
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
 
-; Step 2: Make dynamic (replace one table at a time)
+    -- Extracted search parameters (indexed)
+    status TEXT,
+    category_system TEXT[],
+    category_code TEXT[],
+    code_system TEXT,
+    code_code TEXT,
+    subject_reference TEXT,
+    -- ... all observation columns ...
+);
+
+-- Create indexes for current table
+CREATE INDEX idx_observation_status ON observation (status);
+CREATE INDEX idx_observation_category_code ON observation USING GIN (category_code);
+-- ... all observation indexes ...
+
+-- Create observation history table
+CREATE TABLE observation_history (
+    id TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL,
+    content JSONB NOT NULL,
+
+    -- Same search parameters as current
+    status TEXT,
+    category_system TEXT[],
+    -- ... all observation columns ...
+
+    -- History metadata
+    history_operation VARCHAR(10) NOT NULL,
+    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, version_id)
+);
+
+-- Create indexes for history table
+CREATE INDEX idx_observation_history_id ON observation_history (id);
+-- ... all history indexes ...
+")))
+```
+
+#### Step 2: Make Table Names Dynamic and Iterate Over Resources
+
+Replace all hardcoded "observation" strings with a `table-name` variable and wrap in resource iteration:
+
+```scheme
 (define (migration)
   (file "migrations/001_initial_schema.sql"
-        (apply $ (map generate-table-sql
-                      (node-list->list (select-elements (children (current-node)) "resource"))))))
+        (for-active-resources (lambda (resource)
+          (let ((table-name (downcase-string (name-of resource))))
+            ($"-- Create "table-name" current table
+CREATE TABLE "table-name" (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
+
+    -- Extracted search parameters (indexed)
+    status TEXT,
+    category_system TEXT[],
+    -- ... still hardcoded observation columns ...
+);
+
+-- Create indexes for current table
+CREATE INDEX idx_"table-name"_status ON "table-name" (status);
+CREATE INDEX idx_"table-name"_category_code ON "table-name" USING GIN (category_code);
+-- ... all indexes now use dynamic table-name ...
+
+-- Create "table-name" history table
+CREATE TABLE "table-name"_history (
+    id TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL,
+    content JSONB NOT NULL,
+
+    -- Same search parameters as current
+    status TEXT,
+    category_system TEXT[],
+    -- ... still hardcoded observation columns ...
+
+    -- History metadata
+    history_operation VARCHAR(10) NOT NULL,
+    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, version_id)
+);
+
+-- Create indexes for history table
+CREATE INDEX idx_"table-name"_history_id ON "table-name"_history (id);
+-- ... all indexes now use dynamic table-name ...
+
+"))))))
+```
+
+**Key points:**
+- Use `for-active-resources` to iterate over resources with `active="true"`
+- Use inline lambda to maintain template character
+- Use inverted string pattern: `"text"table-name"more-text"` (no spaces around variables)
+- All "observation" strings replaced with `table-name` variable
+
+**Test:**
+```bash
+./fire.sh
+grep -E '^-- Create [a-z]+ current table' migrations/001_initial_schema.sql
+# Output: observation, patient, practitioner (all 3 resources generated!)
+```
+
+#### Step 3: Make Columns Dynamic from Search Parameters
+
+Replace hardcoded column definitions with dynamic generation based on each resource's search parameters from XML:
+
+```scheme
+(define (migration)
+  (file "migrations/001_initial_schema.sql"
+        (for-active-resources (lambda (resource)
+          (let ((table-name (downcase-string (name-of resource)))
+                (searches (select-children "searches" resource)))
+            ($"-- Create "table-name" current table
+CREATE TABLE "table-name" (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
+
+    -- Extracted search parameters (indexed)
+"(for-selected-children-of searches "search" (lambda (search)
+    (let ((search-name (% "name" search))
+          (search-type (% "type" search)))
+      (if (not (string=? "_lastUpdated" search-name))
+          (case search-type
+            (("string")
+              ($"    "(string-replace search-name "-" "_")"_name TEXT[],
+"))
+            (("token")
+              ($"    "(string-replace search-name "-" "_")"_system TEXT[],
+    "(string-replace search-name "-" "_")"_value TEXT[],
+"))
+            (("date")
+              ($"    "(string-replace search-name "-" "_")" DATE,
+"))
+            (("reference")
+              ($"    "(string-replace search-name "-" "_")"_reference TEXT[] DEFAULT '{}',
+"))
+            (else ""))
+          ""))))
+");
+
+-- Create indexes for current table
+CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
+
+-- Create GIN index for JSONB content
+CREATE INDEX idx_"table-name"_content ON "table-name" USING GIN (content);
+
+-- Create "table-name" history table
+CREATE TABLE "table-name"_history (
+    id TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL,
+    content JSONB NOT NULL,
+
+    -- Same search parameters as current
+"(for-selected-children-of searches "search" (lambda (search)
+    (let ((search-name (% "name" search))
+          (search-type (% "type" search)))
+      (if (not (string=? "_lastUpdated" search-name))
+          (case search-type
+            (("string")
+              ($"    "(string-replace search-name "-" "_")"_name TEXT[],
+"))
+            (("token")
+              ($"    "(string-replace search-name "-" "_")"_system TEXT[],
+    "(string-replace search-name "-" "_")"_value TEXT[],
+"))
+            (("date")
+              ($"    "(string-replace search-name "-" "_")" DATE,
+"))
+            (("reference")
+              ($"    "(string-replace search-name "-" "_")"_reference TEXT[] DEFAULT '{}',
+"))
+            (else ""))
+          ""))))
+"
+    -- History metadata
+    history_operation VARCHAR(10) NOT NULL,
+    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, version_id)
+);
+
+-- Create indexes for history table
+CREATE INDEX idx_"table-name"_history_id ON "table-name"_history (id);
+CREATE INDEX idx_"table-name"_history_timestamp ON "table-name"_history (history_timestamp);
+CREATE INDEX idx_"table-name"_history_last_updated ON "table-name"_history (last_updated);
+
+-- Create GIN index for JSONB content in history
+CREATE INDEX idx_"table-name"_history_content ON "table-name"_history USING GIN (content);
+
+"))))))
+```
+
+**Search Type to Column Mapping:**
+
+| Search Type | Column Pattern | Example |
+|-------------|----------------|---------|
+| `string` | `{name}_name TEXT[]` | `family` → `family_name TEXT[]` |
+| `token` | `{name}_system TEXT[]`<br>`{name}_value TEXT[]` | `identifier` → `identifier_system TEXT[]`<br>`identifier_value TEXT[]` |
+| `date` | `{name} DATE` | `birthdate` → `birthdate DATE` |
+| `reference` | `{name}_reference TEXT[] DEFAULT '{}'` | `general-practitioner` → `general_practitioner_reference TEXT[] DEFAULT '{}'` |
+
+**Key techniques:**
+- **Nested lambdas** - Outer for resources, inner for search parameters
+- **Conditional logic** - Skip `_lastUpdated` (handled by `last_updated` column)
+- **String transformation** - `string-replace` converts hyphens to underscores
+- **Case statement** - Pattern match on search type to generate appropriate columns
+- **Inverted string pattern** - Maintained throughout with no spaces
+- **Template character** - All logic inline, no extracted helper functions
+
+**Test:**
+```bash
+./fire.sh
+head -40 migrations/001_initial_schema.sql
+
+# Output shows dynamic columns:
+# Patient gets: active_system/value, family_name, given_name, birthdate, etc.
+# Observation gets: code_system/value, status_system/value, date, etc.
+# Each resource has columns matching its search parameters!
+```
+
+**Current State:**
+- ✅ Columns generate dynamically from XML search parameters
+- ✅ Each resource gets its own unique column set
+- ✅ Type-based column generation works (string, token, date, reference)
+- ❌ Column names don't perfectly match actual migration yet (refinement needed)
+- ❌ Indexes still minimal (need dynamic generation per column)
+
+**Next steps:**
+- Refine column naming rules to match actual extractor implementations
+- Generate indexes dynamically based on column types
+- Handle special cases (composite searches, quantity searches, etc.)
+
+### Inverted String Pattern
+
+When dynamically building strings in DSSSL, maintain the **"inverted string" pattern** where variable insertions are directly adjacent to string literal boundaries with no spaces:
+
+**Pattern Rule**: `"string-content"variable"more-content"`
+
+The quotes "invert" or "flip" around the variable insertion point, creating a visual rhythm.
+
+**Examples**:
+
+```scheme
+;; CORRECT - No spaces around variables
+(let ((table-name "observation"))
+  ($"CREATE TABLE "table-name" ("))
+
+;; Output: CREATE TABLE observation (
+
+;; WRONG - Spaces break the visual pattern
+(let ((table-name "observation"))
+  ($"CREATE TABLE " table-name " ("))
+
+;; Still produces same output, but breaks the pattern
+```
+
+**Why this pattern matters**:
+- **Visual consistency** - Easy to scan and identify variable insertion points
+- **Clear boundaries** - Quotes mark exact transition between literal and dynamic content
+- **Less ambiguity** - No confusion about where spaces come from (literal vs variable)
+- **Proven at scale** - This pattern used in production DSSSL code generators
+
+**More examples**:
+
+```scheme
+;; Index names - no spaces around variables
+($"CREATE INDEX idx_"table-name"_"column-name" ON "table-name" ("column-name");")
+
+;; Comments with variables
+($"-- Create "resource-name" current table
+")
+
+;; Column definitions
+($"    "column-name" "column-type",
+")
+```
+
+**When spaces ARE needed**, they're part of the literal string on one side:
+
+```scheme
+;; Space AFTER variable (before next word)
+($"pub struct "struct-name" {
+")
+;;                          ^space in literal
+
+;; Space BEFORE variable (after previous word)
+($"impl "trait-name" for "struct-name" {
+")
+;;     ^space in literal    ^space in literal
 ```
 
 ### Core String Manipulation
