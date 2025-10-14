@@ -85,3 +85,91 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         content.clone()
     }
 }
+
+/// Extract search parameters from FHIR Practitioner JSON
+pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearchParams {
+    let mut params = PractitionerSearchParams::default();
+
+    // Extract names
+    if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
+        for name in names {
+            // Extract family
+            if let Some(family) = name.get("family").and_then(|f| f.as_str()) {
+                params.family_name.push(family.to_string());
+            }
+
+            // Extract given names
+            if let Some(given) = name.get("given").and_then(|g| g.as_array()) {
+                for g in given {
+                    if let Some(given_str) = g.as_str() {
+                        params.given_name.push(given_str.to_string());
+                    }
+                }
+            }
+
+            // Extract prefix (Dr., Mr., Ms., etc.)
+            if let Some(prefix) = name.get("prefix").and_then(|p| p.as_array()) {
+                for p in prefix {
+                    if let Some(prefix_str) = p.as_str() {
+                        params.prefix.push(prefix_str.to_string());
+                    }
+                }
+            }
+
+            // Extract suffix (Jr., Sr., III, etc.)
+            if let Some(suffix) = name.get("suffix").and_then(|s| s.as_array()) {
+                for s in suffix {
+                    if let Some(suffix_str) = s.as_str() {
+                        params.suffix.push(suffix_str.to_string());
+                    }
+                }
+            }
+
+            // Extract text (full name as text)
+            if let Some(text) = name.get("text").and_then(|t| t.as_str()) {
+                params.name_text.push(text.to_string());
+            }
+        }
+    }
+
+    // Extract identifiers
+    if let Some(identifiers) = content.get("identifier").and_then(|i| i.as_array()) {
+        for identifier in identifiers {
+            if let Some(system) = identifier.get("system").and_then(|s| s.as_str()) {
+                params.identifier_system.push(system.to_string());
+            }
+            if let Some(value) = identifier.get("value").and_then(|v| v.as_str()) {
+                params.identifier_value.push(value.to_string());
+            }
+        }
+    }
+
+    // Extract telecom
+    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
+        for telecom in telecoms {
+            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
+                params.telecom_value.push(value.to_string());
+            }
+        }
+    }
+
+    // Extract active
+    if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
+        params.active = Some(active);
+    }
+
+    params
+}
+
+#[derive(Debug, Default)]
+pub struct PractitionerSearchParams {
+    pub family_name: Vec<String>,
+    pub given_name: Vec<String>,
+    pub prefix: Vec<String>,
+    pub suffix: Vec<String>,
+    pub name_text: Vec<String>,
+    pub identifier_system: Vec<String>,
+    pub identifier_value: Vec<String>,
+    pub telecom_value: Vec<String>,
+    pub active: Option<bool>,
+}
