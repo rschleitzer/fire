@@ -859,57 +859,504 @@ The special character is followed by `""` which breaks the SGML sequence: the fi
         (else "JSONB")))  ; Complex types stored as JSON
 ```
 
-### Generation Examples
+### Real-World Patterns from Fire Generators
 
-**Generate Rust Struct:**
+#### Pattern: Trailing Comma Logic
+
+When generating lists of items (columns, indexes, etc.) where the last item shouldn't have a trailing comma, use helper functions to detect following siblings:
+
 ```scheme
-(element resource
-    (file ($ "src/models/" (downcase-string (name)) ".rs")
-        ($
-"use chrono::{DateTime, NaiveDate, Utc};
-use serde::{Deserialize, Serialize};
+; Check if there are any following siblings that will generate output
+(define (has-output-following-siblings? search)
+    (let loop ((sibling (ifollow search)))
+      (cond
+        ((node-list-empty? sibling) #f)
+        ((string=? "composite" (% "type" sibling))
+         (loop (ifollow sibling)))
+        ((string=? "special" (% "type" sibling))
+         (loop (ifollow sibling)))
+        (else #t))))
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct " (name) " {
-    pub id: Option<String>,
-    pub meta: Option<Meta>,
-"
-            (for-selected-children "element" (lambda (elem)
-                (let ((elem-name (name-of elem))
-                      (elem-type (rust-type (type-of elem)))
-                      (is-array (string=? "0..*" (% "cardinality" elem))))
-                    ($
-"    pub " (escape-rust-keyword elem-name) ": "
-                        (if is-array "Vec<" "Option<")
-                        elem-type
-                        (if is-array ">" ">")
-                        ",\n"))))
-"}\n")))
+; Return comma or empty string based on following siblings
+(define (trailing-comma search)
+    (if (has-output-following-siblings? search) "," ""))
+
+; Usage in generation:
+(for-selected-children "search" (lambda (search)
+    ($"    "column-name" "column-type(trailing-comma search)"
+")))
 ```
 
-**Generate SQL Tables:**
-```scheme
-(define (generate-tables resource)
-    (let ((table-name (downcase-string (name-of resource)))
-          (search-params (select-children "searchParam" resource)))
-        ($
-"CREATE TABLE " table-name " (
-    id TEXT PRIMARY KEY,
-    version_id INTEGER NOT NULL,
-    last_updated TIMESTAMPTZ NOT NULL,
-    content JSONB NOT NULL,
+**Why this works:**
+- Skips siblings that don't generate output (composite, special)
+- Returns `","` if more output-generating items follow
+- Returns `""` if this is the last item
+- Eliminates trailing comma on final item
 
-    -- Search parameters
+#### Pattern: Property Path Navigation
+
+Navigate from search parameters to their underlying property definitions:
+
+```scheme
+; Get the property node referenced by a search parameter
+(define (search-property search)
+    (let* ((paths-node (select-children "paths" search))
+           (path-nodes (if (node-list-empty? paths-node)
+                          (empty-node-list)
+                          (select-children "path" (node-list-first paths-node))))
+           (first-path (if (node-list-empty? path-nodes)
+                          #f
+                          (node-list-first path-nodes)))
+           (parts-node (if first-path (select-children "parts" first-path) (empty-node-list)))
+           (part-nodes (if (node-list-empty? parts-node)
+                          (empty-node-list)
+                          (select-children "part" (node-list-first parts-node))))
+           (first-part (if (node-list-empty? part-nodes)
+                          #f
+                          (node-list-first part-nodes)))
+           (part-ref (if first-part (% "ref" first-part) #f)))
+      (if part-ref (element-with-id part-ref) #f)))
+
+; Usage: Check if property is a collection
+(define (search-is-collection? search)
+    (let ((property (search-property search)))
+      (if property
+          (true? "iscollection" property)
+          #f)))
+
+; Usage: Check if property is an Identifier type
+(define (search-is-identifier? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "identifier" ref-attr)
+                #f))
+          #f)))
+```
+
+**Why this works:**
+- `search` → `paths` → `path` → `parts` → `part` → `ref` → property
+- Each step checks for empty node-list to avoid errors
+- Uses `element-with-id` to resolve IDREF to actual element
+- Returns `#f` if navigation fails at any point
+
+#### Pattern: Active Resource Filtering
+
+Filter resources based on `active` attribute to control which resources generate code:
+
+```scheme
+; Check if resource should be included in generation
+(define (active? resource)
+    (or (true? "active" resource)
+        (and complete-fhir?
+             (not (or (not (name-of resource))
+                     (string=? "Resource" (name-of resource)))))))
+
+; Get list of active resources
+(define (active-resources)
+    (node-list-filter (lambda (resource) (active? resource))
+                      (children (current-node))))
+
+; Iterate over active resources
+(define (for-active-resources func)
+    (for (active-resources) func))
+
+; Usage in generator:
+(element resources
+  (sosofo-append
+    (file "migrations/001_initial_schema.sql"
+      (for-active-resources (lambda (resource)
+        ; Generate SQL for each active resource
+        )))
+    (process-children)))
+```
+
+**Why this works:**
+- Only generates code for resources marked `active="true"`
+- Supports `complete-fhir?` flag for generating all resources
+- Excludes base `Resource` type (not a concrete resource)
+- Filters at iteration time, not generation time
+
+#### Pattern: Boolean Attribute Checking
+
+Safely check boolean attributes with string comparison:
+
+```scheme
+; Check if attribute is "true"
+(define (true? attribute node)
+    (let ((attrstring (% attribute node)))
+      (if attrstring
+          (string=? "true" attrstring)
+          #f)))
+
+; Check if attribute is "false"
+(define (false? attribute node)
+    (let ((attrstring (% attribute node)))
+      (if attrstring
+          (string=? "false" attrstring)
+          #f)))
+
+; Usage:
+(if (true? "iscollection" property)
+    ($ column-name" TEXT[]")
+    ($ column-name" TEXT"))
+```
+
+**Why this works:**
+- Attributes are strings, not booleans
+- Missing attributes return `#f` (not `""`)
+- Explicit string comparison avoids surprises
+- Returns Scheme boolean for use in `if` expressions
+
+#### Pattern: Node List Filtering
+
+Filter node lists with custom predicates:
+
+```scheme
+; Filter resources with search parameters
+(define (active-resources-with-searches)
+    (node-list-filter
+      (lambda (resource)
+        (not (node-list-empty?
+               (children (select-children "searches" resource)))))
+      (active-resources)))
+
+; Filter for reference-type searches
+(define (reference-searches-of resource)
+    (node-list-filter
+      (lambda (search)
+        (case (% "type" search)
+          (("reference") #t)
+          (else #f)))
+      (children (select-children "searches" resource))))
+
+; Usage:
+(for (reference-searches-of resource) (lambda (search)
+    ; Generate columns for reference searches only
+    ))
+```
+
+**Why this works:**
+- `node-list-filter` takes predicate lambda
+- Predicate returns `#t` or `#f`
+- Returns filtered node-list (not list)
+- Can chain with other node-list functions
+
+#### Pattern: Conditional Column Generation
+
+Generate different columns based on property type characteristics:
+
+```scheme
+; Example: Token searches can be simple codes or complex Coding/CodeableConcept
+(case (% "type" search)
+  (("token")
+    (if (search-is-simple-code? search)
+        ; Simple code type - single column
+        ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",
+")
+        ; Coding/CodeableConcept/Identifier - system and code/value columns
+        (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+          ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+"))))
+  (("reference")
+    ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
+"))
+  (else ""))
+```
+
+**Why this works:**
+- Nested `if` expressions select between column structures
+- Inner `let` bindings compute derived values (e.g., `token-suffix`)
+- Conditional array suffix `[]` applied based on `is-collection` check
+- Each branch returns complete column definition string
+
+#### Pattern: Variant Type Handling
+
+Handle FHIR choice types (like `value[x]`) that can be multiple types:
+
+```scheme
+; Date searches can be date, dateTime, instant, or Period
+(let* ((property (search-property search))
+       (has-variants (property-has-variants? property))
+       (variants (if has-variants (property-variants property) (empty-node-list)))
+       (variant-list (node-list->list variants))
+       (variant-types (map (lambda (v) (% "type" v)) variant-list))
+       (has-datetime (or (member "dateTime" variant-types) (member "instant" variant-types)))
+       (has-period (let loop ((vlist variant-list))
+                     (cond ((null? vlist) #f)
+                           ((and (string=? "element" (% "type" (car vlist)))
+                                 (string=? "period" (% "ref" (car vlist)))) #t)
+                           (else (loop (cdr vlist)))))))
+  (if has-variants
+      ($
+        (if has-datetime ($"    "col-name"_datetime TIMESTAMPTZ,
+")"")
+        (if has-period ($"    "col-name"_period_start TIMESTAMPTZ,
+    "col-name"_period_end TIMESTAMPTZ,
+")""))
+      ($"    "col-name" DATE,
+")))
+```
+
+**Why this works:**
+- `let*` allows sequential bindings where later bindings depend on earlier ones
+- Convert node-list to Scheme list for use with standard list functions
+- `member` function checks if value exists in list
+- Custom loop with `cond` checks complex conditions (element type AND ref value)
+- Generate different columns based on which variants exist
+- Single date field for simple dates, separate columns for complex Period types
+
+**Real-world example from Fire:**
+- `Observation.effective[x]` can be `effectiveDateTime`, `effectivePeriod`, or `effectiveInstant`
+- Generates `effective_datetime TIMESTAMPTZ` for dateTime/instant variants
+- Generates `effective_period_start` and `effective_period_end` for Period variant
+- Patient.birthDate (no variants) just gets `birthdate DATE`
+
+#### Pattern: Conditional Index Generation
+
+Generate appropriate index types based on column characteristics:
+
+```scheme
+; Array columns use GIN indexes, scalars use BTREE (default)
+(case search-type
+  (("string")
+    ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name
+      (if is-collection " USING GIN" "")
+      " ("col-name"_name);
+"))
+  (("reference")
+    ($"CREATE INDEX idx_"table-name"_"col-name"_reference ON "table-name
+      (if is-collection " USING GIN" "")
+      " ("col-name"_reference);
+"))
+  (("date")
+    (if has-period
+        ; Composite index for period ranges
+        ($"CREATE INDEX idx_"table-name"_"col-name"_period ON "table-name
+          " ("col-name"_period_start, "col-name"_period_end);
+")
+        ; Single index for simple dates
+        ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name
+          " ("col-name");
+"))))
+```
+
+**Why this works:**
+- GIN indexes required for array columns (TEXT[], efficient for array contains/overlap)
+- BTREE indexes (PostgreSQL default) used for scalar columns (efficient for equality/range)
+- Composite indexes for period ranges (start, end) support range queries
+- Index strategy matches column type and query patterns
+
+#### Pattern: Composable Helper Functions
+
+Build complex queries by composing small, single-purpose helper functions:
+
+```scheme
+; Base helper: Get property from search parameter
+(define (search-property search)
+    (let* ((paths-node (select-children "paths" search))
+           (path-nodes (if (node-list-empty? paths-node)
+                          (empty-node-list)
+                          (select-children "path" (node-list-first paths-node))))
+           (first-path (if (node-list-empty? path-nodes)
+                          #f
+                          (node-list-first path-nodes)))
+           (parts-node (if first-path (select-children "parts" first-path) (empty-node-list)))
+           (part-nodes (if (node-list-empty? parts-node)
+                          (empty-node-list)
+                          (select-children "part" (node-list-first parts-node))))
+           (first-part (if (node-list-empty? part-nodes)
+                          #f
+                          (node-list-first part-nodes)))
+           (part-ref (if first-part (% "ref" first-part) #f)))
+      (if part-ref (element-with-id part-ref) #f)))
+
+; Composed helper: Check if search references a collection
+(define (search-is-collection? search)
+    (let ((property (search-property search)))
+      (if property
+          (true? "iscollection" property)
+          #f)))
+
+; Composed helper: Check if property is Identifier type
+(define (search-is-identifier? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "identifier" ref-attr)
+                #f))
+          #f)))
+
+; Composed helper: Check if property has choice type variants
+(define (property-has-variants? property)
+    (if property
+        (let ((variants-node (select-children "variants" property)))
+          (not (node-list-empty? variants-node)))
+        #f))
+
+; Composed helper: Get variants from property
+(define (property-variants property)
+    (if property
+        (let ((variants-node (select-children "variants" property)))
+          (if (not (node-list-empty? variants-node))
+              (select-children "variant" (node-list-first variants-node))
+              (empty-node-list)))
+        (empty-node-list)))
+
+; Usage in generator - compose helpers for readable code
+(let ((property (search-property search))
+      (is-collection (search-is-collection? search))
+      (has-variants (property-has-variants? property))
+      (variants (property-variants property)))
+  ; Generate columns based on composed checks
+  )
+```
+
+**Why this works:**
+- **Single Responsibility** - Each helper does one thing well
+- **Composability** - Combine helpers to build complex queries
+- **Reusability** - Same helpers used across multiple generators
+- **Readability** - Intent clear from function names
+- **Testability** - Small functions easier to validate
+- **Safe** - Each helper handles missing/empty cases with `#f` or `empty-node-list`
+
+**Real-world example from Fire:**
+```scheme
+; In migration.scm column generation
+(let ((search-name (% "name" search))
+      (search-type (% "type" search))
+      (is-collection (search-is-collection? search)))  ; Composed helper
+  (case search-type
+    (("token")
+      (if (search-is-simple-code? search)              ; Composed helper
+          ; Single column for code/boolean
+          ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",")
+          ; Two columns for Coding/CodeableConcept
+          (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))  ; Composed helper
+            ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")","))))))
+```
+
+The generator code reads like English:
+- "If this is a simple code..."
+- "If this is an identifier..."
+- "If this is a collection..."
+
+**Helper function naming conventions:**
+- `search-X?` - Predicates returning `#t`/`#f` for search parameters
+- `property-X?` - Predicates for properties
+- `X-of` - Extract child elements (e.g., `reference-searches-of`)
+- `for-X` - Iteration helpers (e.g., `for-active-resources`)
+- `has-X?` - Existence checks (e.g., `has-output-following-siblings?`)
+
+#### Pattern Selection Guide
+
+When building a new generator, apply these patterns in order:
+
+1. **Start with Dumb Template** (see earlier section)
+   - Copy desired output into string literal
+   - Escape special characters (`<""`, `&""`)
+   - Verify generation produces identical output
+
+2. **Make Resource Names Dynamic**
+   - Use `for-active-resources` to iterate
+   - Replace hardcoded names with `(name-of resource)` and `(downcase-string ...)`
+   - Use inverted string pattern throughout
+
+3. **Make Columns/Fields Dynamic**
+   - Iterate over search parameters or properties
+   - Use `case` statements to handle different types
+   - Use helper functions for property inspection
+
+4. **Handle Variants and Collections**
+   - Use `property-has-variants?` and `property-variants`
+   - Use `search-is-collection?` for array vs scalar
+   - Use `let*` for sequential bindings when checking variants
+
+5. **Add Conditional Logic**
+   - Use `if` for binary choices (array suffix, index type)
+   - Use nested `let` for computed values (token suffix)
+   - Keep conditionals close to where values are used
+
+6. **Implement Trailing Commas**
+   - Use `has-output-following-siblings?` helper
+   - Apply `(trailing-comma search)` at end of each item
+   - Handle special cases where commas depend on multiple conditions
+
+7. **Compose Helpers**
+   - Extract repeated logic into named functions
+   - Build complex helpers from simpler ones
+   - Follow naming conventions for clarity
+
+**When to extract a helper function:**
+- Logic is used in 2+ places
+- Logic is complex (>3 nested levels)
+- Logic has a clear single purpose
+- You can give it a clear name
+
+**When to keep logic inline:**
+- Used only once
+- Simple 1-2 line logic
+- Tightly coupled to context
+- Would require many parameters
+
+### Generation Examples
+
+**Real struct generator from Fire:**
+```scheme
+(define (struct)
+  (let ((resource-name (name-of (current-node)))
+        (table-name (downcase-string (name-of (current-node)))))
+    (file ($ "src/models/" table-name ".rs")
+            ($"use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use sqlx::FromRow;
+
+use super::traits::VersionedResource;
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct "resource-name" {
+    pub id: String,
+    pub version_id: i32,
+    pub last_updated: DateTime<""Utc>,
+    #[serde(flatten)]
+    pub content: Value,
+}
+
+pub fn inject_id_meta(content: &""Value, id: &""str, version_id: i32, last_updated: &""DateTime<""Utc>) -> Value {
+    // ... implementation ...
+}
+"))))
+```
+
+**Real migration generator pattern from Fire:**
+```scheme
+; In migration.scm
+(for-active-resources (lambda (resource)
+  (let ((table-name (downcase-string (name-of resource)))
+        (searches (select-children "searches" resource)))
+    ($"CREATE TABLE "table-name" (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
 "
-            (for search-params (lambda (param)
-                ($ "    " (name-of param) " " (postgres-type (type-of param)) ",\n")))
-"
-    -- Indexes
-    INDEX idx_" table-name "_last_updated (last_updated)
-"
-            (for search-params (lambda (param)
-                ($ "    INDEX idx_" table-name "_" (name-of param) " (" (name-of param) "),\n")))
-");\n")))
+    ; Generate columns for each search parameter
+    (for-selected-children-of searches "search" (lambda (search)
+      (case (% "type" search)
+        (("reference")
+          ($"    "(string-replace (% "name" search) "-" "_")"_reference TEXT[] DEFAULT '{}'"(trailing-comma search)"
+"))
+        (("token")
+          ($"    "(string-replace (% "name" search) "-" "_")"_system TEXT[]"(trailing-comma search)"
+    "(string-replace (% "name" search) "-" "_")"_value TEXT[]"(trailing-comma search)"
+"))
+        (else ""))))
+    ");"))))
 ```
 
 ## Testing with pyrtest
