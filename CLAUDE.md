@@ -225,17 +225,12 @@ onsgmls -s fhir.xml 2>&1 | grep "^onsgmls:" | wc -l
 #   - DTD violations: Element/attribute structure mismatches
 ```
 
-**Current Validation Status (as of contentReference implementation):**
-- **107 errors remaining** (down from 201 initial errors)
-- **94 errors fixed** (47% reduction through type resolution and composite search fixes)
+**Current Validation Status:**
+- ✅ **0 DTD validation errors** - Fully compliant!
+- **3 active resources** - Observation, Patient, Practitioner
+- **Property optimization** - Single variants flattened, multi-variants marked with `type="variant"`
 
-**Remaining Error Categories:**
-1. **Missing codesets** (~60 errors) - CodeSystem names that don't exist or have typos in FHIR R5
-2. **Special FHIR types** (7 errors) - `resourcetype`, `fhiralltypes` need stub codesets
-3. **ElementDefinition references** (~8 errors) - References to ElementDefinition properties
-4. **Complex contentReference cases** (~32 errors) - Nested or multi-level contentReferences
-
-Key validation rules enforced by DTD:
+**Key validation rules enforced by DTD:**
 - **IDREF integrity**: All `ref` attributes must point to valid `id` values
 - **Property references**: Must use binding names (e.g., `ref="triggeredbytype"`)
 - **Codeset IDs**: Generated from CodeSystem.name, not CodeSystem.id
@@ -301,30 +296,35 @@ When adding a new code generator (e.g., `migration.scm`):
 
 ### Phase 4: Generation Script
 
+**File: `fire.sh` (in repo root)**
+
+The existing generation script runs OpenJade to generate code from `fhir.xml`:
+
 ```bash
 #!/bin/bash
-set -e
-
-# Step 1: Convert FHIR JSONs to XML (if needed)
-if [ "$1" == "--rebuild-model" ]; then
-    cargo run --bin fhir-to-xml
-fi
-
-# Step 2: Run OpenJade
-export SGML_CATALOG_FILES="$(pwd)/catalog"
-export SP_CHARSET_FIXED="YES"
-export SP_ENCODING="XML"
+export SP_ENCODING=utf-8
 openjade -t sgml -d codegen/map.dsl fhir.xml
+```
 
-# Step 3: Format generated code
+**Usage:**
+```bash
+# Regenerate fhir.xml from FHIR R5 JSONs (when spec changes)
+cargo run --bin fhir-to-xml
+
+# Validate XML against DTD (should have 0 errors)
+onsgmls -s xml.dcl fhir.xml
+
+# Generate code from fhir.xml
+./fire.sh
+
+# Format generated Rust code
 cargo fmt
 
-# Step 4: Update sqlx metadata
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/fhir_dev \
-    cargo sqlx prepare
-
-echo "✅ Generation complete!"
+# Update sqlx metadata (if database schema changed)
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/fhir_dev cargo sqlx prepare
 ```
+
+**Note:** The script is intentionally minimal - it only runs OpenJade. Other steps (formatting, sqlx prepare) are run manually as needed, allowing for incremental development and easier debugging of generated code.
 
 ### Generated Code Architecture
 

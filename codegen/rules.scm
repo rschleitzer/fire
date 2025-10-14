@@ -13,6 +13,10 @@
         (empty-sosofo))
       (empty-sosofo)))
 
+;; Suppress output from direct children of fhir (except resources)
+(element elements (empty-sosofo))
+(element codesets (empty-sosofo))
+
 (define (generate-rust-model)
   (let ((resource-name (name-of (current-node)))
         (snake-name (downcase-string (name-of (current-node)))))
