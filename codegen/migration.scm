@@ -28,10 +28,16 @@ CREATE TABLE "table-name" (
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
+            (("number")
+              ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
+"))
             (("quantity")
               ($"    "(string-replace search-name "-" "_")"_value NUMERIC(20, 6),
     "(string-replace search-name "-" "_")"_unit TEXT,
     "(string-replace search-name "-" "_")"_system TEXT,
+"))
+            (("uri")
+              ($"    "(string-replace search-name "-" "_")" TEXT,
 "))
             (("reference")
               ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
@@ -71,10 +77,16 @@ CREATE TABLE "table-name"_history (
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
 "))
+            (("number")
+              ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
+"))
             (("quantity")
               ($"    "(string-replace search-name "-" "_")"_value NUMERIC(20, 6),
     "(string-replace search-name "-" "_")"_unit TEXT,
     "(string-replace search-name "-" "_")"_system TEXT,
+"))
+            (("uri")
+              ($"    "(string-replace search-name "-" "_")" TEXT,
 "))
             (("reference")
               ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
