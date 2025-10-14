@@ -1,75 +1,3 @@
--- Create patient current table
-CREATE TABLE patient (
-    id TEXT PRIMARY KEY,
-    version_id INTEGER NOT NULL DEFAULT 1,
-    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    content JSONB NOT NULL,
-
-    -- Extracted search parameters (indexed)
-    family_name TEXT[],
-    given_name TEXT[],
-    prefix TEXT[],
-    suffix TEXT[],
-    name_text TEXT[],
-    identifier_system TEXT[],
-    identifier_value TEXT[],
-    birthdate DATE,
-    gender TEXT,
-    active BOOLEAN,
-    general_practitioner_reference TEXT[] DEFAULT '{}'
-);
-
--- Create indexes for current table
-CREATE INDEX idx_patient_family_name ON patient USING GIN (family_name);
-CREATE INDEX idx_patient_given_name ON patient USING GIN (given_name);
-CREATE INDEX idx_patient_prefix ON patient USING GIN (prefix);
-CREATE INDEX idx_patient_suffix ON patient USING GIN (suffix);
-CREATE INDEX idx_patient_name_text ON patient USING GIN (name_text);
-CREATE INDEX idx_patient_identifier_value ON patient USING GIN (identifier_value);
-CREATE INDEX idx_patient_birthdate ON patient (birthdate);
-CREATE INDEX idx_patient_gender ON patient (gender);
-CREATE INDEX idx_patient_active ON patient (active);
-CREATE INDEX idx_patient_last_updated ON patient (last_updated);
-CREATE INDEX idx_patient_general_practitioner ON patient USING GIN (general_practitioner_reference);
-
--- Create GIN index for JSONB content (for advanced queries)
-CREATE INDEX idx_patient_content ON patient USING GIN (content);
-
--- Create patient history table
-CREATE TABLE patient_history (
-    id TEXT NOT NULL,
-    version_id INTEGER NOT NULL,
-    last_updated TIMESTAMPTZ NOT NULL,
-    content JSONB NOT NULL,
-
-    -- Same search parameters as current
-    family_name TEXT[],
-    given_name TEXT[],
-    prefix TEXT[],
-    suffix TEXT[],
-    name_text TEXT[],
-    identifier_system TEXT[],
-    identifier_value TEXT[],
-    birthdate DATE,
-    gender TEXT,
-    active BOOLEAN,
-    general_practitioner_reference TEXT[] DEFAULT '{}',
-
-    -- History metadata
-    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
-    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    PRIMARY KEY (id, version_id)
-);
-
--- Create indexes for history table (lighter than current)
-CREATE INDEX idx_patient_history_id ON patient_history (id);
-CREATE INDEX idx_patient_history_timestamp ON patient_history (history_timestamp);
-CREATE INDEX idx_patient_history_last_updated ON patient_history (last_updated);
-
--- Create GIN index for JSONB content in history
-CREATE INDEX idx_patient_history_content ON patient_history USING GIN (content);
-
 -- Create observation current table
 CREATE TABLE observation (
     id TEXT PRIMARY KEY,
@@ -166,6 +94,79 @@ CREATE INDEX idx_observation_history_last_updated ON observation_history (last_u
 
 -- Create GIN index for JSONB content in history
 CREATE INDEX idx_observation_history_content ON observation_history USING GIN (content);
+
+-- Create patient current table
+CREATE TABLE patient (
+    id TEXT PRIMARY KEY,
+    version_id INTEGER NOT NULL DEFAULT 1,
+    last_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    content JSONB NOT NULL,
+
+    -- Extracted search parameters (indexed)
+    family_name TEXT[],
+    given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
+    identifier_system TEXT[],
+    identifier_value TEXT[],
+    birthdate DATE,
+    gender TEXT,
+    active BOOLEAN,
+    general_practitioner_reference TEXT[] DEFAULT '{}'
+);
+
+-- Create indexes for current table
+CREATE INDEX idx_patient_family_name ON patient USING GIN (family_name);
+CREATE INDEX idx_patient_given_name ON patient USING GIN (given_name);
+CREATE INDEX idx_patient_prefix ON patient USING GIN (prefix);
+CREATE INDEX idx_patient_suffix ON patient USING GIN (suffix);
+CREATE INDEX idx_patient_name_text ON patient USING GIN (name_text);
+CREATE INDEX idx_patient_identifier_value ON patient USING GIN (identifier_value);
+CREATE INDEX idx_patient_birthdate ON patient (birthdate);
+CREATE INDEX idx_patient_gender ON patient (gender);
+CREATE INDEX idx_patient_active ON patient (active);
+CREATE INDEX idx_patient_last_updated ON patient (last_updated);
+CREATE INDEX idx_patient_general_practitioner ON patient USING GIN (general_practitioner_reference);
+
+-- Create GIN index for JSONB content (for advanced queries)
+CREATE INDEX idx_patient_content ON patient USING GIN (content);
+
+-- Create patient history table
+CREATE TABLE patient_history (
+    id TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    last_updated TIMESTAMPTZ NOT NULL,
+    content JSONB NOT NULL,
+
+    -- Same search parameters as current
+    family_name TEXT[],
+    given_name TEXT[],
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
+    identifier_system TEXT[],
+    identifier_value TEXT[],
+    birthdate DATE,
+    gender TEXT,
+    active BOOLEAN,
+    general_practitioner_reference TEXT[] DEFAULT '{}',
+
+    -- History metadata
+    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
+    history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    PRIMARY KEY (id, version_id)
+);
+
+-- Create indexes for history table (lighter than current)
+CREATE INDEX idx_patient_history_id ON patient_history (id);
+CREATE INDEX idx_patient_history_timestamp ON patient_history (history_timestamp);
+CREATE INDEX idx_patient_history_last_updated ON patient_history (last_updated);
+
+-- Create GIN index for JSONB content in history
+CREATE INDEX idx_patient_history_content ON patient_history USING GIN (content);
+
 
 -- Create practitioner current table
 CREATE TABLE practitioner (
