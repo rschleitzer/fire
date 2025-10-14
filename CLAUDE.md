@@ -105,7 +105,7 @@ Fire uses a **battle-tested three-stage approach** proven in production commerci
 
 ```
                    ┌─────────────────┐
-                   │  fhirspec.dtd   │  ← Proven schema from Telemed5000
+                   │  fhirspec.dtd   │  ← Proven schema
                    │  (Schema/Rules) │
                    └────────┬────────┘
                             │
@@ -248,7 +248,7 @@ Key validation rules enforced by DTD:
 ```
 fire/
 ├── fhir.xml                       # Curated model (version controlled, in root)
-├── fhirspec.dtd                   # DTD schema (from Telemed5000)
+├── fhirspec.dtd                   # DTD schema
 ├── xml.dcl                        # XML declaration for SGML parser
 ├── catalog                        # SGML catalog file
 ├── codegen/

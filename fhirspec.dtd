@@ -39,7 +39,7 @@
 <!ELEMENT variants (variant+)>
 <!ELEMENT variant (targets?)>
 <!ATTLIST variant
-  type          (element|code|date|dateTime|string|integer|integer64|oid|canonical|uri|uuid|url|instant|boolean|base64Binary|unsignedInt|markdown|xhtml|id|versionid|time|positiveInt|decimal) #REQUIRED
+  type          (element|code|date|dateTime|string|integer|integer64|oid|canonical|uri|uuid|url|instant|boolean|base64Binary|unsignedInt|markdown|xhtml|id|versionid|time|positiveInt|decimal) "string"
   ref           IDREF     #IMPLIED
 >
 

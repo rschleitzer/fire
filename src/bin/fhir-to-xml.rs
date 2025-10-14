@@ -1,2190 +1,1945 @@
+// This tool reads FHIR R5 JSON definitions and outputs an XML model
+
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
 use std::fs;
-use std::path::PathBuf;
-use clap::Parser;
 
-/// FHIR R5 JSON to XML converter - generates curated XML model for Fire
-#[derive(Parser, Debug)]
-#[command(name = "fhir-to-xml")]
-#[command(about = "Convert FHIR R5 JSON definitions to curated XML model", long_about = None)]
-struct Args {
-    /// Input directory containing FHIR R5 JSON files
-    #[arg(short, long, default_value = "fhir-r5")]
-    input: PathBuf,
+// ============================================================================
+// XML Data Structures
+// ============================================================================
 
-    /// Output XML file path
-    #[arg(short, long, default_value = "fhir.xml")]
-    output: PathBuf,
-
-    /// Resources to process (comma-separated, default: all)
-    #[arg(short, long)]
-    resources: Option<String>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "element")]
+pub struct Element {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@explicit", skip_serializing_if = "Option::is_none")]
+    pub explicit: Option<String>,
+    #[serde(rename = "@backbone", skip_serializing_if = "Option::is_none")]
+    pub backbone: Option<String>,
+    pub description: String,
+    pub properties: Properties,
+    pub elements: Elements,
+    pub codesets: Codesets,
 }
 
-#[derive(Debug, Deserialize)]
-struct FhirBundle {
-    #[serde(rename = "resourceType")]
-    resource_type: String,
-    entry: Vec<BundleEntry>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "resource")]
+pub struct Resource {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@active", skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
+    #[serde(rename = "@id")]
+    pub id: String,
+    pub description: String,
+    pub properties: Properties,
+    pub elements: Elements,
+    pub codesets: Codesets,
+    pub searches: Searches,
+    pub operations: Operations,
 }
 
-#[derive(Debug, Deserialize)]
-struct BundleEntry {
-    resource: Value,
+#[derive(Debug, Clone, Serialize)]
+pub struct Properties {
+    #[serde(default, rename = "property")]
+    pub property: Vec<Property>,
 }
 
-#[derive(Debug, Deserialize)]
-struct StructureDefinition {
-    #[serde(rename = "resourceType")]
-    resource_type: String,
-    id: String,
-    name: String,
-    kind: String,
-    #[serde(rename = "type")]
-    type_name: String,
-    description: Option<String>,
-    snapshot: Option<Snapshot>,
+#[derive(Debug, Clone, Serialize)]
+pub struct Searches {
+    #[serde(default, rename = "search")]
+    pub search: Vec<Search>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Snapshot {
-    element: Vec<ElementDefinition>,
+#[derive(Debug, Clone, Serialize)]
+pub struct Operations {
+    #[serde(default, rename = "operation")]
+    pub operation: Vec<Operation>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ElementDefinition {
-    id: String,
-    path: String,
-    #[serde(rename = "type")]
-    types: Option<Vec<ElementType>>,
-    #[serde(rename = "contentReference")]
-    content_reference: Option<String>,
-    #[serde(rename = "short")]
-    short_description: Option<String>,
-    definition: Option<String>,
-    min: Option<u32>,
-    max: Option<String>,
-    binding: Option<ElementBinding>,
-    #[serde(rename = "isSummary")]
-    is_summary: Option<bool>,
-    #[serde(rename = "isModifier")]
-    is_modifier: Option<bool>,
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "fhir")]
+pub struct Fhir {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@version")]
+    pub version: String,
+    pub resources: Resources,
+    pub elements: Elements,
+    pub codesets: Codesets,
 }
 
-#[derive(Debug, Deserialize)]
-struct ElementBinding {
-    strength: Option<String>,
-    #[serde(rename = "valueSet")]
-    value_set: Option<String>,
-    extension: Option<Vec<Value>>,
+#[derive(Debug, Clone, Serialize)]
+pub struct Resources {
+    #[serde(default, rename = "resource")]
+    pub resource: Vec<Resource>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ElementType {
-    code: String,
-    #[serde(rename = "targetProfile")]
-    target_profile: Option<Vec<String>>,
+#[derive(Debug, Clone, Serialize)]
+pub struct Elements {
+    #[serde(default, rename = "element")]
+    pub element: Vec<Element>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Codesets {
+    #[serde(default, rename = "codeset")]
+    pub codeset: Vec<Codeset>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Variants {
+    #[serde(default, rename = "variant")]
+    pub variant: Vec<Variant>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "property")]
+pub struct Property {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@name")]
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
+    pub type_attr: Option<String>,
+    #[serde(rename = "@ref", skip_serializing_if = "Option::is_none")]
+    pub ref_attr: Option<String>,
+    #[serde(rename = "@iscollection", skip_serializing_if = "Option::is_none")]
+    pub is_collection: Option<String>,
+    #[serde(rename = "@notnull", skip_serializing_if = "Option::is_none")]
+    pub not_null: Option<String>,
+    #[serde(rename = "@summary", skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(rename = "@modifier", skip_serializing_if = "Option::is_none")]
+    pub modifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Targets>,
+    #[serde(skip_serializing_if = "is_variants_empty")]
+    pub variants: Variants,
+}
+
+fn is_variants_empty(variants: &Variants) -> bool {
+    variants.variant.is_empty()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Targets {
+    #[serde(default, rename = "target")]
+    pub target: Vec<Target>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "variant")]
+pub struct Variant {
+    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
+    pub type_attr: Option<String>,
+    #[serde(rename = "@ref", skip_serializing_if = "Option::is_none")]
+    pub ref_attr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Targets>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Codes {
+    #[serde(default, rename = "code")]
+    pub code: Vec<Code>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "codeset")]
+pub struct Codeset {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@id")]
+    pub id: String,
+    pub description: String,
+    pub codes: Codes,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "code")]
+pub struct Code {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@value")]
+    pub value: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "target")]
+pub struct Target {
+    #[serde(rename = "@resource")]
+    pub resource: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Paths {
+    #[serde(default, rename = "path")]
+    pub path: Vec<Path>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Parts {
+    #[serde(default, rename = "part")]
+    pub part: Vec<Part>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Input {
+    #[serde(default, rename = "parameter")]
+    pub parameter: Vec<Parameter>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Output {
+    #[serde(default, rename = "parameter")]
+    pub parameter: Vec<Parameter>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "search")]
+pub struct Search {
+    #[serde(rename = "@name")]
+    pub name: String,
+    #[serde(rename = "@query")]
+    pub query: String,
+    #[serde(rename = "@type")]
+    pub search_type: String,
+    #[serde(rename = "@ref", skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    pub paths: Paths,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "path")]
+pub struct Path {
+    pub parts: Parts,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub casts: Option<Casts>,
+    #[serde(default, rename = "component", skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<Component>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targets: Option<Targets>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "component")]
+pub struct Component {
+    #[serde(rename = "@ref")]
+    pub ref_attr: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub casts: Option<Casts>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Casts {
+    #[serde(default, rename = "cast")]
+    pub cast: Vec<Cast>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "cast")]
+pub struct Cast {
+    #[serde(rename = "@to")]
+    pub to: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "part")]
+pub struct Part {
+    #[serde(rename = "@ref")]
+    pub ref_attr: String,
+    #[serde(rename = "@resolve", skip_serializing_if = "Option::is_none")]
+    pub resolve: Option<String>,
+    #[serde(rename = "@property", skip_serializing_if = "Option::is_none")]
+    pub property: Option<String>,
+    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
+    pub type_attr: Option<String>,
+    #[serde(rename = "@first", skip_serializing_if = "Option::is_none")]
+    pub first: Option<String>,
+    #[serde(rename = "@notnull", skip_serializing_if = "Option::is_none")]
+    pub not_null: Option<String>,
+    #[serde(rename = "@variant", skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    #[serde(rename = "@op", skip_serializing_if = "Option::is_none")]
+    pub op: Option<String>,
+    #[serde(rename = "@value", skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "operation")]
+pub struct Operation {
+    #[serde(rename = "@name")]
+    pub name: String,
+    pub description: String,
+    pub input: Input,
+    pub output: Output,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename = "parameter")]
+pub struct Parameter {
+    #[serde(rename = "@name")]
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "@type", skip_serializing_if = "Option::is_none")]
+    pub type_attr: Option<String>,
+    #[serde(rename = "@iscollection", skip_serializing_if = "Option::is_none")]
+    pub is_collection: Option<String>,
+    #[serde(rename = "@ref", skip_serializing_if = "is_none_or_empty")]
+    pub reference: Option<String>,
+    #[serde(rename = "@notnull", skip_serializing_if = "Option::is_none")]
+    pub not_null: Option<String>,
+}
+
+fn is_none_or_empty(opt: &Option<String>) -> bool {
+    opt.as_ref().map_or(true, |s| s.is_empty())
+}
+
+// ============================================================================
+// FHIR JSON Input Structures (minimal required for parsing)
+// ============================================================================
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Bundle {
+    pub entry: Vec<BundleEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct SearchParameter {
-    #[serde(rename = "resourceType")]
-    resource_type: String,
-    name: String,
-    code: String,
-    base: Vec<String>,
-    #[serde(rename = "type")]
-    param_type: String,
-    expression: Option<String>,
-    #[serde(rename = "multipleOr")]
-    multiple_or: Option<bool>,
-    #[serde(rename = "multipleAnd")]
-    multiple_and: Option<bool>,
-    component: Option<Vec<SearchComponent>>,
-    target: Option<Vec<String>>,
+#[serde(tag = "resourceType")]
+pub enum BundleResource {
+    StructureDefinition(Box<StructureDefinition>),
+    SearchParameter(Box<SearchParameter>),
+    OperationDefinition(Box<OperationDefinition>),
+    ValueSet(Box<ValueSet>),
+    CodeSystem(Box<CodeSystem>),
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct SearchComponent {
-    definition: String,
-    expression: String,
+pub struct BundleEntry {
+    pub resource: BundleResource,
 }
 
-#[derive(Debug, Deserialize)]
-struct CodeSystem {
-    #[serde(rename = "resourceType")]
-    resource_type: String,
-    id: String,
-    name: String,
-    description: Option<String>,
-    concept: Option<Vec<CodeConcept>>,
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StructureDefinition {
+    pub name: String,
+    pub snapshot: SnapshotComponent,
+    pub base_definition: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct CodeConcept {
-    code: String,
-    display: String,
-    definition: Option<String>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnapshotComponent {
+    pub element: Vec<ElementDefinition>,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse();
-
-    println!("🔧 fhir-to-xml - Converting FHIR R5 definitions to XML model");
-    println!("   Input:  {}", args.input.display());
-    println!("   Output: {}", args.output.display());
-
-    // Step 1: Load FHIR R5 JSON files
-    println!("\n📖 Loading FHIR R5 definitions...");
-    let structures = load_structure_definitions(&args.input)?;
-    let complex_types = load_complex_types(&args.input)?;
-    let search_params = load_search_parameters(&args.input)?;
-    let code_systems = load_code_systems(&args.input)?;
-    let valueset_to_codesystem = build_valueset_to_codesystem_map(&args.input)?;
-
-    println!("   Found {} structure definitions", structures.len());
-    println!("   Found {} complex type definitions", complex_types.len());
-    println!("   Found {} search parameters", search_params.len());
-    println!("   Found {} code systems", code_systems.len());
-    println!("   Found {} valueset mappings", valueset_to_codesystem.len());
-
-    // Step 2: Filter resources if specified
-    let resource_filter: Option<Vec<String>> = args.resources.map(|r| {
-        r.split(',').map(|s| s.trim().to_string()).collect()
-    });
-
-    // Step 3: Extract and organize data
-    println!("\n🔨 Extracting resource definitions...");
-    let resources = extract_resources(&structures, &search_params, &resource_filter, &code_systems)?;
-    println!("   Extracted {} resources", resources.len());
-
-    // Step 4: Generate XML
-    println!("\n📝 Generating XML model...");
-    let xml = generate_xml(&resources, &complex_types, &code_systems, &valueset_to_codesystem)?;
-
-    // Step 5: Write output
-    if let Some(parent) = args.output.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&args.output, xml)?;
-
-    println!("\n✅ XML model written to {}", args.output.display());
-    println!("   Next steps:");
-    println!("   1. Review and curate model/fhir.xml");
-    println!("   2. Add <note> elements for deviations from spec");
-    println!("   3. Run DSSSL generators to create Rust code");
-
-    Ok(())
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementDefinition {
+    pub id: String,
+    pub definition: Option<String>,
+    pub min: Option<i32>,
+    pub max: Option<String>,
+    pub is_summary: Option<bool>,
+    pub is_modifier: Option<bool>,
+    #[serde(default)]
+    pub r#type: Vec<ElementType>,
+    pub content_reference: Option<String>,
+    pub binding: Option<ElementBinding>,
+    pub extension: Option<Vec<ElementExtension>>,
 }
 
-fn load_structure_definitions(input_dir: &PathBuf) -> Result<Vec<StructureDefinition>, Box<dyn std::error::Error>> {
-    let profiles_path = input_dir.join("profiles-resources.json");
-    let content = fs::read_to_string(&profiles_path)?;
-    let bundle: FhirBundle = serde_json::from_str(&content)?;
-
-    let mut structures = Vec::new();
-    for entry in bundle.entry {
-        if let Ok(def) = serde_json::from_value::<StructureDefinition>(entry.resource) {
-            // Only include resource types, not complex types or primitives
-            if def.kind == "resource" {
-                structures.push(def);
-            }
-        }
-    }
-
-    Ok(structures)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementType {
+    pub code: String,
+    pub target_profile: Option<Vec<String>>,
 }
 
-fn load_complex_types(input_dir: &PathBuf) -> Result<Vec<StructureDefinition>, Box<dyn std::error::Error>> {
-    let types_path = input_dir.join("profiles-types.json");
-    let content = fs::read_to_string(&types_path)?;
-    let bundle: FhirBundle = serde_json::from_str(&content)?;
-
-    let mut types = Vec::new();
-    for entry in bundle.entry {
-        if let Ok(def) = serde_json::from_value::<StructureDefinition>(entry.resource) {
-            // Only include complex types (data types like Address, HumanName, etc.)
-            if def.kind == "complex-type" {
-                types.push(def);
-            }
-        }
-    }
-
-    Ok(types)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementBinding {
+    pub strength: Option<String>,
+    pub value_set: Option<String>,
 }
 
-fn load_search_parameters(input_dir: &PathBuf) -> Result<HashMap<String, Vec<SearchParameter>>, Box<dyn std::error::Error>> {
-    let search_path = input_dir.join("search-parameters.json");
-    let content = fs::read_to_string(&search_path)?;
-    let bundle: FhirBundle = serde_json::from_str(&content)?;
-
-    let mut by_resource: HashMap<String, Vec<SearchParameter>> = HashMap::new();
-
-    for entry in bundle.entry {
-        if let Ok(param) = serde_json::from_value::<SearchParameter>(entry.resource) {
-            for base in &param.base {
-                by_resource.entry(base.clone()).or_insert_with(Vec::new).push(param.clone());
-                break; // Only add once per parameter
-            }
-        }
-    }
-
-    Ok(by_resource)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ElementExtension {
+    pub url: Option<String>,
+    pub value_string: Option<String>,
 }
 
-fn load_code_systems(input_dir: &PathBuf) -> Result<Vec<CodeSystem>, Box<dyn std::error::Error>> {
-    let valuesets_path = input_dir.join("valuesets.json");
-    let content = fs::read_to_string(&valuesets_path)?;
-    let bundle: FhirBundle = serde_json::from_str(&content)?;
-
-    let mut code_systems = Vec::new();
-    for entry in bundle.entry {
-        if let Ok(cs) = serde_json::from_value::<CodeSystem>(entry.resource) {
-            if cs.resource_type == "CodeSystem" && cs.concept.is_some() {
-                code_systems.push(cs);
-            }
-        }
-    }
-
-    Ok(code_systems)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchParameter {
+    pub code: String,
+    pub name: String,
+    pub r#type: String,
+    pub expression: Option<String>,
+    pub base: Vec<String>,
+    pub target: Option<Vec<String>>,
+    pub component: Option<Vec<SearchParameterComponent>>,
+    pub version: Option<String>,
 }
 
-/// Build a mapping from ValueSet ID to CodeSystem ID
-/// This is needed because ValueSets often have different IDs than the CodeSystems they reference
-/// Example: ValueSet "request-resource-types" → CodeSystem URL "http://hl7.org/fhir/fhir-types" → CodeSystem ID "fhir-types"
-fn build_valueset_to_codesystem_map(input_dir: &PathBuf) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
-    let valuesets_path = input_dir.join("valuesets.json");
-    let content = fs::read_to_string(&valuesets_path)?;
-    let bundle: Value = serde_json::from_str(&content)?;
-
-    let mut valueset_to_codesystem: HashMap<String, String> = HashMap::new();
-
-    if let Some(entries) = bundle.get("entry").and_then(|e| e.as_array()) {
-        for entry in entries {
-            if let Some(resource) = entry.get("resource") {
-                // Check if this is a ValueSet
-                if resource.get("resourceType").and_then(|rt| rt.as_str()) == Some("ValueSet") {
-                    let valueset_id = resource.get("id").and_then(|id| id.as_str());
-
-                    // Extract the CodeSystem URL from compose.include[0].system
-                    let codesystem_url = resource
-                        .get("compose")
-                        .and_then(|compose| compose.get("include"))
-                        .and_then(|include| include.as_array())
-                        .and_then(|arr| arr.get(0))
-                        .and_then(|first| first.get("system"))
-                        .and_then(|sys| sys.as_str());
-
-                    if let (Some(vs_id), Some(cs_url)) = (valueset_id, codesystem_url) {
-                        // Extract CodeSystem ID from URL
-                        // Examples:
-                        //   "http://hl7.org/fhir/fhir-types" → "fhir-types"
-                        //   "http://hl7.org/fhir/fm-status" → "fm-status"
-                        //   "http://terminology.hl7.org/CodeSystem/v3-ActCode" → "v3-ActCode"
-                        let cs_id = cs_url.split('/').last().unwrap_or("");
-                        if !cs_id.is_empty() {
-                            valueset_to_codesystem.insert(vs_id.to_string(), cs_id.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(valueset_to_codesystem)
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchParameterComponent {
+    pub expression: String,
 }
 
-#[derive(Debug)]
-struct ResourceDefinition {
-    name: String,
-    description: String,
-    elements: Vec<ElementInfo>,
-    backbone_elements: Vec<BackboneElementInfo>,
-    search_params: Vec<SearchParamInfo>,
-    local_codesets: Vec<LocalCodeSet>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct OperationDefinition {
+    pub code: String,
+    pub description: Option<String>,
+    pub resource: Option<Vec<String>>,
+    pub parameter: Option<Vec<OperationParameter>>,
 }
 
-#[derive(Debug)]
-struct LocalCodeSet {
-    name: String,
-    id: String,
-    description: String,
-    codes: Vec<(String, String, String)>, // (code, display, definition)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationParameter {
+    pub name: String,
+    pub r#use: String,
+    pub min: i32,
+    pub max: String,
+    pub documentation: Option<String>,
+    pub r#type: Option<String>,
 }
 
-#[derive(Debug)]
-struct BackboneElementInfo {
-    name: String,
-    path: String,
-    description: String,
-    properties: Vec<ElementInfo>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueSet {
+    pub name: String,
+    pub url: String,
+    pub description: Option<String>,
+    pub compose: ValueSetCompose,
 }
 
-#[derive(Debug, Clone)]
-struct TypeInfo {
-    code: String,
-    target_resources: Vec<String>,  // For Reference types
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueSetCompose {
+    pub include: Vec<ValueSetInclude>,
 }
 
-#[derive(Debug, Clone)]
-struct ElementInfo {
-    name: String,
-    path: String,
-    types: Vec<TypeInfo>,
-    description: String,
-    cardinality: String,
-    binding_name: Option<String>, // ValueSet binding name (e.g., "AdministrativeGender")
-    value_set_url: Option<String>, // ValueSet canonical URL (e.g., "http://hl7.org/fhir/ValueSet/administrative-gender")
-    is_summary: bool,
-    is_modifier: bool,
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueSetInclude {
+    pub system: Option<String>,
+    pub concept: Option<Vec<ValueSetConcept>>,
 }
 
-#[derive(Debug)]
-struct SearchParamInfo {
-    name: String,
-    code: String,
-    param_type: String,
-    expression: String,
-    is_composite: bool,
-    components: Vec<ComponentInfo>,
-    targets: Vec<String>,
+#[derive(Debug, Clone, Deserialize)]
+pub struct ValueSetConcept {
+    pub code: String,
+    pub extension: Option<Vec<ValueSetConceptExtension>>,
 }
 
-#[derive(Debug)]
-struct ComponentInfo {
-    expression: String,
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueSetConceptExtension {
+    pub url: String,
+    pub value_string: Option<String>,
 }
 
-fn extract_resources(
-    structures: &[StructureDefinition],
-    search_params: &HashMap<String, Vec<SearchParameter>>,
-    filter: &Option<Vec<String>>,
-    all_code_systems: &[CodeSystem],
-) -> Result<Vec<ResourceDefinition>, Box<dyn std::error::Error>> {
-    let mut resources = Vec::new();
-
-    for structure in structures {
-        // Apply filter if specified
-        if let Some(ref filter_list) = filter {
-            if !filter_list.contains(&structure.name) {
-                continue;
-            }
-        }
-
-        let elements = extract_elements(structure);
-        let backbone_elements = extract_backbone_elements(structure);
-        let search = extract_search_params(&structure.name, search_params);
-        let local_codesets = extract_local_codesets(&structure.name, &elements, &backbone_elements, all_code_systems);
-
-        resources.push(ResourceDefinition {
-            name: structure.name.clone(),
-            description: structure.description.clone().unwrap_or_default(),
-            elements,
-            backbone_elements,
-            search_params: search,
-            local_codesets,
-        });
-    }
-
-    Ok(resources)
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeSystem {
+    pub name: String,
+    pub url: String,
+    pub concept: Option<Vec<CodeSystemConcept>>,
 }
 
-fn extract_elements(structure: &StructureDefinition) -> Vec<ElementInfo> {
-    let mut elements = Vec::new();
-
-    if let Some(snapshot) = &structure.snapshot {
-        for elem in &snapshot.element {
-            // Skip root element and certain infrastructure field children (but include id, meta, implicitRules, language, text!)
-            // Use exact match or match with trailing dot to avoid false positives
-            // e.g., "Patient.id" should not match "Patient.identifier"
-            if elem.path == structure.type_name
-                || elem.path.starts_with(&format!("{}.id.", structure.type_name))  // Skip id children (e.g., Patient.id.extension)
-                || elem.path.starts_with(&format!("{}.meta.", structure.type_name))  // Skip meta children
-                || elem.path.starts_with(&format!("{}.implicitRules.", structure.type_name))  // Skip implicitRules children, but include implicitRules itself
-                || elem.path.starts_with(&format!("{}.language.", structure.type_name))  // Skip language children, but include language itself
-                || elem.path.starts_with(&format!("{}.text.", structure.type_name))  // Skip text children, but include text itself
-            {
-                continue;
-            }
-
-            // Only include direct properties of the resource
-            if elem.path.matches('.').count() == 1 {
-                let name = elem.path.split('.').last().unwrap_or("").to_string();
-
-                // Handle contentReference for recursive structures
-                let types = if let Some(content_ref) = &elem.content_reference {
-                    // Parse contentReference: "#ResourceName.path.to.element" -> "resourcenamepath..."
-                    let referenced_path = content_ref.trim_start_matches('#');
-                    let element_id = referenced_path.replace(".", "").to_lowercase();
-
-                    // Create synthetic type pointing to the referenced element
-                    vec![TypeInfo {
-                        code: element_id,
-                        target_resources: vec![],
-                    }]
-                } else {
-                    // Normal type extraction
-                    elem.types.as_ref()
-                        .map(|t| t.iter().map(|et| TypeInfo {
-                            code: et.code.clone(),
-                            target_resources: et.target_profile.as_ref()
-                                .map(|profiles| profiles.iter()
-                                    .filter_map(|url| url.split('/').last().map(String::from))
-                                    .collect())
-                                .unwrap_or_default()
-                        }).collect())
-                        .unwrap_or_default()
-                };
-
-                let cardinality = format!("{}..{}",
-                    elem.min.unwrap_or(0),
-                    elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
-                );
-
-                // Extract binding name and ValueSet URL
-                let (binding_name, value_set_url) = elem.binding.as_ref()
-                    .map(|binding| {
-                        let name = binding.extension.as_ref().and_then(|extensions| {
-                            for ext in extensions {
-                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                            return Some(value.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                            None
-                        });
-                        let url = binding.value_set.clone();
-                        (name, url)
-                    })
-                    .unwrap_or((None, None));
-
-                elements.push(ElementInfo {
-                    name,
-                    path: elem.path.clone(),
-                    types,
-                    description: elem.definition.clone()
-                        .or_else(|| elem.short_description.clone())
-                        .unwrap_or_default(),
-                    cardinality,
-                    binding_name,
-                    value_set_url,
-                    is_summary: elem.is_summary.unwrap_or(false),
-                    is_modifier: elem.is_modifier.unwrap_or(false),
-                });
-            }
-        }
-    }
-
-    elements
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeSystemConcept {
+    pub code: String,
+    pub definition: Option<String>,
+    pub property: Option<Vec<CodeSystemConceptProperty>>,
+    pub concept: Option<Vec<CodeSystemConcept>>,
 }
 
-fn extract_backbone_elements(structure: &StructureDefinition) -> Vec<BackboneElementInfo> {
-    let mut backbone_elements = Vec::new();
-
-    if let Some(snapshot) = &structure.snapshot {
-        // First pass: identify ALL backbone elements at any depth (not just direct children)
-        let mut backbone_paths = Vec::new();
-        for elem in &snapshot.element {
-            // Check if this is a BackboneElement at any depth (excluding root)
-            if elem.path != structure.type_name {
-                if let Some(types) = &elem.types {
-                    if types.len() == 1 && types[0].code == "BackboneElement" {
-                        backbone_paths.push(elem.path.clone());
-                    }
-                }
-            }
-        }
-
-        // Second pass: extract properties for each backbone element
-        for backbone_path in backbone_paths {
-            let backbone_name = backbone_path.split('.').last().unwrap_or("").to_string();
-            let prefix = format!("{}.", backbone_path);
-            let depth = backbone_path.matches('.').count();
-            let mut properties = Vec::new();
-
-            // Find description
-            let description = snapshot.element.iter()
-                .find(|e| e.path == backbone_path)
-                .and_then(|e| e.definition.clone().or_else(|| e.short_description.clone()))
-                .unwrap_or_default();
-
-            // Extract properties (direct children of this backbone element)
-            for elem in &snapshot.element {
-                // Only include direct children (one level deeper than the backbone element)
-                if elem.path.starts_with(&prefix) && elem.path.matches('.').count() == depth + 1 {
-                    // Skip extension fields
-                    if elem.path.ends_with(".id")
-                        || elem.path.ends_with(".extension")
-                        || elem.path.ends_with(".modifierExtension") {
-                        continue;
-                    }
-
-                    let name = elem.path.split('.').last().unwrap_or("").to_string();
-
-                    // Handle contentReference for recursive structures
-                    let types = if let Some(content_ref) = &elem.content_reference {
-                        // Parse contentReference: "#ResourceName.path.to.element" -> "resourcenamepath..."
-                        let referenced_path = content_ref.trim_start_matches('#');
-                        let element_id = referenced_path.replace(".", "").to_lowercase();
-
-                        // Create synthetic type pointing to the referenced element
-                        vec![TypeInfo {
-                            code: element_id,
-                            target_resources: vec![],
-                        }]
-                    } else {
-                        // Normal type extraction
-                        elem.types.as_ref()
-                            .map(|t| t.iter().map(|et| TypeInfo {
-                                code: et.code.clone(),
-                                target_resources: et.target_profile.as_ref()
-                                    .map(|profiles| profiles.iter()
-                                        .filter_map(|url| url.split('/').last().map(String::from))
-                                        .collect())
-                                    .unwrap_or_default()
-                            }).collect())
-                            .unwrap_or_default()
-                    };
-
-                    let cardinality = format!("{}..{}",
-                        elem.min.unwrap_or(0),
-                        elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
-                    );
-
-                    // Extract binding name and ValueSet URL
-                    let (binding_name, value_set_url) = elem.binding.as_ref()
-                        .map(|binding| {
-                            let name = binding.extension.as_ref().and_then(|extensions| {
-                                for ext in extensions {
-                                    if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                        if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                            if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                                return Some(value.to_string());
-                                            }
-                                        }
-                                    }
-                                }
-                                None
-                            });
-                            let url = binding.value_set.clone();
-                            (name, url)
-                        })
-                        .unwrap_or((None, None));
-
-                    properties.push(ElementInfo {
-                        name,
-                        path: elem.path.clone(),
-                        types,
-                        description: elem.definition.clone()
-                            .or_else(|| elem.short_description.clone())
-                            .unwrap_or_default(),
-                        cardinality,
-                        binding_name,
-                        value_set_url,
-                        is_summary: elem.is_summary.unwrap_or(false),
-                        is_modifier: elem.is_modifier.unwrap_or(false),
-                    });
-                }
-            }
-
-            backbone_elements.push(BackboneElementInfo {
-                name: backbone_name,
-                path: backbone_path,
-                description,
-                properties,
-            });
-        }
-    }
-
-    backbone_elements
+#[derive(Debug, Clone, Deserialize)]
+pub struct CodeSystemConceptProperty {
+    pub code: String,
 }
 
-fn extract_search_params(
-    resource_name: &str,
-    all_search_params: &HashMap<String, Vec<SearchParameter>>,
-) -> Vec<SearchParamInfo> {
-    let mut params = Vec::new();
-
-    if let Some(resource_params) = all_search_params.get(resource_name) {
-        for param in resource_params {
-            let is_composite = param.component.is_some();
-            let components = param.component.as_ref()
-                .map(|comps| comps.iter().map(|c| ComponentInfo {
-                    expression: c.expression.clone(),
-                }).collect())
-                .unwrap_or_default();
-
-            let targets = param.target.clone().unwrap_or_default();
-
-            params.push(SearchParamInfo {
-                name: param.name.clone(),
-                code: param.code.clone(),
-                param_type: param.param_type.clone(),
-                expression: param.expression.clone().unwrap_or_default(),
-                is_composite,
-                components,
-                targets,
-            });
-        }
-    }
-
-    params
-}
-
-fn extract_local_codesets(
-    resource_name: &str,
-    elements: &[ElementInfo],
-    backbone_elements: &[BackboneElementInfo],
-    all_code_systems: &[CodeSystem],
-) -> Vec<LocalCodeSet> {
-    let mut local_codesets = Vec::new();
-    let resource_prefix = resource_name.to_lowercase();
-
-    // Collect all binding names from elements and backbone elements
-    let mut binding_names = HashSet::new();
-    for element in elements {
-        if let Some(binding) = &element.binding_name {
-            binding_names.insert(binding.clone());
-        }
-    }
-    for backbone in backbone_elements {
-        for property in &backbone.properties {
-            if let Some(binding) = &property.binding_name {
-                binding_names.insert(binding.clone());
-            }
-        }
-    }
-
-    // Find CodeSystems whose IDs start with the resource name (resource-local codesets)
-    // Examples:
-    //   - "observation-triggeredbytype" for Observation resource
-    //   - "observationworkflowstatus" for Observation resource
-    //   - "location-mode" for Location resource
-    for code_system in all_code_systems {
-        // Check if the CodeSystem ID starts with the resource name (case-insensitive)
-        let cs_id_lower = code_system.id.to_lowercase();
-        let cs_id_normalized = cs_id_lower.replace("-", "");
-
-        // Match if ID starts with resource name (with or without dash separator)
-        // e.g., "observation-triggeredbytype" or "observationworkflowstatus"
-        if cs_id_lower.starts_with(&format!("{}-", resource_prefix))
-            || cs_id_normalized.starts_with(&resource_prefix) {
-
-            // Check if this codeset is actually referenced by properties in this resource
-            let binding_id = to_lowercase_preserve_digits(&code_system.name);
-            if binding_names.contains(&code_system.name) || binding_names.iter().any(|b| to_lowercase_preserve_digits(b) == binding_id) {
-                let codes = code_system.concept.as_ref()
-                    .map(|concepts| concepts.iter().map(|c| {
-                        (
-                            c.code.clone(),
-                            c.display.clone(),
-                            c.definition.clone().unwrap_or_else(|| c.display.clone())
-                        )
-                    }).collect())
-                    .unwrap_or_default();
-
-                local_codesets.push(LocalCodeSet {
-                    name: code_system.name.clone(),
-                    id: to_lowercase_preserve_digits(&code_system.name),
-                    description: code_system.description.clone().unwrap_or_default(),
-                    codes,
-                });
-            }
-        }
-    }
-
-    local_codesets
-}
-
-fn generate_xml(resources: &[ResourceDefinition], all_complex_types: &[StructureDefinition], all_code_systems: &[CodeSystem], valueset_to_codesystem: &HashMap<String, String>) -> Result<String, Box<dyn std::error::Error>> {
-    // FIRST: Collect all referenced element types (needed to know which complex types will be generated)
-    let mut referenced_types = HashSet::new();
-    let mut to_process = Vec::new();
-
-    // Start with types referenced by resources
-    for resource in resources {
-        for element in &resource.elements {
-            for type_info in &element.types {
-                let dtd_type = map_fhir_type_to_dtd(&type_info.code);
-                if dtd_type == "element" {
-                    if referenced_types.insert(type_info.code.as_str()) {
-                        to_process.push(type_info.code.as_str());
-                    }
-                }
-            }
-        }
-    }
-
-    // Create a map for quick lookup
-    let type_map: HashMap<&str, &StructureDefinition> = all_complex_types
-        .iter()
-        .map(|t| (t.type_name.as_str(), t))
-        .collect();
-
-    // Recursively follow references
-    while let Some(type_name) = to_process.pop() {
-        if let Some(complex_type) = type_map.get(type_name) {
-            if let Some(snapshot) = &complex_type.snapshot {
-                for elem in &snapshot.element {
-                    if let Some(types) = &elem.types {
-                        for elem_type in types {
-                            let dtd_type = map_fhir_type_to_dtd(&elem_type.code);
-                            if dtd_type == "element" {
-                                if referenced_types.insert(elem_type.code.as_str()) {
-                                    to_process.push(elem_type.code.as_str());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // SECOND PASS: Collect all valid XML IDs that will be generated
-    // This allows us to comment out references to non-existent IDs
-    let mut valid_ids: HashSet<String> = HashSet::new();
-
-    // Add resource IDs
-    for resource in resources {
-        valid_ids.insert(resource.name.to_lowercase());
-
-        // Add property IDs
-        for element in &resource.elements {
-            let property_name_clean = element.name.replace("[x]", "");
-            let property_id = format!("{}.{}", resource.name.to_lowercase(), to_lowercase_preserve_digits(&property_name_clean));
-            valid_ids.insert(property_id);
-        }
-
-        // Add backbone element IDs and their properties
-        for backbone in &resource.backbone_elements {
-            let backbone_id = backbone.path.replace(".", "").to_lowercase();
-            valid_ids.insert(backbone_id.clone());
-
-            // Properties within backbone elements use dotted path
-            let backbone_path_lower = backbone.path.to_lowercase();
-            for property in &backbone.properties {
-                let property_name_clean = property.name.replace("[x]", "");
-                let property_id = format!("{}.{}", backbone_path_lower, to_lowercase_preserve_digits(&property_name_clean));
-                valid_ids.insert(property_id);
-            }
-        }
-    }
-
-    // Add referenced complex type IDs (now that we know which types will be generated)
-    for complex_type in all_complex_types {
-        let type_name = complex_type.type_name.as_str();
-        if referenced_types.contains(type_name) {
-            let type_id = type_name.to_lowercase();
-            valid_ids.insert(type_id.clone());
-
-            if let Some(snapshot) = &complex_type.snapshot {
-                for elem in &snapshot.element {
-                    // Only include direct properties (not nested or root)
-                    if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
-                        let name = elem.path.split('.').last().unwrap_or("").to_string();
-                        let property_id = format!("{}.{}", type_id, to_lowercase_preserve_digits(&name));
-                        valid_ids.insert(property_id);
-                    }
-                }
-            }
-        }
-    }
-
-    // Add codeset IDs (with collision detection logic matching what will be generated)
-    let mut codeset_ids_used: HashSet<String> = HashSet::new();
-    for code_system in all_code_systems {
-        let mut codeset_id = to_lowercase_preserve_digits(&code_system.name);
-
-        // Apply same collision detection as during generation
-        if valid_ids.contains(&codeset_id) {
-            codeset_id = format!("{}codes", codeset_id);
-        }
-
-        // Handle duplicate codeset names
-        let base_id = codeset_id.clone();
-        let mut counter = 2;
-        while codeset_ids_used.contains(&codeset_id) {
-            codeset_id = format!("{}{}", base_id, counter);
-            counter += 1;
-        }
-
-        codeset_ids_used.insert(codeset_id.clone());
-        valid_ids.insert(codeset_id);
-    }
-
-    // SECOND PASS: Generate XML
-    let mut xml = String::new();
-
-    // XML header and DTD reference
-    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xml.push_str("<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">\n\n");
-
-    // Build CodeSystem ID → CodeSystem name mapping for resolving binding references
-    // This is needed because FHIR R5 binding names often don't match CodeSystem names
-    // We resolve via: ValueSet URL → ValueSet ID → CodeSystem ID → CodeSystem name
-    // Example: ValueSet URL "http://hl7.org/fhir/ValueSet/request-resource-types|5.0.0"
-    //          → ValueSet ID "request-resource-types"
-    //          → CodeSystem ID "fhir-types" (via valueset_to_codesystem map)
-    //          → CodeSystem name "FHIRTypes"
-    let mut codeset_id_to_name: HashMap<String, String> = HashMap::new();
-    for code_system in all_code_systems {
-        codeset_id_to_name.insert(code_system.id.clone(), code_system.name.clone());
-    }
-
-    // Build type lookup dictionaries (following Telemed5000's approach)
-    // Maps property ID (e.g., "appointment.reason") to its type reference (e.g., "codeablereference")
-    let mut property_type_map: HashMap<String, String> = HashMap::new();
-
-    // Add properties from resources
-    for resource in resources {
-        let resource_id = resource.name.to_lowercase();
-
-        // Build a map of backbone element names to their IDs for this resource
-        let mut backbone_map: HashMap<String, String> = HashMap::new();
-        for backbone in &resource.backbone_elements {
-            let element_id = backbone.path.replace(".", "").to_lowercase();
-            backbone_map.insert(backbone.name.clone(), element_id);
-        }
-
-        for element in &resource.elements {
-            let property_name_clean = element.name.replace("[x]", "");
-            let property_id = format!("{}.{}", resource_id, to_lowercase_preserve_digits(&property_name_clean));
-
-            // Store the type reference (use first type if multiple variants)
-            if !element.types.is_empty() {
-                let mut type_ref = fhir_type_to_element_ref(&element.types[0].code);
-
-                // Special case: if this is a BackboneElement, look up the specific backbone element ID
-                if element.types[0].code == "BackboneElement" {
-                    if let Some(backbone_id) = backbone_map.get(&element.name) {
-                        type_ref = backbone_id.clone();
-                    }
-                }
-
-                property_type_map.insert(property_id, type_ref);
-            }
-        }
-
-        // Add properties from backbone elements
-        // Use the full dotted path as property ID (e.g., "conceptmap.group.element")
-        // not the element ID (e.g., "conceptmapgroup.element")
-        for backbone in &resource.backbone_elements {
-            let backbone_path_lower = backbone.path.to_lowercase();
-            for property in &backbone.properties {
-                let property_name_clean = property.name.replace("[x]", "");
-                let property_id = format!("{}.{}", backbone_path_lower, to_lowercase_preserve_digits(&property_name_clean));
-
-                if !property.types.is_empty() {
-                    let mut type_ref = fhir_type_to_element_ref(&property.types[0].code);
-
-                    // Special case: if this is a nested BackboneElement, the type ref should be
-                    // the property path with dots removed (e.g., "ConceptMap.group.element" -> "conceptmapgroupelement")
-                    if property.types[0].code == "BackboneElement" {
-                        type_ref = property.path.replace(".", "").to_lowercase();
-                    }
-
-                    property_type_map.insert(property_id, type_ref);
-                }
-            }
-        }
-    }
-
-    // Add properties from complex types
-    for complex_type in all_complex_types {
-        let element_id = complex_type.type_name.to_lowercase();
-        if let Some(snapshot) = &complex_type.snapshot {
-            for elem in &snapshot.element {
-                // Only include direct properties (not nested or root)
-                if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
-                    let name = elem.path.split('.').last().unwrap_or("").to_string();
-                    let property_id = format!("{}.{}", element_id, to_lowercase_preserve_digits(&name));
-
-                    if let Some(types) = &elem.types {
-                        if !types.is_empty() {
-                            let type_ref = fhir_type_to_element_ref(&types[0].code);
-                            property_type_map.insert(property_id, type_ref);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Root element
-    xml.push_str("<fhir name=\"Fire\" version=\"5.0.0\">\n");
-    xml.push_str("  <resources>\n");
-
-    for resource in resources {
-        generate_resource_xml(&mut xml, resource, &property_type_map, valueset_to_codesystem, &codeset_id_to_name, &valid_ids)?;
-    }
-
-    xml.push_str("  </resources>\n");
-
-    // Generate element definitions for all referenced types (referenced_types already collected earlier)
-    xml.push_str("  <elements>\n");
-
-    // Track generated IDs to avoid duplicates
-    let mut generated_ids = HashSet::new();
-
-    for complex_type in all_complex_types {
-        let type_name = complex_type.type_name.as_str();
-        if referenced_types.contains(type_name) {
-            let element_id = type_name.to_lowercase();
-
-            // Skip if already generated (e.g., MoneyQuantity and SimpleQuantity duplicate Quantity)
-            if generated_ids.insert(element_id.clone()) {
-                generate_element_xml(&mut xml, complex_type, valueset_to_codesystem, &codeset_id_to_name, &valid_ids)?;
-            }
-        }
-    }
-    xml.push_str("  </elements>\n");
-
-    // Collect all referenced codesets
-    let mut referenced_codesets = HashSet::new();
-
-    // From resources
-    for resource in resources {
-        for element in &resource.elements {
-            // Resolve binding name via ValueSet URL to get actual CodeSystem name
-            let resolved = resolve_binding_name(
-                element.binding_name.as_ref(),
-                element.value_set_url.as_ref(),
-                valueset_to_codesystem,
-                &codeset_id_to_name
-            );
-            if let Some(binding) = resolved {
-                referenced_codesets.insert(to_lowercase_preserve_digits(&binding));
-            }
-        }
-
-        // From backbone elements
-        for backbone in &resource.backbone_elements {
-            for property in &backbone.properties {
-                // Resolve binding name via ValueSet URL to get actual CodeSystem name
-                let resolved = resolve_binding_name(
-                    property.binding_name.as_ref(),
-                    property.value_set_url.as_ref(),
-                    valueset_to_codesystem,
-                    &codeset_id_to_name
-                );
-                if let Some(binding) = resolved {
-                    referenced_codesets.insert(to_lowercase_preserve_digits(&binding));
-                }
-            }
-        }
-    }
-
-    // From elements
-    for complex_type in all_complex_types {
-        if let Some(snapshot) = &complex_type.snapshot {
-            for elem in &snapshot.element {
-                if let Some(binding) = &elem.binding {
-                    if let Some(extensions) = &binding.extension {
-                        for ext in extensions {
-                            if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                    if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                        referenced_codesets.insert(to_lowercase_preserve_digits(value));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Generate codesets
-    xml.push_str("  <codesets>\n");
-
-    // Create multiple maps for different lookup strategies
-    // 1. By normalized ID (e.g., "observation-triggeredbytype" -> "observationtriggeredbytype")
-    let codeset_map_by_id: HashMap<String, &CodeSystem> = all_code_systems
-        .iter()
-        .map(|cs| (cs.id.replace("-", "").to_lowercase(), cs))
-        .collect();
-
-    // 2. By normalized name (e.g., "TriggeredBytype" -> "triggeredbytype")
-    let codeset_map_by_name: HashMap<String, &CodeSystem> = all_code_systems
-        .iter()
-        .map(|cs| (to_lowercase_preserve_digits(&cs.name), cs))
-        .collect();
-
-    // Track all IDs already used in the document to prevent collisions
-    // Start with resource IDs and element IDs
-    let mut all_used_ids: HashSet<String> = resources.iter()
-        .map(|r| r.name.to_lowercase())
-        .collect();
-
-    // Add element IDs (from complex types)
-    all_used_ids.extend(generated_ids.iter().cloned());
-
-    // Collect IDs of all resource-local codesets to exclude them from global section
-    let mut local_codeset_ids: HashSet<String> = HashSet::new();
-    for resource in resources {
-        for codeset in &resource.local_codesets {
-            local_codeset_ids.insert(codeset.id.clone());
-        }
-    }
-
-    for codeset_id in referenced_codesets.iter() {
-        // Skip if this codeset is resource-local (already in resource's <codesets> section)
-        if local_codeset_ids.contains(codeset_id) {
-            continue;
-        }
-
-        // Try lookup by name first (binding name), then by ID
-        let code_system = codeset_map_by_name.get(codeset_id.as_str())
-            .or_else(|| codeset_map_by_id.get(codeset_id.as_str()));
-
-        if let Some(code_system) = code_system {
-            // Generate codeset with collision detection
-            // The function will add "codes" suffix if needed and return the actual ID used
-            let actual_id = generate_codeset_xml(&mut xml, code_system, &all_used_ids)?;
-
-            // Track the ID to prevent future collisions
-            all_used_ids.insert(actual_id);
-        }
-    }
-
-    // Add hardcoded stub codesets for external references
-    add_stub_codesets(&mut xml);
-
-    xml.push_str("  </codesets>\n");
-    xml.push_str("</fhir>\n");
-
-    Ok(xml)
-}
-
-fn add_stub_codesets(xml: &mut String) {
-    // MimeType - IANA MIME types
-    xml.push_str("    <codeset name=\"MimeType\" id=\"mimetype\">\n");
-    xml.push_str("      <description>IANA MIME types (placeholder - use IANA registry)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"JSON\" value=\"application/json\">\n");
-    xml.push_str("          <description>JSON format</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"XML\" value=\"application/xml\">\n");
-    xml.push_str("          <description>XML format</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // Language - BCP 47
-    xml.push_str("    <codeset name=\"Language\" id=\"language\">\n");
-    xml.push_str("      <description>BCP 47 language codes (placeholder)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"English\" value=\"en\">\n");
-    xml.push_str("          <description>English</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
-    xml.push_str("          <description>English (United States)</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // CurrencyCode - ISO 4217
-    xml.push_str("    <codeset name=\"CurrencyCode\" id=\"currencycode\">\n");
-    xml.push_str("      <description>ISO 4217 currency codes (placeholder)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"US Dollar\" value=\"USD\">\n");
-    xml.push_str("          <description>US Dollar</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Euro\" value=\"EUR\">\n");
-    xml.push_str("          <description>Euro</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // Units - UCUM
-    xml.push_str("    <codeset name=\"Units\" id=\"units\">\n");
-    xml.push_str("      <description>UCUM units (placeholder)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"Seconds\" value=\"s\">\n");
-    xml.push_str("          <description>Seconds</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Minutes\" value=\"min\">\n");
-    xml.push_str("          <description>Minutes</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // ParameterUse
-    xml.push_str("    <codeset name=\"ParameterUse\" id=\"parameteruse\">\n");
-    xml.push_str("      <description>Operation parameter use</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"In\" value=\"in\">\n");
-    xml.push_str("          <description>Input parameter</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Out\" value=\"out\">\n");
-    xml.push_str("          <description>Output parameter</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // ExpressionLanguage
-    xml.push_str("    <codeset name=\"ExpressionLanguage\" id=\"expressionlanguage\">\n");
-    xml.push_str("      <description>Expression languages</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"FHIRPath\" value=\"text/fhirpath\">\n");
-    xml.push_str("          <description>FHIRPath expression language</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"CQL\" value=\"text/cql\">\n");
-    xml.push_str("          <description>Clinical Quality Language</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // RelatedArtifactPublicationStatus
-    xml.push_str("    <codeset name=\"RelatedArtifactPublicationStatus\" id=\"relatedartifactpublicationstatus\">\n");
-    xml.push_str("      <description>Publication status of related artifacts</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"Draft\" value=\"draft\">\n");
-    xml.push_str("          <description>Draft</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Active\" value=\"active\">\n");
-    xml.push_str("          <description>Active</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Retired\" value=\"retired\">\n");
-    xml.push_str("          <description>Retired</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"Unknown\" value=\"unknown\">\n");
-    xml.push_str("          <description>Unknown</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // NameLanguage - BCP 47 (alias for Language)
-    xml.push_str("    <codeset name=\"NameLanguage\" id=\"namelanguage\">\n");
-    xml.push_str("      <description>BCP 47 language codes for item names (placeholder - references urn:ietf:bcp:47)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"English\" value=\"en\">\n");
-    xml.push_str("          <description>English</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
-    xml.push_str("          <description>English (United States)</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // ItemDescriptionLanguage - BCP 47 (alias for Language)
-    xml.push_str("    <codeset name=\"ItemDescriptionLanguage\" id=\"itemdescriptionlanguage\">\n");
-    xml.push_str("      <description>BCP 47 language codes for item descriptions (placeholder - references urn:ietf:bcp:47)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"English\" value=\"en\">\n");
-    xml.push_str("          <description>English</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("        <code name=\"English (US)\" value=\"en-US\">\n");
-    xml.push_str("          <description>English (United States)</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    // UseContext values - external terminology (HL7 v3)
-    // Note: These are actually complex types (CodeableConcept) not simple codes
-    // Leaving as placeholder stubs - proper implementation would need external terminology
-    xml.push_str("    <codeset name=\"UseContextCode\" id=\"valueset.usecontext.code\">\n");
-    xml.push_str("      <description>UseContext code types (placeholder - references external v3 vocabulary)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"Clinical Focus\" value=\"focus\">\n");
-    xml.push_str("          <description>Clinical context focus</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    xml.push_str("    <codeset name=\"UseContextValue\" id=\"valueset.usecontext.value\">\n");
-    xml.push_str("      <description>UseContext values (placeholder - references external vocabularies)</description>\n");
-    xml.push_str("      <codes>\n");
-    xml.push_str("        <code name=\"Example Value\" value=\"example\">\n");
-    xml.push_str("          <description>Example value</description>\n");
-    xml.push_str("        </code>\n");
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-}
-
-fn generate_codeset_xml(xml: &mut String, code_system: &CodeSystem, all_used_ids: &HashSet<String>) -> Result<String, Box<dyn std::error::Error>> {
-    // Use the CodeSystem.name (binding name) as the ID, not the CodeSystem.id
-    // This matches how properties reference codesets via binding names
-    // e.g., binding name "TriggeredByType" -> id "triggeredbytype"
-    let mut codeset_id = to_lowercase_preserve_digits(&code_system.name);
-
-    // Following Telemed5000's approach (lines 1565-1570, 1669-1670 in Program.cs):
-    // Add "codes" suffix if ID collides with a resource or element ID
-    // Examples:
-    //   - "SubscriptionStatus" resource + "SubscriptionStatus" codeset → rename codeset to "subscriptionstatuscodes"
-    //   - "BiologicallyDerivedProductDispense" codeset → "biologicallyderivedproductdispensecodes" (avoids resource collision)
-    if all_used_ids.contains(&codeset_id) {
-        codeset_id = format!("{}codes", codeset_id);
-    }
-
-    xml.push_str(&format!("    <codeset name=\"{}\" id=\"{}\">\n", code_system.name, codeset_id));
-    xml.push_str(&format!("      <description>{}</description>\n",
-        escape_xml(&code_system.description.as_ref().unwrap_or(&String::new()))));
-
-    xml.push_str("      <codes>\n");
-    if let Some(concepts) = &code_system.concept {
-        for concept in concepts {
-            xml.push_str(&format!("        <code name=\"{}\" value=\"{}\">\n",
-                escape_xml(&concept.display),
-                escape_xml(&concept.code)));
-            xml.push_str(&format!("          <description>{}</description>\n",
-                escape_xml(&concept.definition.as_ref().unwrap_or(&concept.display))));
-            xml.push_str("        </code>\n");
-        }
-    }
-    xml.push_str("      </codes>\n");
-    xml.push_str("    </codeset>\n");
-
-    Ok(codeset_id)
-}
-
-/// Helper function to wrap an XML element in an SGML comment if its ref doesn't exist
-fn maybe_comment_invalid_ref(element: &str, ref_value: &str, valid_ids: &HashSet<String>) -> String {
-    if valid_ids.contains(ref_value) {
-        element.to_string()
-    } else {
-        // Comment out the entire element by wrapping it in SGML comment delimiters
-        format!("<!-- INVALID REF: {} - {}", ref_value, element.trim_end().replace("-->", ""))
-            + " -->\n"
-    }
-}
-
-fn generate_resource_xml(xml: &mut String, resource: &ResourceDefinition, property_type_map: &HashMap<String, String>, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let resource_id = resource.name.to_lowercase();
-
-    // Resources with reference implementations
-    let implemented_resources = ["Patient", "Observation", "Practitioner"];
-    let is_active = implemented_resources.contains(&resource.name.as_str());
-
-    // Only output active="true" if resource has a reference implementation (default is "false")
-    let active_attr = if is_active {
-        " active=\"true\" "
-    } else {
-        " "  // Just a space before id
-    };
-
-    xml.push_str(&format!("    <resource name=\"{}\"{}id=\"{}\">\n", resource.name, active_attr, resource_id));
-    xml.push_str(&format!("      <description>{}</description>\n", escape_xml(&resource.description)));
-
-    // Properties (resource-level attributes)
-    xml.push_str("      <properties>\n");
-    for element in &resource.elements {
-        generate_property_xml_with_backbone(xml, element, &resource.name, &resource.backbone_elements, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
-    }
-    xml.push_str("      </properties>\n");
-
-    // Elements (backbone elements - nested complex types)
-    if resource.backbone_elements.is_empty() {
-        xml.push_str("      <elements/>\n");
-    } else {
-        xml.push_str("      <elements>\n");
-        for backbone in &resource.backbone_elements {
-            generate_backbone_element_xml(xml, backbone, &resource.name, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
-        }
-        xml.push_str("      </elements>\n");
-    }
-
-    // Codesets (local ValueSets)
-    if resource.local_codesets.is_empty() {
-        xml.push_str("      <codesets/>\n");
-    } else {
-        xml.push_str("      <codesets>\n");
-
-        // Track codeset IDs used within this resource to detect duplicates
-        let mut used_codeset_ids: HashSet<String> = HashSet::new();
-
-        for codeset in &resource.local_codesets {
-            let mut codeset_id = codeset.id.clone();
-
-            // Avoid collision with resource ID
-            if codeset_id == resource_id {
-                codeset_id = format!("{}codes", codeset_id);
-            }
-
-            // Avoid collisions with other codesets in this resource (duplicate codeset names)
-            // Add numeric suffix (2, 3, ...) if needed
-            let base_id = codeset_id.clone();
-            let mut counter = 2;
-            while used_codeset_ids.contains(&codeset_id) {
-                codeset_id = format!("{}{}", base_id, counter);
-                counter += 1;
-            }
-            used_codeset_ids.insert(codeset_id.clone());
-
-            xml.push_str(&format!("        <codeset name=\"{}\" id=\"{}\">\n", codeset.name, codeset_id));
-            xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&codeset.description)));
-            xml.push_str("          <codes>\n");
-            for (code, display, definition) in &codeset.codes {
-                xml.push_str(&format!("            <code name=\"{}\" value=\"{}\">\n",
-                    escape_xml(display),
-                    escape_xml(code)));
-                xml.push_str(&format!("              <description>{}</description>\n", escape_xml(definition)));
-                xml.push_str("            </code>\n");
-            }
-            xml.push_str("          </codes>\n");
-            xml.push_str("        </codeset>\n");
-        }
-        xml.push_str("      </codesets>\n");
-    }
-
-    // Search parameters
-    // Skip search parameters for Bundle - bundles are never stored in the database
-    if resource.name != "Bundle" {
-        xml.push_str("      <searches>\n");
-        for param in &resource.search_params {
-            generate_search_xml(xml, param, &resource.name, property_type_map, valid_ids)?;
-        }
-        xml.push_str("      </searches>\n");
-    } else {
-        xml.push_str("      <searches/>\n");
-    }
-
-    xml.push_str("    </resource>\n");
-
-    Ok(())
-}
-
-fn generate_backbone_element_xml(xml: &mut String, backbone: &BackboneElementInfo, _resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    // Generate element ID following Telemed5000 convention
-    // e.g., "Observation.component" -> ID "observationcomponent"
-    let element_id = backbone.path.replace(".", "").to_lowercase();
-    let element_name = capitalize_first(&backbone.name);
-
-    // Only output backbone="true" since default is "false"
-    xml.push_str(&format!("        <element id=\"{}\" name=\"{}\" backbone=\"true\">\n", element_id, element_name));
-    xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&backbone.description)));
-
-    // Properties
-    xml.push_str("          <properties>\n");
-    for property in &backbone.properties {
-        // Generate property XML with the full dotted path as the parent
-        // Following Telemed5000 convention: property IDs use full dotted path from resource root
-        // e.g., "ConceptMap.group.element" property has ID "conceptmap.group.element"
-        let parent_path_lower = backbone.path.to_lowercase();
-        generate_property_xml_with_parent(xml, property, &parent_path_lower, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
-    }
-    xml.push_str("          </properties>\n");
-
-    xml.push_str("          <elements/>\n");
-    xml.push_str("          <codesets/>\n");
-    xml.push_str("        </element>\n");
-
-    Ok(())
-}
-
-fn generate_element_xml(xml: &mut String, complex_type: &StructureDefinition, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let element_id = complex_type.type_name.to_lowercase();
-
-    xml.push_str(&format!("    <element id=\"{}\" name=\"{}\">\n", element_id, complex_type.name));
-    xml.push_str(&format!("      <description>{}</description>\n", escape_xml(&complex_type.description.as_ref().unwrap_or(&String::new()))));
-
-    // Properties
-    xml.push_str("      <properties>\n");
-    if let Some(snapshot) = &complex_type.snapshot {
-        for elem in &snapshot.element {
-            // Only include direct properties of the complex type (not nested or root)
-            if elem.path.matches('.').count() == 1 && elem.path != complex_type.type_name {
-                let name = elem.path.split('.').last().unwrap_or("").to_string();
-                let types = elem.types.as_ref()
-                    .map(|t| t.iter().map(|et| TypeInfo {
-                        code: et.code.clone(),
-                        target_resources: et.target_profile.as_ref()
-                            .map(|profiles| profiles.iter()
-                                .filter_map(|url| url.split('/').last().map(String::from))
-                                .collect())
-                            .unwrap_or_default()
-                    }).collect())
-                    .unwrap_or_default();
-
-                let cardinality = format!("{}..{}",
-                    elem.min.unwrap_or(0),
-                    elem.max.as_ref().map(|s| s.as_str()).unwrap_or("*")
-                );
-
-                // Extract binding name and ValueSet URL
-                let (binding_name, value_set_url) = elem.binding.as_ref()
-                    .map(|binding| {
-                        let name = binding.extension.as_ref().and_then(|extensions| {
-                            for ext in extensions {
-                                if let Some(url) = ext.get("url").and_then(|v| v.as_str()) {
-                                    if url == "http://hl7.org/fhir/StructureDefinition/elementdefinition-bindingName" {
-                                        if let Some(value) = ext.get("valueString").and_then(|v| v.as_str()) {
-                                            return Some(value.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                            None
-                        });
-                        let url = binding.value_set.clone();
-                        (name, url)
-                    })
-                    .unwrap_or((None, None));
-
-                let element_info = ElementInfo {
-                    name,
-                    path: elem.path.clone(),
-                    types,
-                    description: elem.definition.clone()
-                        .or_else(|| elem.short_description.clone())
-                        .unwrap_or_default(),
-                    cardinality,
-                    binding_name,
-                    value_set_url,
-                    is_summary: elem.is_summary.unwrap_or(false),
-                    is_modifier: elem.is_modifier.unwrap_or(false),
-                };
-
-                generate_property_xml(xml, &element_info, &complex_type.name, valueset_to_codesystem, codeset_id_to_name, valid_ids)?;
-            }
-        }
-    }
-    xml.push_str("      </properties>\n");
-
-    xml.push_str("      <elements/>\n");
-    xml.push_str("      <codesets/>\n");
-    xml.push_str("    </element>\n");
-
-    Ok(())
-}
-
-fn generate_property_xml(xml: &mut String, element: &ElementInfo, resource_name: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    // Follow Telemed5000 naming convention: {resource_lowercase}.{property_lowercase}
-    let parent_id = resource_name.to_lowercase();
-    generate_property_xml_with_parent(xml, element, &parent_id, valueset_to_codesystem, codeset_id_to_name, valid_ids)
-}
-
-fn generate_property_xml_with_backbone(xml: &mut String, element: &ElementInfo, resource_name: &str, backbone_elements: &[BackboneElementInfo], valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if this property refers to a BackboneElement
-    // If so, replace "BackboneElement" with the specific backbone element ID
-    if element.types.len() == 1 && element.types[0].code == "BackboneElement" {
-        // Find the matching backbone element
-        if let Some(backbone) = backbone_elements.iter().find(|b| b.name == element.name) {
-            // Create a modified element with the specific backbone element ref
-            let backbone_element_id = backbone.path.replace(".", "").to_lowercase();
-            let mut modified_element = element.clone();
-            modified_element.types = vec![TypeInfo {
-                code: backbone_element_id,
-                target_resources: vec![],
-            }];
-            return generate_property_xml(xml, &modified_element, resource_name, valueset_to_codesystem, codeset_id_to_name, valid_ids);
-        }
-    }
-
-    // Not a backbone element, generate normally
-    generate_property_xml(xml, element, resource_name, valueset_to_codesystem, codeset_id_to_name, valid_ids)
-}
-
-fn generate_property_xml_with_parent(xml: &mut String, element: &ElementInfo, parent_id: &str, valueset_to_codesystem: &HashMap<String, String>, codeset_id_to_name: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    // Remove [x] suffix from choice types (e.g., deceased[x] -> deceased)
-    let property_name_clean = element.name.replace("[x]", "");
-    let property_id = format!("{}.{}",
-        parent_id,
-        to_lowercase_preserve_digits(&property_name_clean)
-    );
-    let is_collection = element.cardinality.ends_with("*");
-
-    // Resolve binding name using ValueSet URL if available
-    let resolved_binding = resolve_binding_name(
-        element.binding_name.as_ref(),
-        element.value_set_url.as_ref(),
-        valueset_to_codesystem,
-        codeset_id_to_name
-    );
-
-    // Check if this is a true variant type (choice type with multiple types)
-    let is_variant = element.types.len() > 1;
-
-    if is_variant {
-        // Choice type (e.g., value[x], deceased[x]) - use type="variant" and <variants>
-        // Suppress default values: type="string" (but variant is not default), iscollection="false", notnull="false", summary="false", modifier="false"
-        // Output id last, and use cleaned name (without [x])
-        xml.push_str(&format!(
-            "        <property name=\"{}\" type=\"variant\"{}{}{}{} id=\"{}\">\n",
-            property_name_clean,
-            attr_bool_if_not_default("iscollection", is_collection, false),
-            attr_bool_if_not_default("notnull", false, false),
-            attr_bool_if_not_default("summary", element.is_summary, false),
-            attr_bool_if_not_default("modifier", element.is_modifier, false),
-            property_id
-        ));
-        xml.push_str(&format!("          <description>{}</description>\n", escape_xml(&element.description)));
-
-        xml.push_str("          <variants>\n");
-        for type_info in &element.types {
-            let dtd_type = map_fhir_type_to_dtd(&type_info.code);
-            if dtd_type == "element" {
-                // Complex type - add ref attribute
-                let element_ref = fhir_type_to_element_ref(&type_info.code);
-
-                // Check if this is a Reference with target resources
-                if type_info.code == "Reference" && !type_info.target_resources.is_empty() {
-                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\">\n", dtd_type, element_ref));
-                    xml.push_str("              <targets>\n");
-                    for target in &type_info.target_resources {
-                        xml.push_str(&format!("                <target resource=\"{}\"/>\n", target));
-                    }
-                    xml.push_str("              </targets>\n");
-                    xml.push_str("            </variant>\n");
-                } else {
-                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, element_ref));
-                }
-            } else if dtd_type == "code" && resolved_binding.is_some() {
-                // Code with binding - add ref to codeset using resolved binding
-                let binding_name = resolved_binding.as_ref().unwrap();
-                if binding_name != "??" {
-                    let binding_ref = to_lowercase_preserve_digits(binding_name);
-                    xml.push_str(&format!("            <variant type=\"{}\" ref=\"{}\"/>\n", dtd_type, binding_ref));
-                } else {
-                    // No ref attribute for invalid binding
-                    xml.push_str(&format!("            <variant type=\"{}\"/>\n", dtd_type));
-                }
-            } else {
-                // Primitive type - no ref
-                xml.push_str(&format!("            <variant type=\"{}\"/>\n", dtd_type));
-            }
-        }
-        xml.push_str("          </variants>\n");
-        xml.push_str("        </property>\n");
-    } else if element.types.len() == 1 {
-        // Single type - flatten by putting type directly on property
-        // Output on one line: <property ...><description>...</description></property>
-        let fhir_type = map_fhir_type_to_dtd(&element.types[0].code);
-
-        if fhir_type == "element" {
-            // Complex type - add ref attribute
-            let element_ref = fhir_type_to_element_ref(&element.types[0].code);
-            let property_element = format!(
-                "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-                element.name,
-                attr_if_not_default("type", fhir_type, "string"),
-                format!(" ref=\"{}\"", element_ref),  // ref is always required when type="element"
-                attr_bool_if_not_default("iscollection", is_collection, false),
-                attr_bool_if_not_default("notnull", false, false),
-                attr_bool_if_not_default("summary", element.is_summary, false),
-                attr_bool_if_not_default("modifier", element.is_modifier, false),
-                property_id,
-                escape_xml(&element.description)
-            );
-            xml.push_str(&maybe_comment_invalid_ref(&property_element, &element_ref, valid_ids));
-        } else if fhir_type == "code" && resolved_binding.is_some() {
-            // Code type with ValueSet binding - add ref to codeset using resolved binding
-            let binding_name = resolved_binding.as_ref().unwrap();
-            if binding_name == "??" {
-                // Treat as code without binding (no ref attribute)
-                xml.push_str(&format!(
-                    "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-                    element.name,
-                    attr_if_not_default("type", fhir_type, "string"),
-                    attr_bool_if_not_default("iscollection", is_collection, false),
-                    attr_bool_if_not_default("notnull", false, false),
-                    attr_bool_if_not_default("summary", element.is_summary, false),
-                    attr_bool_if_not_default("modifier", element.is_modifier, false),
-                    property_id,
-                    escape_xml(&element.description)
-                ));
-            } else {
-                let binding_ref = to_lowercase_preserve_digits(binding_name);
-                xml.push_str(&format!(
-                    "        <property name=\"{}\"{}{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-                    element.name,
-                    attr_if_not_default("type", fhir_type, "string"),
-                    format!(" ref=\"{}\"", binding_ref),  // ref is always required when type="code" with binding
-                    attr_bool_if_not_default("iscollection", is_collection, false),
-                    attr_bool_if_not_default("notnull", false, false),
-                    attr_bool_if_not_default("summary", element.is_summary, false),
-                    attr_bool_if_not_default("modifier", element.is_modifier, false),
-                    property_id,
-                    escape_xml(&element.description)
-                ));
-            }
-        } else {
-            // Primitive type - no ref
-            xml.push_str(&format!(
-                "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-                element.name,
-                attr_if_not_default("type", fhir_type, "string"),
-                attr_bool_if_not_default("iscollection", is_collection, false),
-                attr_bool_if_not_default("notnull", false, false),
-                attr_bool_if_not_default("summary", element.is_summary, false),
-                attr_bool_if_not_default("modifier", element.is_modifier, false),
-                property_id,
-                escape_xml(&element.description)
-            ));
-        }
-    } else {
-        // No type info - default to element without ref (will need manual curation)
-        xml.push_str(&format!(
-            "        <property name=\"{}\"{}{}{}{}{} id=\"{}\"><description>{}</description></property>\n",
-            element.name,
-            attr_if_not_default("type", "element", "string"),
-            attr_bool_if_not_default("iscollection", is_collection, false),
-            attr_bool_if_not_default("notnull", false, false),
-            attr_bool_if_not_default("summary", element.is_summary, false),
-            attr_bool_if_not_default("modifier", element.is_modifier, false),
-            property_id,
-            escape_xml(&element.description)
-        ));
-    }
-
-    Ok(())
-}
-
-fn generate_search_xml(xml: &mut String, param: &SearchParamInfo, resource_name: &str, property_type_map: &HashMap<String, String>, valid_ids: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-    // Parse the expression to generate paths
-    // Handle OR expressions by splitting on "|"
-    let expression_branches = param.expression.split('|').map(|s| s.trim()).collect::<Vec<_>>();
-
-    // Filter branches to only include paths starting with the current resource
-    // This prevents multi-resource search parameters (e.g., "email" on Patient, Person, Practitioner)
-    // from generating paths for other resources in the current resource's definition
-    let resource_prefix = resource_name.to_lowercase();
-
-    // Collect valid paths first to check if we have any
-    let mut valid_paths = Vec::new();
-
-    for expr in expression_branches {
-        if expr.is_empty() {
-            continue;
-        }
-
-        // Skip expressions with .extension() calls - too complex to parse (URLs with dots/slashes)
-        // Following Telemed5000's approach: omit extension paths, keep only primary paths
-        // Examples skipped:
-        //   - CareTeam.extension('http://hl7.org/fhir/StructureDefinition/careteam-alias').value
-        //   - Location.extension('http://hl7.org/fhir/StructureDefinition/location-boundary-geojson').value
-        if expr.contains(".extension(") {
-            continue;
-        }
-
-        // Check if this expression starts with the current resource
-        // Handle parentheses: "(Patient.deceased.ofType(dateTime))" -> "Patient"
-        let expr_trimmed = expr.trim_start_matches('(').trim();
-        let expr_resource = expr_trimmed.split('.').next().unwrap_or("").to_lowercase();
-
-        if expr_resource != resource_prefix {
-            // Skip this branch - it's for a different resource
-            continue;
-        }
-
-        valid_paths.push(expr);
-    }
-
-    // Skip this search parameter entirely if there are no valid paths
-    if valid_paths.is_empty() {
-        return Ok(());
-    }
-
-    // Convert parameter code to PascalCase for Rust-friendly query attribute
-    // e.g., "address-city" -> "AddressCity", "email" -> "Email"
-    let query_name = param.code
-        .split('-')
-        .map(|part| capitalize_first(part))
-        .collect::<Vec<_>>()
-        .join("");
-
-    // Suppress default type="string"
-    xml.push_str(&format!(
-        "        <search name=\"{}\" query=\"{}\"{}>\n",
-        param.name,
-        query_name,
-        attr_if_not_default("type", &param.param_type, "string")
-    ));
-
-    xml.push_str("          <paths>\n");
-
-    for expr in valid_paths {
-        xml.push_str("            <path>\n");
-        xml.push_str("              <parts>\n");
-
-        // Parse the expression and generate parts and casts
-        let (parts, casts) = parse_fhirpath_expression(expr, property_type_map);
-        for part_ref in &parts {
-            let part_element = format!("                <part ref=\"{}\"/>\n", part_ref);
-            xml.push_str(&maybe_comment_invalid_ref(&part_element, part_ref, valid_ids));
-        }
-
-        xml.push_str("              </parts>\n");
-
-        // Generate casts if any were found
-        if !casts.is_empty() {
-            xml.push_str("              <casts>\n");
-            for cast_type in &casts {
-                xml.push_str(&format!("                <cast to=\"{}\"/>\n", cast_type));
-            }
-            xml.push_str("              </casts>\n");
-        }
-
-        // Generate targets for reference search parameters
-        if param.param_type == "reference" && !param.targets.is_empty() {
-            xml.push_str("              <targets>\n");
-            for target in &param.targets {
-                xml.push_str(&format!("                <target resource=\"{}\"/>\n", target));
-            }
-            xml.push_str("              </targets>\n");
-        }
-
-        // Generate components for composite search parameters
-        if param.is_composite && !param.components.is_empty() {
-            // Determine the prefix for component refs based on cast types
-            // If the base expression has a cast (e.g., ".ofType(Ratio)"), the component refs
-            // are relative to the cast type, not the base path.
-            // Examples:
-            //   - "Observation.component" → components are "observation.component.code", "observation.component.value"
-            //   - "Ingredient.substance.strength.presentation.ofType(Ratio)" → components are "ratio.numerator", "ratio.denominator"
-            let component_prefix = if !casts.is_empty() {
-                // Use the last cast type as the prefix (lowercased)
-                casts.last().unwrap().to_lowercase()
-            } else {
-                // No casts, use the base path
-                parse_base_path(&param.expression)
-            };
-
-            // Check if any components are valid first
-            let component_refs: Vec<_> = param.components.iter().map(|component| {
-                let component_path = parse_component_path(&component.expression);
-                if component_prefix.is_empty() {
-                    component_path
-                } else {
-                    format!("{}.{}", component_prefix, component_path)
-                }
-            }).collect();
-
-            let has_valid_component = component_refs.iter().any(|ref_id| valid_ids.contains(ref_id));
-
-            if has_valid_component {
-                // Generate normal <components> block with individual comments for invalid refs
-                xml.push_str("              <components>\n");
-                for (component, component_ref) in param.components.iter().zip(component_refs.iter()) {
-                    let component_element = format!("                <component ref=\"{}\"/>\n", component_ref);
-                    xml.push_str(&maybe_comment_invalid_ref(&component_element, component_ref, valid_ids));
-                }
-                xml.push_str("              </components>\n");
-            } else {
-                // Comment out entire components block (no nested comments)
-                xml.push_str("              <!-- INVALID COMPONENTS BLOCK - all refs invalid:\n");
-                for component_ref in &component_refs {
-                    xml.push_str(&format!("                INVALID REF: {} - <component ref=\"{}\"/>\n", component_ref, component_ref));
-                }
-                xml.push_str("              -->\n");
-            }
-        }
-
-        xml.push_str("            </path>\n");
-    }
-
-    xml.push_str("          </paths>\n");
-    xml.push_str("        </search>\n");
-
-    Ok(())
-}
-
-fn map_fhir_type_to_dtd(fhir_type: &str) -> &str {
-    match fhir_type {
-        "string" | "code" | "uri" | "url" | "canonical" | "oid" | "uuid" | "id" | "markdown" | "xhtml" => fhir_type,
-        "boolean" => "boolean",
-        "integer" | "positiveInt" | "unsignedInt" => "integer",
-        "integer64" => "integer64",
-        "decimal" => "decimal",
-        "date" => "date",
-        "dateTime" | "instant" => "dateTime",
-        "time" => "time",
-        "base64Binary" => "base64Binary",
-        // FHIR internal types - map to primitive
-        "http://hl7.org/fhirpath/System.String" => "string",
-        t if t.starts_with("http://hl7.org/fhirpath/") => "string", // Other FHIRPath primitives
-        _ => "element", // All complex types (including Reference) are elements
-    }
-}
-
-/// Convert CamelCase to lowercase, preserving digits
-/// Examples: birthDate -> birthdate, multipleBirth -> multiplebirth
-fn to_lowercase_preserve_digits(s: &str) -> String {
-    s.chars().map(|c| c.to_ascii_lowercase()).collect()
-}
-
-/// Capitalize first letter of a string
-/// Examples: component -> Component, name -> Name
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().chain(chars).collect(),
-    }
-}
-
-/// Map FHIR complex type names to their lowercase element ref
-/// Examples: HumanName -> humanname, ContactPoint -> contactpoint, Reference -> reference
-fn fhir_type_to_element_ref(fhir_type: &str) -> String {
-    to_lowercase_preserve_digits(fhir_type)
-}
-
-/// Parse base path from search parameter expression
-/// Examples:
-///   "Observation.component" -> "observation.component"
-///   "Patient" -> "patient"
-///   "Observation | Observation.component" -> "observation.component" (takes last OR branch)
-///   "Ingredient.substance.strength.concentration.ofType(Ratio)" -> "ingredient.substance.strength.concentration"
-fn parse_base_path(expression: &str) -> String {
-    // Simple implementation: convert to lowercase and return
-    // More complex expressions would need proper FHIRPath parsing
-    if expression.is_empty() {
-        return String::new();
-    }
-
-    // For OR expressions (e.g., "Observation | Observation.component"), take the more specific path (last one)
-    // TODO: Properly handle OR expressions by generating multiple paths
-    let or_parts: Vec<&str> = expression.split('|').map(|s| s.trim()).collect();
-    let selected = or_parts.last().unwrap_or(&"");
-
-    // Strip any parentheses or filters (e.g., "Observation.component.where(...)")
-    let clean = selected.split(".where(").next().unwrap_or(selected);
-
-    // Strip .ofType() casts - e.g., "Ingredient.substance.strength.concentration.ofType(Ratio)" -> "Ingredient.substance.strength.concentration"
-    let clean = clean.split(".ofType(").next().unwrap_or(clean);
-
-    clean.to_lowercase()
-}
-
-/// Parse component expression to property path
-/// Examples:
-///   "code" -> "code"
-///   "value.ofType(CodeableConcept)" -> "value"
-///   "(value.ofType(Quantity))" -> "value"
-///   "value.ofType(boolean)" -> "value"
-fn parse_component_path(expression: &str) -> String {
-    if expression.is_empty() {
-        return String::new();
-    }
-
-    // Strip leading/trailing parentheses - e.g., "(value.ofType(CodeableConcept))" -> "value.ofType(CodeableConcept)"
-    let clean = expression.trim().trim_matches(|c| c == '(' || c == ')');
-
-    // Strip ofType() casts
-    let without_oftype = clean.split(".ofType(").next().unwrap_or(clean);
-
-    // Strip as() casts
-    let without_as = without_oftype.split(" as ").next().unwrap_or(without_oftype);
-
-    without_as.trim().to_lowercase()
-}
-
-/// Check if a property name refers to a complex type (vs backbone element)
-/// Complex types are reusable across resources (Address, HumanName, etc.)
-/// Backbone elements are resource-specific (component, link, qualification, etc.)
-fn is_complex_type(property_name: &str) -> bool {
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+fn is_resource(type_name: &str) -> bool {
     matches!(
-        property_name,
-        "name" | "address" | "telecom" | "identifier" | "code" | "value" |
-        "meta" | "extension" | "period" | "range" | "ratio" | "reference" |
-        "annotation" | "attachment" | "coding" | "contactpoint" | "humanname" |
-        "quantity" | "duration" | "distance" | "count" | "age" | "money" |
-        "sampleddata" | "signature" | "timing" | "dosage" | "codeableconcept" |
-        "codeablereference"
+        type_name,
+        "Resource" | "Account" | "ActivityDefinition" | "ActorDefinition"
+        | "AdministrableProductDefinition" | "AdverseEvent" | "AllergyIntolerance"
+        | "Appointment" | "AppointmentResponse" | "ArtifactAssessment" | "AuditEvent"
+        | "Basic" | "Binary" | "BiologicallyDerivedProduct"
+        | "BiologicallyDerivedProductDispense" | "BodyStructure" | "Bundle"
+        | "CapabilityStatement" | "CarePlan" | "CareTeam" | "CatalogEntry"
+        | "ChargeItem" | "ChargeItemDefinition" | "Citation" | "Claim"
+        | "ClaimResponse" | "ClinicalImpression" | "ClinicalUseDefinition"
+        | "CodeSystem" | "Communication" | "CommunicationRequest"
+        | "CompartmentDefinition" | "Composition" | "ConceptMap" | "Condition"
+        | "ConditionDefinition" | "Consent" | "Contract" | "Coverage"
+        | "CoverageEligibilityRequest" | "CoverageEligibilityResponse"
+        | "DetectedIssue" | "Device" | "DeviceAssociation" | "DeviceDefinition"
+        | "DeviceDispense" | "DeviceMetric" | "DeviceRequest" | "DeviceUsage"
+        | "DeviceUseStatement" | "DiagnosticReport" | "DocumentManifest"
+        | "DocumentReference" | "Encounter" | "EncounterHistory" | "Endpoint"
+        | "EnrollmentRequest" | "EnrollmentResponse" | "EpisodeOfCare"
+        | "EventDefinition" | "Evidence" | "EvidenceReport" | "EvidenceVariable"
+        | "ExampleScenario" | "ExplanationOfBenefit" | "FamilyMemberHistory"
+        | "Flag" | "FormularyItem" | "GenomicStudy" | "Goal" | "GraphDefinition"
+        | "Group" | "GuidanceResponse" | "HealthcareService" | "ImagingSelection"
+        | "ImagingStudy" | "Immunization" | "ImmunizationEvaluation"
+        | "ImmunizationRecommendation" | "ImplementationGuide" | "Ingredient"
+        | "InsurancePlan" | "InventoryItem" | "InventoryReport" | "Invoice"
+        | "Library" | "Linkage" | "List" | "Location"
+        | "ManufacturedItemDefinition" | "Measure" | "MeasureReport" | "Media"
+        | "Medication" | "MedicationAdministration" | "MedicationDispense"
+        | "MedicationKnowledge" | "MedicationRequest" | "MedicationStatement"
+        | "MedicinalProductDefinition" | "MessageDefinition" | "MessageHeader"
+        | "MolecularSequence" | "NamingSystem" | "NutritionIntake"
+        | "NutritionOrder" | "NutritionProduct" | "Observation"
+        | "ObservationDefinition" | "OperationDefinition" | "OperationOutcome"
+        | "Organization" | "OrganizationAffiliation" | "PackagedProductDefinition"
+        | "Parameters" | "Patient" | "PaymentNotice" | "PaymentReconciliation"
+        | "Permission" | "Person" | "PlanDefinition" | "Practitioner"
+        | "PractitionerRole" | "Procedure" | "Provenance" | "Questionnaire"
+        | "QuestionnaireResponse" | "RegulatedAuthorization" | "RelatedPerson"
+        | "RequestGroup" | "RequestOrchestration" | "Requirements"
+        | "ResearchDefinition" | "ResearchElementDefinition" | "ResearchStudy"
+        | "ResearchSubject" | "RiskAssessment" | "Schedule" | "SearchParameter"
+        | "ServiceRequest" | "Slot" | "Specimen" | "SpecimenDefinition"
+        | "StructureDefinition" | "StructureMap" | "Subscription"
+        | "SubscriptionStatus" | "SubscriptionTopic" | "Substance"
+        | "SubstanceDefinition" | "SupplyDelivery" | "SupplyRequest" | "Task"
+        | "TerminologyCapabilities" | "TestPlan" | "TestReport" | "TestScript"
+        | "Transport" | "ValueSet" | "VerificationResult" | "VisionPrescription"
     )
 }
 
-/// Map FHIR property names to their type names
-/// This is used when a property is identified as a complex type
-/// Examples: "name" -> "humanname", "address" -> "address", "telecom" -> "contactpoint"
-fn map_property_to_type(property_name: &str) -> String {
-    match property_name {
-        "name" => "humanname".to_string(),
-        "address" => "address".to_string(),
-        "telecom" => "contactpoint".to_string(),
-        "identifier" => "identifier".to_string(),
-        "code" => "codeableconcept".to_string(),
-        "value" => "value".to_string(),  // Value is choice type, may need refinement
-        "meta" => "meta".to_string(),
-        "period" => "period".to_string(),
-        "range" => "range".to_string(),
-        "ratio" => "ratio".to_string(),
-        "reference" => "reference".to_string(),
-        "annotation" => "annotation".to_string(),
-        "attachment" => "attachment".to_string(),
-        "coding" => "coding".to_string(),
-        "quantity" => "quantity".to_string(),
-        "duration" => "duration".to_string(),
-        "distance" => "distance".to_string(),
-        "count" => "count".to_string(),
-        "age" => "age".to_string(),
-        "money" => "money".to_string(),
-        "sampleddata" => "sampleddata".to_string(),
-        "signature" => "signature".to_string(),
-        "timing" => "timing".to_string(),
-        "dosage" => "dosage".to_string(),
-        "codeablereference" => "codeablereference".to_string(),
-        "codeableconcept" => "codeableconcept".to_string(),
-        "humanname" => "humanname".to_string(),
-        "contactpoint" => "contactpoint".to_string(),
-        "extension" => "extension".to_string(),
-        _ => property_name.to_string(),  // Default: use property name as type name
-    }
+fn is_active(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "ActivityDefinition" | "Appointment" | "Basic" | "Binary" | "CarePlan"
+        | "CareTeam" | "Citation" | "CodeSystem" | "Communication" | "Composition"
+        | "Condition" | "Device" | "DeviceDefinition" | "DeviceRequest"
+        | "DiagnosticReport" | "DocumentReference" | "Encounter" | "EpisodeOfCare"
+        | "Goal" | "Group" | "Ingredient" | "Location" | "Media" | "Medication"
+        | "MedicationStatement" | "Observation" | "Organization" | "Patient"
+        | "PlanDefinition" | "Practitioner" | "Provenance" | "Questionnaire"
+        | "QuestionnaireResponse" | "RelatedPerson" | "ResearchStudy"
+        | "ResearchSubject" | "RiskAssessment" | "Schedule" | "StructureDefinition"
+        | "Subscription" | "Task" | "TestScript" | "ValueSet"
+    )
 }
 
-/// Parse a FHIRPath expression and convert it to property references
-/// Returns (parts, casts) tuple where:
-///   - parts: Vec of property references (e.g., ["patient.birthdate"])
-///   - casts: Vec of cast type names (e.g., ["Reference", "CodeableConcept"])
-/// Examples:
-///   "Patient.birthDate" -> (["patient.birthdate"], [])
-///   "Patient.name.family" -> (["patient.name", "humanname.family"], [])
-///   "Observation.code" -> (["observation.code"], [])
-///   "Observation.value.ofType(Quantity)" -> (["observation.value"], ["Quantity"])
-///   "instance as Reference" -> (["adverseevent.suspectentity.instance"], ["Reference"])
-fn parse_fhirpath_expression(expression: &str, property_type_map: &HashMap<String, String>) -> (Vec<String>, Vec<String>) {
-    let mut parts = Vec::new();
-    let mut casts = Vec::new();
+fn is_model(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "Resource" | "Bundle" | "CapabilityStatement" | "CompartmentDefinition"
+        | "ConceptMap" | "OperationDefinition" | "OperationOutcome" | "SearchParameter"
+    )
+}
 
-    if expression.is_empty() {
-        return (parts, casts);
-    }
+fn is_primitive(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "date" | "dateTime" | "string" | "integer" | "integer64" | "oid"
+        | "canonical" | "uri" | "uuid" | "url" | "instant" | "boolean"
+        | "base64Binary" | "unsignedInt" | "markdown" | "id" | "time"
+        | "positiveInt" | "decimal" | "code" | "xhtml"
+    )
+}
 
-    // Clean up the expression
-    // Remove boolean logic - e.g., "Patient.deceased.exists() and Patient.deceased != false" -> "Patient.deceased"
-    let clean_expr = expression
-        .split(" and ")
-        .next()
-        .unwrap_or(expression)
-        .split(" or ")
-        .next()
-        .unwrap_or(expression)
-        .trim();
+fn is_data_type(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "Meta" | "Address" | "Age" | "Availability" | "Attachment" | "Contributor"
+        | "Count" | "DataRequirement" | "Distance" | "Dosage" | "Duration" | "Element"
+        | "ExtendedContactDetail" | "Money" | "MonetaryComponent" | "HumanName"
+        | "ContactPoint" | "MarketingStatus" | "Identifier" | "SubstanceAmount"
+        | "Coding" | "SampledData" | "Population" | "Ratio" | "Range" | "Reference"
+        | "TriggerDefinition" | "Quantity" | "Period" | "RelatedArtifact"
+        | "Annotation" | "ProductShelfLife" | "ContactDetail" | "UsageContext"
+        | "Expression" | "Signature" | "Timing" | "RelativeTime"
+        | "ProdCharacteristic" | "CodeableConcept" | "ParameterDefinition"
+        | "ElementDefinition" | "Narrative" | "CodeableReference" | "RatioRange"
+        | "VirtualServiceDetail"
+    )
+}
 
-    // Remove .exists() calls
-    let clean_expr = clean_expr
-        .replace(".exists()", "");
+// Shared codesets that go in the root <fhir> element
+fn get_shared_codesets() -> HashSet<&'static str> {
+    [
+        "administrativegender", "consentprovisiontype", "codesystemcontentmode",
+        "consentdatameaning", "searchcomparator", "searchmodifiercode",
+        "encounterstatus", "eventstatus", "evidencevariablehandling",
+        "examplescenarioactortype", "devicenametype", "observationstatus",
+        "publicationstatus", "daysofweek", "quantitycomparator",
+        "participationstatus", "financialresourcestatuscodes", "use",
+        "requestpriority", "requeststatus", "requestintent",
+        "claimprocessingcodes", "documentreferencestatus",
+        "documentrelationshiptype", "compositionstatus", "listmode",
+        "notetype", "compartmenttype", "invoicecomponenttype",
+        "invoicepricecomponenttype", "searchparamtype", "actionparticipanttype",
+        "actionconditionkind", "actionrelationshiptype", "actiongroupingbehavior",
+        "actionselectionbehavior", "actionrequiredbehavior",
+        "actionprecheckbehavior", "actioncardinalitybehavior",
+        "evidencevariabletype", "groupmeasure", "fhirversion", "fhirtypes",
+        "capabilitystatementkind", "filteroperator", "bindingstrength",
+        "operationparameteruse", "medicationstatuscodes", "remittanceoutcome",
+        "subscriptionstatuscodes", "resourcetype", "mimetypes", "fhiralltypes",
+        "alllanguages", "commonlanguages", "versionindependentresourcetypesall",
+    ]
+    .iter()
+    .copied()
+    .collect()
+}
 
-    // Remove leading/trailing parentheses - e.g., "(Patient.deceased.ofType(dateTime))" -> "Patient.deceased.ofType(dateTime)"
-    let clean_expr = clean_expr.trim_matches(|c| c == '(' || c == ')');
+// Unsupported properties (extensions, etc.)
+fn get_unsupported_properties() -> HashSet<&'static str> {
+    ["contained", "extension", "modifierExtension"]
+        .iter()
+        .copied()
+        .collect()
+}
 
-    // Remove .where() filters - e.g., "Patient.subject.where(resolve() is Patient)" -> "Patient.subject"
-    let clean_expr = clean_expr
-        .split(".where(")
-        .next()
-        .unwrap_or(&clean_expr);
+fn main() -> Result<(), Box<dyn Error>> {
+    println!("Modeler - FHIR R5 to XML converter (Rust port)");
 
-    // Remove .first() calls
-    let clean_expr = clean_expr
-        .split(".first(")
-        .next()
-        .unwrap_or(clean_expr);
+    // Load FHIR R5 JSON files
+    let profiles_resources_json = fs::read_to_string("fhir-r5/profiles-resources.json")?;
+    let profiles_types_json = fs::read_to_string("fhir-r5/profiles-types.json")?;
+    let search_parameters_json = fs::read_to_string("fhir-r5/search-parameters.json")?;
+    let valuesets_json = fs::read_to_string("fhir-r5/valuesets.json")?;
 
-    // Split by dots to get path segments
-    let segments: Vec<&str> = clean_expr.split('.').collect();
+    println!("Parsing JSON files...");
+    let resources_bundle: Bundle = serde_json::from_str(&profiles_resources_json)?;
+    let types_bundle: Bundle = serde_json::from_str(&profiles_types_json)?;
+    let search_bundle: Bundle = serde_json::from_str(&search_parameters_json)?;
+    let valuesets_bundle: Bundle = serde_json::from_str(&valuesets_json)?;
 
-    if segments.is_empty() {
-        return (parts, casts);
-    }
+    // Extract specific resource types
+    let mut structure_defs = Vec::new();
+    let mut operation_defs = Vec::new();
 
-    // First segment is the resource name (e.g., "Patient", "Observation")
-    let resource_name = segments[0].to_lowercase();
-
-    // Build paths following FHIR model rules, using Telemed5000's approach:
-    // 1. First level is always resource.property: ["patient.address"]
-    // 2. For subsequent levels, look up the property type from the type map
-    // 3. If the type is a complex type (not a backbone element), use the type as the prefix
-    // 4. If the type starts with the current element ID, it's a backbone element, use property ID
-
-    let mut current_prefix = resource_name.clone();
-
-    for i in 1..segments.len() {
-        let segment = segments[i];
-
-        // Handle .ofType() casts - extract the type and use it as the prefix for subsequent properties
-        // e.g., "Observation.value.ofType(CodeableConcept).text" -> use CodeableConcept as prefix for .text
-        if segment.starts_with("ofType(") {
-            // Extract type from ofType(TypeName)
-            let type_name = segment
-                .trim_start_matches("ofType(")
-                .trim_end_matches(")")
-                .trim();
-
-            // Store the cast (preserve original case for type name)
-            casts.push(type_name.to_string());
-
-            // Update current_prefix to this type for the next iteration
-            current_prefix = type_name.to_lowercase();
-            continue;
-        }
-
-        // Strip parentheses and other noise
-        let property_name = segment
-            .split("(")
-            .next()
-            .unwrap_or(segment)
-            .trim();
-
-        // Handle " as TypeName" casts - e.g., "instance as Reference"
-        // Extract the cast type and store it, then strip from property name
-        let property_name = if let Some(as_pos) = property_name.find(" as ") {
-            let parts: Vec<&str> = property_name.split(" as ").collect();
-            if parts.len() >= 2 {
-                // Store the cast (preserve original case for type name)
-                casts.push(parts[1].trim().to_string());
-                parts[0].trim()
-            } else {
-                property_name
+    for entry in &resources_bundle.entry {
+        match &entry.resource {
+            BundleResource::StructureDefinition(sd) => {
+                if is_resource(&sd.snapshot.element[0].id) {
+                    structure_defs.push(sd.as_ref().clone());
+                }
             }
+            BundleResource::OperationDefinition(od) => {
+                operation_defs.push(od.as_ref().clone());
+            }
+            _ => {}
+        }
+    }
+
+    let mut element_defs = Vec::new();
+    for entry in &types_bundle.entry {
+        if let BundleResource::StructureDefinition(sd) = &entry.resource {
+            if is_data_type(&sd.snapshot.element[0].id) {
+                element_defs.push(sd.as_ref().clone());
+            }
+        }
+    }
+
+    let mut search_params = Vec::new();
+    for entry in &search_bundle.entry {
+        if let BundleResource::SearchParameter(sp) = &entry.resource {
+            search_params.push(sp.as_ref().clone());
+        }
+    }
+
+    // Build ValueSet and CodeSystem dictionaries
+    let mut value_sets = Vec::new();
+    let mut code_systems = Vec::new();
+
+    for entry in &valuesets_bundle.entry {
+        match &entry.resource {
+            BundleResource::ValueSet(vs) => value_sets.push(vs.as_ref().clone()),
+            BundleResource::CodeSystem(cs) => code_systems.push(cs.as_ref().clone()),
+            _ => {}
+        }
+    }
+
+    let dict_value_sets: HashMap<String, ValueSet> =
+        value_sets.iter().map(|vs| (vs.url.clone(), vs.clone())).collect();
+    let dict_code_systems: HashMap<String, CodeSystem> =
+        code_systems.iter().map(|cs| (cs.url.clone(), cs.clone())).collect();
+
+    println!("Building model...");
+    let mut model = Fhir {
+        name: "FHIR".to_string(),
+        version: "5.0.0".to_string(),
+        resources: Resources {
+            resource: Vec::new(),
+        },
+        elements: Elements {
+            element: Vec::new(),
+        },
+        codesets: Codesets {
+            codeset: Vec::new(),
+        },
+    };
+
+    // Global dictionaries for tracking elements and properties
+    let mut dict_elements: HashMap<String, Vec<Element>> = HashMap::new();
+    let mut dict_properties: HashMap<String, Vec<Property>> = HashMap::new();
+    let mut dict_property: HashMap<String, Property> = HashMap::new();
+
+    // Process resources
+    for structure_def in &structure_defs {
+        let snapshot = &structure_def.snapshot;
+        let current_element_name = &snapshot.element[0].id;
+
+        let active = if is_active(current_element_name) {
+            Some("true".to_string())
+        } else if is_model(current_element_name) {
+            Some("model".to_string())
         } else {
-            property_name
+            None
         };
 
-        // Remove [x] suffix from choice types
-        let property_name = property_name.replace("[x]", "");
+        let resource = Resource {
+            id: current_element_name.to_lowercase(),
+            active,
+            name: current_element_name.clone(),
+            description: snapshot.element[0]
+                .definition
+                .as_ref()
+                .unwrap_or(&String::new())
+                .replace('\n', "")
+                .replace('\r', "")
+                .replace('\'', ""),
+            properties: Properties {
+                property: Vec::new(),
+            },
+            elements: Elements {
+                element: Vec::new(),
+            },
+            codesets: Codesets {
+                codeset: Vec::new(),
+            },
+            searches: Searches {
+                search: Vec::new(),
+            },
+            operations: Operations {
+                operation: Vec::new(),
+            },
+        };
 
-        if property_name.is_empty() {
+        dict_elements.insert(resource.id.clone(), Vec::new());
+        dict_properties.insert(resource.id.clone(), Vec::new());
+
+        model.resources.resource.push(resource);
+
+        // Process all element definitions for this resource
+        for element_def in &snapshot.element {
+            handle_element(
+                element_def,
+                &dict_value_sets,
+                &dict_code_systems,
+                &mut dict_elements,
+                &mut dict_properties,
+                &mut dict_property,
+                &mut model,
+            );
+        }
+    }
+
+    // Process data types
+    for structure_def in &element_defs {
+        let snapshot = &structure_def.snapshot;
+        let current_element_name = &snapshot.element[0].id;
+
+        // Skip if already processed
+        if model.elements.element.iter().any(|e| e.name == *current_element_name) {
             continue;
         }
 
-        let property_name_lower = property_name.to_lowercase();
+        let is_backbone = structure_def
+            .base_definition
+            .as_ref()
+            .map(|bd| bd == "http://hl7.org/fhir/StructureDefinition/BackboneElement")
+            .unwrap_or(false);
 
-        // Build the property ID for this level
-        let property_id = format!("{}.{}", current_prefix, property_name_lower);
+        let element = Element {
+            id: current_element_name.to_lowercase(),
+            name: current_element_name.clone(),
+            explicit: None,
+            backbone: if is_backbone { Some("true".to_string()) } else { None },
+            description: snapshot.element[0]
+                .definition
+                .as_ref()
+                .unwrap_or(&String::new())
+                .replace('\n', "")
+                .replace('\r', "")
+                .replace('\'', "")
+                .replace("…", "..."),
+            properties: Properties {
+                property: Vec::new(),
+            },
+            elements: Elements {
+                element: Vec::new(),
+            },
+            codesets: Codesets {
+                codeset: Vec::new(),
+            },
+        };
 
-        // Add this part to the result
-        parts.push(property_id.clone());
+        dict_elements.insert(element.id.clone(), Vec::new());
+        dict_properties.insert(element.id.clone(), Vec::new());
 
-        // Look up the property type from the map to determine the next prefix
-        // Following Telemed5000's approach (lines 1258-1270 in Program.cs):
-        if let Some(type_ref) = property_type_map.get(&property_id) {
-            // Check if this type reference is a backbone element or a complex type
-            // Backbone elements: type ref starts with the resource name (e.g., "conceptmapgroup", "observationcomponent")
-            // Complex types: type ref is independent of resource (e.g., "humanname", "codeablereference")
+        model.elements.element.push(element);
 
-            if type_ref.starts_with(&resource_name) {
-                // Backbone element: continue building the dotted path
-                // e.g., "conceptmap.group" → next is "conceptmap.group.element"
-                current_prefix = property_id;
+        // Process all element definitions
+        for element_def in &snapshot.element {
+            handle_element(
+                element_def,
+                &dict_value_sets,
+                &dict_code_systems,
+                &mut dict_elements,
+                &mut dict_properties,
+                &mut dict_property,
+                &mut model,
+            );
+        }
+    }
+
+    // Copy properties and elements from dictionaries into model
+    println!("Copying properties and elements into model...");
+    copy_dict_to_model(&dict_elements, &dict_properties, &mut model);
+
+    println!("Building searches and operations...");
+
+    // Build searches with FHIRPath parsing
+    build_searches(&search_params, &dict_property, &mut model);
+
+    // Build operations
+    build_operations(&operation_defs, &mut model);
+
+    // Normalize model for DTD compliance
+    println!("Normalizing model for DTD compliance...");
+    normalize_model(&mut model);
+
+    // Output XML
+    println!("Writing XML output...");
+    write_xml_output(&model)?;
+
+    println!("Done!");
+    Ok(())
+}
+
+fn handle_element(
+    element_def: &ElementDefinition,
+    dict_value_sets: &HashMap<String, ValueSet>,
+    dict_code_systems: &HashMap<String, CodeSystem>,
+    dict_elements: &mut HashMap<String, Vec<Element>>,
+    dict_properties: &mut HashMap<String, Vec<Property>>,
+    dict_property: &mut HashMap<String, Property>,
+    model: &mut Fhir,
+) {
+    let unsupported = get_unsupported_properties();
+
+    let path: Vec<&str> = element_def.id.split('.').collect();
+    if path.len() == 1 {
+        return;
+    }
+
+    let name = path[path.len() - 1];
+    if unsupported.contains(name) {
+        return;
+    }
+
+    let parent_id: String = path[..path.len() - 1].join("").replace('.', "").to_lowercase();
+
+    // Handle BackboneElement or Element types
+    if !element_def.r#type.is_empty()
+        && (element_def.r#type[0].code == "BackboneElement" || element_def.r#type[0].code == "Element")
+    {
+        let explicit_type_name = element_def
+            .extension
+            .as_ref()
+            .and_then(|exts| exts.iter().find(|e| e.value_string.is_some()))
+            .and_then(|e| e.value_string.clone());
+
+        let element_id: String = path.join("").replace('.', "").to_lowercase();
+        let element_name = format!(
+            "{}{}",
+            path[path.len() - 1].chars().next().unwrap().to_uppercase(),
+            &path[path.len() - 1][1..]
+        );
+
+        let element = Element {
+            id: element_id.clone(),
+            name: element_name,
+            explicit: explicit_type_name,
+            backbone: None,
+            description: format!("Backbone element for {}.", path[0]),
+            properties: Properties {
+                property: Vec::new(),
+            },
+            elements: Elements {
+                element: Vec::new(),
+            },
+            codesets: Codesets {
+                codeset: Vec::new(),
+            },
+        };
+
+        if let Some(elements_vec) = dict_elements.get_mut(&parent_id) {
+            elements_vec.push(element);
+        }
+        dict_elements.insert(element_id.clone(), Vec::new());
+        dict_properties.insert(element_id.clone(), Vec::new());
+    }
+
+    // Create property
+    let property_id = element_def.id.to_lowercase();
+    let mut property_name = name.to_string();
+
+    // Handle choice types (name[x])
+    if element_def.r#type.len() > 1 {
+        property_name = property_name.trim_end_matches("[x]").to_string();
+    }
+
+    let mut property = Property {
+        id: property_id.clone(),
+        name: property_name.clone(),
+        description: element_def
+            .definition
+            .as_ref()
+            .unwrap_or(&String::new())
+            .replace('\n', "")
+            .replace('\r', "")
+            .replace('\'', "")
+            .replace(">=", "greater or equal ")
+            .replace("<=", "lower or equal ")
+            .replace('<', "lower than"),
+        type_attr: None,
+        ref_attr: None,
+        is_collection: None,
+        not_null: None,
+        summary: None,
+        modifier: None,
+        targets: None,
+        variants: Variants {
+            variant: Vec::new(),
+        },
+    };
+
+    // Handle contentReference (no type specified)
+    if element_def.r#type.is_empty() {
+        if let Some(content_ref) = &element_def.content_reference {
+            let linked_ref = &content_ref[1..]; // Remove leading #
+            let linked_ref_lower = linked_ref.to_lowercase();
+            let linked_path: Vec<&str> = linked_ref_lower.split('.').collect();
+            let mut linked_class = linked_path[0].to_string();
+            for class_part in &linked_path[1..] {
+                linked_class.push_str(class_part);
+            }
+
+            let variant = Variant {
+                type_attr: Some("element".to_string()),
+                ref_attr: Some(linked_class),
+                targets: None,
+            };
+            property.variants.variant.push(variant);
+        }
+    }
+
+    // Handle typed properties
+    if !element_def.r#type.is_empty() {
+        for element_type in &element_def.r#type {
+            let type_code = &element_type.code;
+            let mut variant = Variant {
+                type_attr: None,
+                ref_attr: None,
+                targets: None,
+            };
+
+            if is_primitive(type_code) {
+                variant.type_attr = Some(type_code.clone());
+                if type_code == "string" {
+                    variant.type_attr = None; // Default
+                }
+
+                // Handle code types with bindings
+                if type_code == "code" {
+                    if let Some(binding) = &element_def.binding {
+                        if binding.strength.as_deref() == Some("required") {
+                            if let Some(value_set_uri) = &binding.value_set {
+                                let value_set_uri_clean = value_set_uri.split('|').next().unwrap();
+                                if let Some(value_set) = dict_value_sets.get(value_set_uri_clean) {
+                                    let mut value_set_id = value_set.name.to_lowercase().replace(' ', "");
+                                    if value_set_id != "mimetypes" {
+                                        if value_set_id == "biologicallyderivedproductdispense"
+                                            || value_set_id == "subscriptionstatus"
+                                        {
+                                            value_set_id.push_str("code");
+                                        }
+                                        // Add codeset
+                                        let shared_codesets = get_shared_codesets();
+                                        let codeset_added = if shared_codesets.contains(value_set_id.as_str()) {
+                                            // Add to global codesets if not already present
+                                            if !model.codesets.codeset.iter().any(|cs| cs.id == value_set_id) {
+                                                add_codeset(&mut model.codesets.codeset, value_set, dict_code_systems)
+                                            } else {
+                                                true // Already exists
+                                            }
+                                        } else {
+                                            // Add to resource or element codesets
+                                            let mut added = false;
+                                            if let Some(resource) =
+                                                model.resources.resource.iter_mut().find(|r| r.name == path[0])
+                                            {
+                                                added = add_codeset(&mut resource.codesets.codeset, value_set, dict_code_systems);
+                                            }
+                                            if let Some(element) =
+                                                model.elements.element.iter_mut().find(|e| e.name == path[0])
+                                            {
+                                                added = add_codeset(&mut element.codesets.codeset, value_set, dict_code_systems);
+                                            }
+                                            added
+                                        };
+
+                                        // Only set ref_attr if codeset was actually added (has codes)
+                                        if codeset_added {
+                                            variant.ref_attr = Some(value_set_id.clone());
+                                        }
+                                    }
+                                }
+
+                                // Handle special URIs
+                                match value_set_uri_clean {
+                                    "http://hl7.org/fhir/ValueSet/resource-types" => {
+                                        variant.ref_attr = Some("resourcetype".to_string());
+                                    }
+                                    "http://hl7.org/fhir/ValueSet/units-of-time" => {
+                                        variant.ref_attr = Some("unitsoftime".to_string());
+                                    }
+                                    "http://hl7.org/fhir/ValueSet/days-of-week" => {
+                                        variant.ref_attr = Some("daysofweek".to_string());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if type_code == "http://hl7.org/fhirpath/System.String" || type_code.is_empty() {
+                variant.type_attr = None;
             } else {
-                // Complex type: use the type reference as the next prefix
-                // e.g., "patient.name" (type="humanname") → next is "humanname.family"
-                current_prefix = type_ref.clone();
+                // Complex type
+                variant.type_attr = Some("element".to_string());
+                if type_code == "BackboneElement" || type_code == "Element" {
+                    variant.ref_attr = Some(element_def.id.replace('.', "").to_lowercase());
+                } else {
+                    variant.ref_attr = Some(type_code.to_lowercase());
+                }
+
+                // Handle Reference targetProfile
+                if type_code == "Reference" {
+                    if let Some(target_profiles) = &element_type.target_profile {
+                        let mut targets_vec = Vec::new();
+                        for target_profile in target_profiles {
+                            let parts: Vec<&str> = target_profile.split('/').collect();
+                            if parts.len() >= 6 {
+                                targets_vec.push(Target {
+                                    resource: parts[5].to_string(),
+                                });
+                            }
+                        }
+                        if !targets_vec.is_empty() {
+                            variant.targets = Some(Targets {
+                                target: targets_vec,
+                            });
+                        }
+                    }
+                }
             }
-        } else {
-            // No type information available - assume it's a continuation of the current path
-            // This fallback ensures we don't break on missing type information
-            current_prefix = property_id;
+
+            // Special case: id property
+            if property_name == "id" {
+                variant.type_attr = Some("id".to_string());
+            }
+
+            property.variants.variant.push(variant);
         }
     }
 
-    (parts, casts)
-}
-
-fn escape_xml(text: &str) -> String {
-    // First fix double-encoded UTF-8 (common FHIR R5 data quality issue)
-    // "â€"" should be em-dash (these appear in source FHIR R5 JSON as corrupted UTF-8)
-    let text = text.replace("\u{00E2}\u{20AC}\u{201D}", "\u{2014}");  // â€" -> em dash
-    let text = text.replace("\u{00E2}\u{20AC}\u{201C}", "\u{2013}");  // â€œ -> en dash (if present)
-
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-        // Replace line breaks with spaces
-        .replace('\n', " ")
-        .replace('\r', " ")
-        // Replace smart quotes with regular quotes
-        .replace('\u{201C}', "\"")  // Left double quote
-        .replace('\u{201D}', "\"")  // Right double quote
-        .replace('\u{2018}', "'")   // Left single quote
-        .replace('\u{2019}', "'")   // Right single quote
-        // Replace other special characters
-        .replace('\u{2011}', "-")   // Non-breaking hyphen
-        .replace('\u{2013}', "-")   // En dash
-        .replace('\u{2014}', "-")   // Em dash
-        .replace('\u{2026}', "...")  // Ellipsis
-        .replace('\u{2265}', "&gt;=")  // Greater than or equal (≥)
-        .replace('\u{2264}', "&lt;=")  // Less than or equal (≤)
-        // Replace Windows-1252 control characters that sometimes appear in FHIR data
-        .replace('\u{0091}', "'")   // Windows-1252 0x91 (left single quote)
-        .replace('\u{0082}', ",")   // Windows-1252 0x82 (low double quote, use comma)
-        .replace('\u{0089}', "per-mille")  // Windows-1252 0x89 (per-mille sign)
-}
-
-/// Helper to conditionally output an attribute only if it differs from the default value
-fn attr_if_not_default(name: &str, value: &str, default: &str) -> String {
-    if value == default {
-        String::new()
-    } else {
-        format!(" {}=\"{}\"", name, value)
-    }
-}
-
-/// Helper to conditionally output a boolean attribute only if it differs from the default
-fn attr_bool_if_not_default(name: &str, value: bool, default: bool) -> String {
-    if value == default {
-        String::new()
-    } else {
-        format!(" {}=\"{}\"", name, if value { "true" } else { "false" })
-    }
-}
-
-/// Extract CodeSystem ID from ValueSet canonical URL
-/// Examples:
-///   "http://hl7.org/fhir/ValueSet/fm-status|5.0.0" -> Some("fm-status")
-///   "http://hl7.org/fhir/ValueSet/administrative-gender" -> Some("administrative-gender")
-///   "http://terminology.hl7.org/ValueSet/v3-ActCode" -> Some("v3-ActCode")
-fn extract_codeset_id_from_valueset_url(url: &str) -> Option<String> {
-    // ValueSet URLs typically follow this pattern:
-    // http://hl7.org/fhir/ValueSet/{id}|{version}
-    // or
-    // http://hl7.org/fhir/ValueSet/{id}
-
-    // Split off version if present
-    let url_without_version = url.split('|').next().unwrap_or(url);
-
-    // Extract the last path segment after "ValueSet/"
-    if let Some(valueset_pos) = url_without_version.rfind("/ValueSet/") {
-        let id_start = valueset_pos + "/ValueSet/".len();
-        let id = &url_without_version[id_start..];
-        if !id.is_empty() {
-            return Some(id.to_string());
+    // Handle cardinality (min/max)
+    if let Some(max) = &element_def.max {
+        match max.as_str() {
+            "0" => {
+                // Skip this property
+                return;
+            }
+            "*" => {
+                property.is_collection = Some("true".to_string());
+            }
+            "1" => {
+                if let Some(min) = element_def.min {
+                    if min == 1 {
+                        property.not_null = Some("true".to_string());
+                    }
+                }
+            }
+            _ => {
+                // Unexpected max value - could log warning
+            }
         }
     }
 
-    None
+    // Handle summary and modifier flags
+    if element_def.is_summary == Some(true) {
+        property.summary = Some("true".to_string());
+    }
+    if element_def.is_modifier == Some(true) {
+        property.modifier = Some("true".to_string());
+    }
+
+    // Skip properties with no variants (DTD requires at least one variant)
+    if property.variants.variant.is_empty() {
+        return;
+    }
+
+    // Add property to dictionaries
+    if let Some(properties_vec) = dict_properties.get_mut(&parent_id) {
+        properties_vec.push(property.clone());
+    }
+
+    // Normalize the key for dict_property - remove [x] suffix for choice types
+    let dict_key = if property_id.ends_with("[x]") {
+        property_id[..property_id.len() - 3].to_string()
+    } else {
+        property_id
+    };
+
+    dict_property.insert(dict_key, property);
 }
 
-/// Resolve binding name to correct CodeSystem name using ValueSet URL
-/// Following Telemed5000's approach: Use ValueSet URL to look up CodeSystem ID, then use ID to get name
-/// This fixes FHIR R5 data quality issues where binding names don't match CodeSystem names
-/// Examples:
-///   binding_name="ActivityDefinitionKind", value_set_url="http://hl7.org/fhir/ValueSet/request-resource-types|5.0.0"
-///     → ValueSet ID "request-resource-types"
-///     → CodeSystem ID "fhir-types" (via valueset_to_codesystem map)
-///     → CodeSystem name "FHIRTypes"
-fn resolve_binding_name(
-    binding_name: Option<&String>,
-    value_set_url: Option<&String>,
-    valueset_to_codesystem: &HashMap<String, String>,
-    codeset_id_to_name: &HashMap<String, String>,
-) -> Option<String> {
-    // Strategy 1: If we have a ValueSet URL, use it to resolve the CodeSystem name
-    if let Some(url) = value_set_url {
-        if let Some(valueset_id) = extract_codeset_id_from_valueset_url(url) {
-            // First try direct CodeSystem lookup (for ValueSets where ID == CodeSystem ID)
-            if let Some(codeset_name) = codeset_id_to_name.get(&valueset_id) {
-                return Some(codeset_name.clone());
-            }
+// Helper function to add codesets
+// Returns true if the codeset was added, false if it has no codes
+fn add_codeset(
+    codesets: &mut Vec<Codeset>,
+    value_set: &ValueSet,
+    dict_code_systems: &HashMap<String, CodeSystem>,
+) -> bool {
+    // Check if already exists
+    let value_set_name = value_set.name.replace(' ', "");
+    if codesets.iter().any(|cs| cs.name == value_set_name) {
+        return true; // Already exists, so it's valid
+    }
 
-            // Then try via ValueSet → CodeSystem mapping (for ValueSets with different IDs)
-            if let Some(codesystem_id) = valueset_to_codesystem.get(&valueset_id) {
-                if let Some(codeset_name) = codeset_id_to_name.get(codesystem_id) {
-                    return Some(codeset_name.clone());
+    let mut codeset_id = value_set.name.to_lowercase().replace(' ', "");
+    if codeset_id == "biologicallyderivedproductdispense" || codeset_id == "subscriptionstatus" {
+        codeset_id.push_str("code");
+    }
+
+    let codeset = Codeset {
+        id: codeset_id,
+        name: value_set_name,
+        description: value_set
+            .description
+            .as_ref()
+            .unwrap_or(&String::new())
+            .replace('\n', "")
+            .replace('\r', "")
+            .replace('\'', "")
+            .replace("--", "-"),
+        codes: Codes {
+            code: Vec::new(),
+        },
+    };
+
+    // Temporary codeset to collect codes
+    let mut temp_codeset = codeset;
+
+    // Add codes from ValueSet
+    for include in &value_set.compose.include {
+        if let Some(concepts) = &include.concept {
+            for concept in concepts {
+                add_codeset_codes_from_valueset(&mut temp_codeset, concept);
+            }
+        } else if let Some(system) = &include.system {
+            if let Some(code_system) = dict_code_systems.get(system) {
+                if let Some(concepts) = &code_system.concept {
+                    for concept in concepts {
+                        add_codeset_codes_from_codesystem(&mut temp_codeset, concept);
+                    }
                 }
             }
         }
     }
 
-    // Strategy 2: Fall back to binding name if no ValueSet URL or lookup failed
-    binding_name.cloned()
+    // Only add codeset if it has at least one code (DTD requirement)
+    if !temp_codeset.codes.code.is_empty() {
+        codesets.push(temp_codeset);
+        true
+    } else {
+        false
+    }
+}
+
+fn add_codeset_codes_from_valueset(codeset: &mut Codeset, concept: &ValueSetConcept) {
+    let mut name: String = concept
+        .code
+        .split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    name = name.replace('.', "_");
+
+    if name.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        name = format!("N{}", name);
+    }
+
+    let mut description = String::new();
+    if let Some(extensions) = &concept.extension {
+        if let Some(ext) = extensions
+            .iter()
+            .find(|e| e.url == "http://hl7.org/fhir/StructureDefinition/valueset-concept-definition")
+        {
+            if let Some(val_str) = &ext.value_string {
+                description = val_str
+                    .replace('\n', "")
+                    .replace('\r', "")
+                    .replace('\'', "")
+                    .replace('&', "and");
+            }
+        }
+    }
+
+    let mut code = Code {
+        name: name.clone(),
+        value: concept.code.clone(),
+        description,
+    };
+
+    // Handle special operator names
+    code.name = match code.name.as_str() {
+        "=" => "Equal".to_string(),
+        "!=" => "NotEqual".to_string(),
+        ">" => "GreaterThan".to_string(),
+        "<" => "LessThan".to_string(),
+        ">=" => "GreaterOrEqual".to_string(),
+        "<=" => "LessOrEqual".to_string(),
+        _ => code.name,
+    };
+
+    codeset.codes.code.push(code);
+}
+
+fn add_codeset_codes_from_codesystem(codeset: &mut Codeset, concept: &CodeSystemConcept) {
+    let mut name: String = concept
+        .code
+        .split('-')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect();
+    name = name.replace('.', "_");
+
+    if name.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        name = format!("N{}", name);
+    }
+
+    let description = concept
+        .definition
+        .as_ref()
+        .unwrap_or(&String::new())
+        .replace('\n', "")
+        .replace('\r', "")
+        .replace('\'', "")
+        .replace('&', "and");
+
+    let mut code = Code {
+        name: name.clone(),
+        value: concept.code.clone(),
+        description,
+    };
+
+    // Handle special operator names
+    code.name = match code.name.as_str() {
+        "=" => "Equal".to_string(),
+        "!=" => "NotEqual".to_string(),
+        ">" => "GreaterThan".to_string(),
+        "<" => "LessThan".to_string(),
+        ">=" => "GreaterOrEqual".to_string(),
+        "<=" => "LessOrEqual".to_string(),
+        _ => code.name,
+    };
+
+    // Check if notSelectable
+    let not_selectable = concept
+        .property
+        .as_ref()
+        .map(|props| props.iter().any(|p| p.code == "notSelectable"))
+        .unwrap_or(false);
+
+    if !not_selectable {
+        codeset.codes.code.push(code);
+    }
+
+    // Recursively add child concepts
+    if let Some(child_concepts) = &concept.concept {
+        for child_concept in child_concepts {
+            add_codeset_codes_from_codesystem(codeset, child_concept);
+        }
+    }
+}
+
+fn build_searches(
+    search_params: &[SearchParameter],
+    dict_property: &HashMap<String, Property>,
+    model: &mut Fhir,
+) {
+    // Add _lastUpdated search to all resources
+    for resource in &mut model.resources.resource {
+        let last_updated_search = Search {
+            name: "_lastUpdated".to_string(),
+            query: "LastUpdated".to_string(),
+            search_type: "date".to_string(),
+            reference: None,
+            paths: Paths {
+                path: vec![Path {
+                    parts: Parts {
+                        part: vec![
+                            Part {
+                                ref_attr: format!("{}.meta", resource.name.to_lowercase()),
+                                resolve: None,
+                                property: None,
+                                type_attr: None,
+                                first: None,
+                                not_null: None,
+                                variant: None,
+                                op: None,
+                                value: None,
+                            },
+                            Part {
+                                ref_attr: "meta.lastupdated".to_string(),
+                                resolve: None,
+                                property: None,
+                                type_attr: None,
+                                first: None,
+                                not_null: None,
+                                variant: None,
+                                op: None,
+                                value: None,
+                            },
+                        ],
+                    },
+                    casts: None,
+                    components: Vec::new(),
+                    targets: None,
+                }],
+            },
+        };
+        resource.searches.search.push(last_updated_search);
+    }
+
+    // Process search parameters from FHIR specification
+    for search_param in search_params {
+        // Skip internal search parameters
+        if search_param.code.starts_with('_') {
+            continue;
+        }
+
+        // Skip parameters without expressions
+        if search_param.expression.is_none() {
+            continue;
+        }
+
+        let expression = search_param.expression.as_ref().unwrap();
+
+        // Skip complex expressions with extension() or other function calls we can't parse
+        if expression.contains(".extension(") || expression.contains("resolve()") {
+            continue;
+        }
+
+        // Handle special cases that require custom logic
+        if expression == "Patient.deceased.exists() and Patient.deceased != false"
+            || expression == "Practitioner.deceased.exists() and Practitioner.deceased != false"
+            || expression == "Person.deceased.exists() and Person.deceased != false"
+        {
+            for base_resource in &search_param.base {
+                if let Some(resource) = model.resources.resource.iter_mut().find(|r| &r.name == base_resource) {
+                    let search = Search {
+                        name: search_param.code.clone(),
+                        query: to_pascal_case(&search_param.code),
+                        search_type: search_param.r#type.to_lowercase(),
+                        reference: None,
+                        paths: Paths {
+                            path: vec![Path {
+                                parts: Parts {
+                                    part: vec![Part {
+                                        ref_attr: format!("{}.deceased", base_resource.to_lowercase()),
+                                        resolve: None,
+                                        property: None,
+                                        type_attr: None,
+                                        first: None,
+                                        not_null: Some("true".to_string()),
+                                        variant: Some("boolean".to_string()),
+                                        op: Some("ne".to_string()),
+                                        value: Some("true".to_string()),
+                                    }],
+                                },
+                                casts: None,
+                                components: Vec::new(),
+                                targets: None,
+                            }],
+                        },
+                    };
+                    resource.searches.search.push(search);
+                }
+            }
+            continue;
+        }
+
+        // Parse FHIRPath expressions
+        for base_resource in &search_param.base {
+            if let Some(resource) = model.resources.resource.iter_mut().find(|r| &r.name == base_resource) {
+                let paths = parse_fhirpath_expression(
+                    expression,
+                    base_resource,
+                    search_param,
+                    dict_property,
+                );
+
+                if !paths.is_empty() {
+                    let search = Search {
+                        name: search_param.code.clone(),
+                        query: to_pascal_case(&search_param.code),
+                        search_type: search_param.r#type.to_lowercase(),
+                        reference: None,
+                        paths: Paths { path: paths },
+                    };
+                    resource.searches.search.push(search);
+                }
+            }
+        }
+    }
+}
+
+// Convert kebab-case or snake_case to PascalCase
+fn to_pascal_case(s: &str) -> String {
+    s.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().chain(chars).collect::<String>(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+// Parse FHIRPath expression into Path structures
+fn parse_fhirpath_expression(
+    expression: &str,
+    resource_name: &str,
+    search_param: &SearchParameter,
+    dict_property: &HashMap<String, Property>,
+) -> Vec<Path> {
+    let mut paths = Vec::new();
+
+    // Split on | for union paths
+    let path_expressions: Vec<&str> = expression.split(" | ").collect();
+
+    for path_expr in path_expressions {
+        let path_expr = path_expr.trim();
+
+        // Skip paths that don't start with our resource (shared search params)
+        if !path_expr.to_lowercase().starts_with(&resource_name.to_lowercase()) {
+            continue;
+        }
+
+        // Parse the path
+        if let Some(path) = parse_single_path(path_expr, resource_name, search_param, dict_property) {
+            paths.push(path);
+        }
+    }
+
+    paths
+}
+
+// Parse a single FHIRPath expression
+fn parse_single_path(
+    expr: &str,
+    resource_name: &str,
+    search_param: &SearchParameter,
+    dict_property: &HashMap<String, Property>,
+) -> Option<Path> {
+    let mut parts: Vec<Part> = Vec::new();
+    let mut cast_vec: Vec<Cast> = Vec::new();
+
+    // Track the current property path (with dots preserved from original FHIRPath)
+    let mut current_path = resource_name.to_lowercase();
+
+    // Handle parentheses
+    let expr = expr.trim_matches(|c| c == '(' || c == ')');
+
+    // Check for .ofType() or .as() cast
+    let (base_expr, cast_type) = if let Some(idx) = expr.find(".ofType(") {
+        let base = &expr[..idx];
+        let cast_start = idx + 8; // ".ofType(".len()
+        let cast_end = expr[cast_start..].find(')').map(|i| cast_start + i);
+        let cast = cast_end.map(|end| expr[cast_start..end].to_string());
+        (base, cast)
+    } else if let Some(idx) = expr.find(".as(") {
+        let base = &expr[..idx];
+        let cast_start = idx + 4; // ".as(".len()
+        let cast_end = expr[cast_start..].find(')').map(|i| cast_start + i);
+        let cast = cast_end.map(|end| expr[cast_start..end].to_string());
+        (base, cast)
+    } else if let Some(idx) = expr.find(" as ") {
+        let base = &expr[..idx];
+        let cast = Some(expr[idx + 4..].trim().to_string());
+        (base, cast)
+    } else {
+        (expr, None)
+    };
+
+    // Check for .where() function
+    let (base_expr, where_clause) = if let Some(idx) = base_expr.find(".where(") {
+        let base = &base_expr[..idx];
+        let where_start = idx + 7; // ".where(".len()
+        let where_end = base_expr[where_start..].find(')').map(|i| where_start + i);
+        let where_expr = where_end.map(|end| base_expr[where_start..end].to_string());
+        (base, where_expr)
+    } else {
+        (base_expr, None)
+    };
+
+    // Split path into segments
+    let segments: Vec<&str> = base_expr.split('.').collect();
+
+    for (i, segment) in segments.iter().enumerate() {
+        if i == 0 {
+            // First segment should be resource name
+            if !segment.to_lowercase().eq_ignore_ascii_case(resource_name) {
+                return None;
+            }
+            continue;
+        }
+
+        // Check for [0] or .first()
+        let (clean_segment, is_first) = if segment.ends_with("[0]") {
+            (&segment[..segment.len() - 3], true)
+        } else if segment == &"first()" {
+            // Skip .first() in path, will be added to previous part
+            if let Some(last_part) = parts.last_mut() {
+                last_part.first = Some("true".to_string());
+            }
+            continue;
+        } else {
+            (*segment, false)
+        };
+
+        // Build property ID using the accumulated path
+        let property_id = format!("{}.{}", current_path, clean_segment.to_lowercase());
+
+        let mut part = Part {
+            ref_attr: property_id.clone(),
+            resolve: None,
+            property: None,
+            type_attr: None,
+            first: if is_first { Some("true".to_string()) } else { None },
+            not_null: None,
+            variant: None,
+            op: None,
+            value: None,
+        };
+
+        // Handle where clause
+        if where_clause.is_some() && i == segments.len() - 1 {
+            if let Some(ref where_expr) = where_clause {
+                parse_where_clause(where_expr, &mut part);
+            }
+        }
+
+        parts.push(part);
+
+        // Update current_path for next iteration
+        // Check if this property exists and what type it references
+        if let Some(property) = dict_property.get(&property_id) {
+            if let Some(variant) = property.variants.variant.first() {
+                if let Some(ref_attr) = &variant.ref_attr {
+                    // Check if the reference starts with current_path (without dots) AND is a direct child
+                    // This indicates it's a backbone element under the current path (not a contentReference)
+                    let current_path_no_dots = current_path.replace('.', "");
+                    let property_id_no_dots = property_id.replace('.', "");
+                    if ref_attr == &property_id_no_dots {
+                        // It's a backbone element defined by this property - keep the full dotted path
+                        current_path = property_id.clone();
+                    } else {
+                        // It's a reference to a data type or contentReference
+                        // For contentReference, we need to find the dotted form of the backbone element
+                        // Check if the ref is a property that exists (indicates it's a contentReference)
+                        if let Some(_backbone_property) = dict_property.get(ref_attr) {
+                            // The ref itself is a dotted property ID (this shouldn't happen normally)
+                            current_path = ref_attr.clone();
+                        } else {
+                            // ref_attr is likely a backbone element ID without dots
+                            // Try to find its dotted form by looking for a property whose ID without dots matches
+                            let found_dotted = dict_property.keys()
+                                .find(|k| k.replace('.', "") == *ref_attr && k.matches('.').count() >= 1)
+                                .cloned();
+
+                            if let Some(dotted_form) = found_dotted {
+                                // Use the dotted form as the current path
+                                current_path = dotted_form;
+                            } else {
+                                // It's a data type reference (not a backbone element)
+                                current_path = ref_attr.clone();
+                            }
+                        }
+                    }
+                } else {
+                    // No reference, keep the property path
+                    current_path = property_id.clone();
+                }
+            } else {
+                // No variants, keep the property path
+                current_path = property_id.clone();
+            }
+        } else {
+            // Property not found in dict, keep building the path
+            current_path = property_id.clone();
+        }
+    }
+
+    // Add cast if present
+    if let Some(cast_type) = cast_type {
+        cast_vec.push(Cast { to: cast_type });
+    }
+
+    // Wrap casts in Casts struct if non-empty
+    let casts = if cast_vec.is_empty() {
+        None
+    } else {
+        Some(Casts { cast: cast_vec })
+    };
+
+    // Add targets for reference search parameters
+    let targets = if search_param.r#type == "reference" {
+        search_param.target.as_ref().map(|target_vec| Targets {
+            target: target_vec
+                .iter()
+                .map(|t| Target {
+                    resource: t.clone(),
+                })
+                .collect(),
+        })
+    } else {
+        None
+    };
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(Path {
+            parts: Parts { part: parts },
+            casts,
+            components: Vec::new(),
+            targets,
+        })
+    }
+}
+
+// Parse .where() clause
+fn parse_where_clause(where_expr: &str, part: &mut Part) {
+    // Handle system='email' pattern
+    if let Some(idx) = where_expr.find('=') {
+        let property = where_expr[..idx].trim();
+        let value = where_expr[idx + 1..]
+            .trim()
+            .trim_matches(|c| c == '\'' || c == '"');
+
+        part.property = Some(property.to_string());
+        part.type_attr = Some(value.to_string());
+    }
+}
+
+fn build_operations(operation_defs: &[OperationDefinition], model: &mut Fhir) {
+    for operation_def in operation_defs {
+        if let Some(resource_types) = &operation_def.resource {
+            for resource_type in resource_types {
+                // Find the resource in the model
+                if let Some(resource) = model.resources.resource.iter_mut().find(|r| r.name == *resource_type) {
+                    let operation = Operation {
+                        name: operation_def.code.clone(),
+                        description: operation_def
+                            .description
+                            .as_ref()
+                            .unwrap_or(&String::new())
+                            .replace('\r', "")
+                            .replace('\n', ""),
+                        input: Input {
+                            parameter: Vec::new(),
+                        },
+                        output: Output {
+                            parameter: Vec::new(),
+                        },
+                    };
+
+                    resource.operations.operation.push(operation);
+
+                    // Add parameters
+                    if let Some(parameters) = &operation_def.parameter {
+                        let resource_operation = resource.operations.operation.last_mut().unwrap();
+
+                        for param_component in parameters {
+                            let pc_type_string = param_component.r#type.as_deref().unwrap_or("");
+
+                            let param_type = if is_primitive(pc_type_string) {
+                                // Make first char lowercase
+                                let mut chars = pc_type_string.chars();
+                                match chars.next() {
+                                    Some(c) => format!("{}{}", c.to_lowercase(), chars.as_str()),
+                                    None => String::new(),
+                                }
+                            } else {
+                                "resource".to_string()
+                            };
+
+                            let reference = if is_primitive(pc_type_string)
+                                || pc_type_string == "Any"
+                                || pc_type_string == "Bundle"
+                                || pc_type_string == "Resource"
+                            {
+                                None
+                            } else {
+                                Some(pc_type_string.to_lowercase())
+                            };
+
+                            let mut parameter = Parameter {
+                                name: param_component.name.clone(),
+                                description: param_component
+                                    .documentation
+                                    .as_ref()
+                                    .unwrap_or(&String::new())
+                                    .replace('\n', "")
+                                    .replace('\r', "")
+                                    .replace('\'', ""),
+                                type_attr: Some(param_type),
+                                reference,
+                                is_collection: if param_component.max == "*" {
+                                    Some("true".to_string())
+                                } else {
+                                    None
+                                },
+                                not_null: if param_component.min == 1 {
+                                    Some("true".to_string())
+                                } else {
+                                    None
+                                },
+                            };
+
+                            // Clean up type attribute
+                            if parameter.type_attr.as_deref() == Some("string")
+                                || parameter.type_attr.as_deref() == Some("")
+                                || (parameter.type_attr.as_deref() == Some("resource")
+                                    && parameter.reference.is_none())
+                            {
+                                parameter.type_attr = None;
+                            }
+
+                            // Add to input or output
+                            if param_component.r#use == "in" {
+                                resource_operation.input.parameter.push(parameter);
+                            } else {
+                                resource_operation.output.parameter.push(parameter);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn normalize_model(model: &mut Fhir) {
+    // Normalize resources
+    for resource in &mut model.resources.resource {
+        resource.description = strip_non_ascii(&resource.description);
+        normalize_properties(&mut resource.properties.property);
+        normalize_elements(&mut resource.elements.element);
+        normalize_codesets(&mut resource.codesets.codeset);
+        normalize_operations(&mut resource.operations.operation);
+    }
+
+    // Normalize data type elements
+    for element in &mut model.elements.element {
+        element.description = strip_non_ascii(&element.description);
+        normalize_properties(&mut element.properties.property);
+        normalize_elements(&mut element.elements.element);
+        normalize_codesets(&mut element.codesets.codeset);
+    }
+
+    // Normalize global codesets
+    normalize_codesets(&mut model.codesets.codeset);
+}
+
+fn normalize_operations(operations: &mut Vec<Operation>) {
+    for operation in operations {
+        operation.description = strip_non_ascii(&operation.description);
+        for param in &mut operation.input.parameter {
+            param.description = strip_non_ascii(&param.description);
+        }
+        for param in &mut operation.output.parameter {
+            param.description = strip_non_ascii(&param.description);
+        }
+    }
+}
+
+fn normalize_properties(properties: &mut Vec<Property>) {
+    for property in properties {
+        // Fix property IDs containing [x] for choice types - remove [x] suffix entirely
+        if property.id.ends_with("[x]") {
+            property.id = property.id[..property.id.len() - 3].to_string();
+        }
+
+        // Strip non-ASCII characters from descriptions
+        property.description = strip_non_ascii(&property.description);
+
+        // Flatten single-variant properties: move type and ref to property level
+        if property.variants.variant.len() == 1 {
+            let variant = &property.variants.variant[0];
+            property.type_attr = variant.type_attr.clone();
+            property.ref_attr = variant.ref_attr.clone();
+            property.targets = variant.targets.clone();
+            // Clear variants since we've moved the data to property level
+            property.variants.variant.clear();
+        }
+    }
+}
+
+fn normalize_elements(elements: &mut Vec<Element>) {
+    for element in elements {
+        // Strip non-ASCII characters from descriptions
+        element.description = strip_non_ascii(&element.description);
+
+        normalize_properties(&mut element.properties.property);
+        normalize_elements(&mut element.elements.element);
+    }
+}
+
+fn normalize_codesets(codesets: &mut Vec<Codeset>) {
+    for codeset in codesets {
+        // Strip non-ASCII characters from codeset descriptions
+        codeset.description = strip_non_ascii(&codeset.description);
+
+        // Strip non-ASCII characters from code descriptions
+        for code in &mut codeset.codes.code {
+            code.description = strip_non_ascii(&code.description);
+        }
+    }
+}
+
+// Helper to strip non-ASCII and normalize descriptions
+fn strip_non_ascii(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii())
+        .collect()
+}
+
+fn copy_dict_to_model(
+    dict_elements: &HashMap<String, Vec<Element>>,
+    dict_properties: &HashMap<String, Vec<Property>>,
+    model: &mut Fhir,
+) {
+    // Copy properties and elements into resources
+    for resource in &mut model.resources.resource {
+        if let Some(properties) = dict_properties.get(&resource.id) {
+            resource.properties.property = properties.clone();
+        }
+        if let Some(elements) = dict_elements.get(&resource.id) {
+            resource.elements.element = elements.clone();
+            // Recursively copy properties and elements for nested backbone elements
+            copy_nested_elements(&mut resource.elements.element, dict_elements, dict_properties);
+        }
+    }
+
+    // Copy properties and elements into data type elements
+    for element in &mut model.elements.element {
+        if let Some(properties) = dict_properties.get(&element.id) {
+            element.properties.property = properties.clone();
+        }
+        if let Some(elements) = dict_elements.get(&element.id) {
+            element.elements.element = elements.clone();
+            // Recursively copy properties and elements for nested backbone elements
+            copy_nested_elements(&mut element.elements.element, dict_elements, dict_properties);
+        }
+    }
+}
+
+fn copy_nested_elements(
+    elements: &mut Vec<Element>,
+    dict_elements: &HashMap<String, Vec<Element>>,
+    dict_properties: &HashMap<String, Vec<Property>>,
+) {
+    for element in elements {
+        if let Some(properties) = dict_properties.get(&element.id) {
+            element.properties.property = properties.clone();
+        }
+        if let Some(nested_elements) = dict_elements.get(&element.id) {
+            element.elements.element = nested_elements.clone();
+            // Recursively handle deeper nesting
+            copy_nested_elements(&mut element.elements.element, dict_elements, dict_properties);
+        }
+    }
+}
+
+fn write_xml_output(model: &Fhir) -> Result<(), Box<dyn Error>> {
+    use quick_xml::se::to_string_with_root;
+    use quick_xml::{Reader, Writer, events::Event};
+    use std::io::Cursor;
+
+    let xml = to_string_with_root("fhir", model)?;
+
+    // Pretty-print the XML
+    let mut reader = Reader::from_str(&xml);
+    reader.trim_text(true);
+
+    let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event)?,
+            Err(e) => return Err(Box::new(e)),
+        }
+    }
+
+    let pretty_xml = String::from_utf8(writer.into_inner().into_inner())?;
+
+    // Add DOCTYPE and XML declaration
+    let output = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">\n{}",
+        pretty_xml
+    );
+
+    fs::write("fhir.xml", output)?;
+    Ok(())
 }
