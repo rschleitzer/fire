@@ -1823,14 +1823,18 @@ fn normalize_properties(properties: &mut Vec<Property>) {
         // Strip non-ASCII characters from descriptions
         property.description = strip_non_ascii(&property.description);
 
-        // Flatten single-variant properties: move type and ref to property level
+        // Handle variants based on count
         if property.variants.variant.len() == 1 {
+            // Single variant: flatten - move type and ref to property level
             let variant = &property.variants.variant[0];
             property.type_attr = variant.type_attr.clone();
             property.ref_attr = variant.ref_attr.clone();
             property.targets = variant.targets.clone();
             // Clear variants since we've moved the data to property level
             property.variants.variant.clear();
+        } else if property.variants.variant.len() > 1 {
+            // Multiple variants: set type="variant" on property
+            property.type_attr = Some("variant".to_string());
         }
     }
 }

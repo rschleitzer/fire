@@ -203,7 +203,7 @@ write_xml("fhir.xml", extract_and_curate(structure_defs, search_params));
 1. Run generator → code doesn't compile
 2. Find issue in FHIR spec or generated code
 3. Edit `fhir.xml` (add `<note>` documenting fix), edit generator if applicable
-4. Validate XML with `onsgmls -s xml.dcl fhir.xml`
+4. Validate XML with `onsgmls -s fhir.xml`
 5. Re-run generator
 6. Repeat until all resources work
 7. Commit XML model, generator, and generated code
@@ -214,10 +214,10 @@ Use `onsgmls` (SGML parser from OpenSP) to validate XML against DTD:
 
 ```bash
 # Validate XML model - must pass with zero errors before code generation
-onsgmls -s xml.dcl fhir.xml
+onsgmls -s fhir.xml
 
 # Count errors
-onsgmls -s xml.dcl fhir.xml 2>&1 | grep "^onsgmls:" | wc -l
+onsgmls -s fhir.xml 2>&1 | grep "^onsgmls:" | wc -l
 
 # Expected output on success: (silent, no errors)
 # Common errors:
