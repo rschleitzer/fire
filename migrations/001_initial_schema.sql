@@ -10,26 +10,26 @@ CREATE TABLE observation (
     identifier_value TEXT[],
     code_system TEXT,
     code_code TEXT,
-    effective_datetime TIMESTAMPTZ,
-    effective_period_start TIMESTAMPTZ,
-    effective_period_end TIMESTAMPTZ,
+    date_datetime TIMESTAMPTZ,
+    date_period_start TIMESTAMPTZ,
+    date_period_end TIMESTAMPTZ,
     encounter_reference TEXT,
-    category_system TEXT,
-    category_code TEXT,
-    focus_reference TEXT,
-    performer_reference TEXT,
+    category_system TEXT[],
+    category_code TEXT[],
+    focus_reference TEXT[],
+    performer_reference TEXT[],
     status TEXT,
     subject_reference TEXT,
     value_quantity_value NUMERIC(20, 6),
     value_quantity_unit TEXT,
     value_quantity_system TEXT,
-    value_codeable_concept_code TEXT,
+    value_codeable_concept_code TEXT[],
     patient_reference TEXT,
     issued TIMESTAMPTZ,
     value_string TEXT,
-    triggered_by_observation TEXT,
-    triggered_by_type TEXT,
-    body_structure_reference TEXT,
+    triggered_by_observation TEXT[],
+    triggered_by_type TEXT[],
+    body_structure_reference TEXT
 );
 
 -- Create indexes for current table
@@ -39,14 +39,17 @@ CREATE INDEX idx_observation_code_code ON observation (code_code);
 CREATE INDEX idx_observation_subject ON observation (subject_reference);
 CREATE INDEX idx_observation_patient ON observation (patient_reference);
 CREATE INDEX idx_observation_encounter ON observation (encounter_reference);
-CREATE INDEX idx_observation_effective_datetime ON observation (effective_datetime);
-CREATE INDEX idx_observation_effective_period ON observation (effective_period_start, effective_period_end);
+CREATE INDEX idx_observation_date_datetime ON observation (date_datetime);
+CREATE INDEX idx_observation_date_period ON observation (date_period_start, date_period_end);
 CREATE INDEX idx_observation_issued ON observation (issued);
 CREATE INDEX idx_observation_value_quantity ON observation (value_quantity_value);
 CREATE INDEX idx_observation_last_updated ON observation (last_updated);
 CREATE INDEX idx_observation_triggered_by ON observation USING GIN (triggered_by_observation);
 CREATE INDEX idx_observation_focus ON observation USING GIN (focus_reference);
 CREATE INDEX idx_observation_body_structure ON observation (body_structure_reference);
+CREATE INDEX idx_observation_performer ON observation USING GIN (performer_reference);
+CREATE INDEX idx_observation_value_codeable_concept ON observation USING GIN (value_codeable_concept_code);
+CREATE INDEX idx_observation_triggered_by_type ON observation USING GIN (triggered_by_type);
 
 -- Create GIN index for JSONB content
 CREATE INDEX idx_observation_content ON observation USING GIN (content);
@@ -63,9 +66,9 @@ CREATE TABLE observation_history (
     identifier_value TEXT[],
     code_system TEXT,
     code_code TEXT,
-    effective_datetime TIMESTAMPTZ,
-    effective_period_start TIMESTAMPTZ,
-    effective_period_end TIMESTAMPTZ,
+    date_datetime TIMESTAMPTZ,
+    date_period_start TIMESTAMPTZ,
+    date_period_end TIMESTAMPTZ,
     encounter_reference TEXT,
     category_system TEXT[],
     category_code TEXT[],
@@ -83,7 +86,6 @@ CREATE TABLE observation_history (
     triggered_by_observation TEXT[],
     triggered_by_type TEXT[],
     body_structure_reference TEXT,
-
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,
     history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -157,7 +159,7 @@ CREATE TABLE patient_history (
     general_practitioner_reference TEXT[] DEFAULT '{}',
 
     -- History metadata
-    history_operation VARCHAR(10),
+    history_operation VARCHAR(10) NOT NULL,
     history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     PRIMARY KEY (id, version_id)
@@ -221,7 +223,7 @@ CREATE TABLE practitioner_history (
     active BOOLEAN,
 
     -- History metadata
-    history_operation VARCHAR(10),
+    history_operation VARCHAR(10) NOT NULL,
     history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     PRIMARY KEY (id, version_id)

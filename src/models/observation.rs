@@ -146,23 +146,23 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         params.encounter_reference = Some(encounter.to_string());
     }
 
-    // Extract effectiveDateTime
+    // Extract effectiveDateTime (date search parameter)
     if let Some(effective) = content.get("effectiveDateTime").and_then(|e| e.as_str()) {
         if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {
-            params.effective_datetime = Some(dt.with_timezone(&Utc));
+            params.date_datetime = Some(dt.with_timezone(&Utc));
         }
     }
 
-    // Extract effectivePeriod
+    // Extract effectivePeriod (date search parameter)
     if let Some(period) = content.get("effectivePeriod") {
         if let Some(start) = period.get("start").and_then(|s| s.as_str()) {
             if let Ok(dt) = DateTime::parse_from_rfc3339(start) {
-                params.effective_period_start = Some(dt.with_timezone(&Utc));
+                params.date_period_start = Some(dt.with_timezone(&Utc));
             }
         }
         if let Some(end) = period.get("end").and_then(|e| e.as_str()) {
             if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
-                params.effective_period_end = Some(dt.with_timezone(&Utc));
+                params.date_period_end = Some(dt.with_timezone(&Utc));
             }
         }
     }
@@ -259,9 +259,9 @@ pub struct ObservationSearchParams {
     pub subject_reference: Option<String>,
     pub patient_reference: Option<String>,
     pub encounter_reference: Option<String>,
-    pub effective_datetime: Option<DateTime<Utc>>,
-    pub effective_period_start: Option<DateTime<Utc>>,
-    pub effective_period_end: Option<DateTime<Utc>>,
+    pub date_datetime: Option<DateTime<Utc>>,
+    pub date_period_start: Option<DateTime<Utc>>,
+    pub date_period_end: Option<DateTime<Utc>>,
     pub issued: Option<DateTime<Utc>>,
     pub value_quantity_value: Option<f64>,
     pub value_quantity_unit: Option<String>,
