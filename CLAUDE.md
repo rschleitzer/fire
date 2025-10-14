@@ -257,7 +257,7 @@ fire/
 │   ├── repositories.scm           # Generate repository methods
 │   ├── handlers.scm               # Generate Axum handlers
 │   └── search-extractors.scm     # Generate search param extractors
-└── generate.sh                    # Generation script
+└── fire.sh                        # Generation script
 ```
 
 **Key DSSSL Patterns (See Detailed Examples Below):**
@@ -795,34 +795,44 @@ The quotes "invert" or "flip" around the variable insertion point, creating a vi
         (make formatting-instruction data: contents)))
 ```
 
-### Angular Bracket Escaping in DSSSL
+### Special Character Escaping in DSSSL
 
-When writing DSSSL code generators that output code containing angular brackets, you need to prevent OpenJade from interpreting them as SGML tags. This affects:
-- Generic types (e.g., `Option<String>`, `Vec<T>`)
-- Any other code containing `<` characters
+When writing DSSSL code generators that output code containing special SGML characters, you need to prevent OpenJade from interpreting them as markup.
 
-**Problem**: OpenJade treats `<` as the start of an SGML tag, causing parsing errors.
+**Problem**: OpenJade treats DSSSL `.scm` files as SGML, so characters like `<` and `&` have special meaning.
 
 **Solution: Double-Quote Escaping**
 
-Within a `($...)` function, write the `<` character followed immediately by two double quotes:
+Within a `($...)` inverted string pattern, write the special character followed immediately by two double quotes:
 
 ```scheme
+;; Escape < (start tag)
 ($ "Option<""String>")
+
+;; Escape & (entity reference)
+($ "fn get_id(&""self) -> &""String")
 ```
 
-The `<` is followed by `""` which breaks the sequence: the first `"` ends the current string, and the second `"` immediately begins a new string, preventing OpenJade from recognizing `<` as a tag opener.
+The special character is followed by `""` which breaks the SGML sequence: the first `"` ends the current string, and the second `"` immediately begins a new string, preventing OpenJade from recognizing the character as markup.
+
+**Characters that need escaping:**
+- `<` - Would be interpreted as start of SGML tag
+- `&` - Would be interpreted as start of entity reference
 
 **Examples**:
 ```scheme
 ;; Wrong - will cause OpenJade parsing errors:
 ($ "pub id: Option<String>")
 ($ "pub items: Vec<Item>")
+($ "fn get_id(&self) -> &String")
 
-;; Correct - escapes the < characters:
+;; Correct - escapes the special characters:
 ($ "pub id: Option<""String>")
 ($ "pub items: Vec<""Item>")
+($ "fn get_id(&""self) -> &""String")
 ```
+
+**Note**: The `>` character does not need escaping, only `<` and `&`.
 
 ### Type Mapping
 

@@ -5,6 +5,7 @@
 <!ENTITY utilities      SYSTEM "utilities.scm">
 <!ENTITY general        SYSTEM "general.scm">
 <!ENTITY migration      SYSTEM "migration.scm">
+<!ENTITY structs        SYSTEM "structs.scm">
 <!ENTITY rules          SYSTEM "rules.scm">
 
 ]>
@@ -13,4 +14,5 @@
 &utilities;
 &general;
 &migration;
+&structs;
 &rules;
