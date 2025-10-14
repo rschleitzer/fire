@@ -21,13 +21,40 @@ CREATE TABLE "table-name" (
               ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+              (if (search-is-simple-code? search)
+                  ; Simple code type - single column
+                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",
+")
+                  ; Coding/CodeableConcept/Identifier - system and code/value columns
+                  (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+                    ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
     "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
-")))
+"))))
             (("date")
-              ($"    "(string-replace search-name "-" "_")" DATE,
-"))
+              (let* ((property (search-property search))
+                     (has-variants (property-has-variants? property))
+                     (variants (if has-variants (property-variants property) (empty-node-list)))
+                     (variant-list (node-list->list variants))
+                     (variant-types (map (lambda (v) (% "type" v)) variant-list))
+                     (has-datetime (or (member "dateTime" variant-types) (member "instant" variant-types)))
+                     (has-period (let loop ((vlist variant-list))
+                                   (cond ((null? vlist) #f)
+                                         ((and (string=? "element" (% "type" (car vlist)))
+                                               (string=? "period" (% "ref" (car vlist)))) #t)
+                                         (else (loop (cdr vlist)))))))
+                (if has-variants
+                    ($
+                      (if has-datetime
+                          ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ,
+")
+                          "")
+                      (if has-period
+                          ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
+    "(string-replace search-name "-" "_")"_period_end TIMESTAMPTZ,
+")
+                          ""))
+                    ($"    "(string-replace search-name "-" "_")" DATE,
+"))))
             (("number")
               ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
 "))
@@ -74,13 +101,40 @@ CREATE TABLE "table-name"_history (
               ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
             (("token")
-              (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+              (if (search-is-simple-code? search)
+                  ; Simple code type - single column
+                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",
+")
+                  ; Coding/CodeableConcept/Identifier - system and code/value columns
+                  (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+                    ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
     "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
-")))
+"))))
             (("date")
-              ($"    "(string-replace search-name "-" "_")" DATE,
-"))
+              (let* ((property (search-property search))
+                     (has-variants (property-has-variants? property))
+                     (variants (if has-variants (property-variants property) (empty-node-list)))
+                     (variant-list (node-list->list variants))
+                     (variant-types (map (lambda (v) (% "type" v)) variant-list))
+                     (has-datetime (or (member "dateTime" variant-types) (member "instant" variant-types)))
+                     (has-period (let loop ((vlist variant-list))
+                                   (cond ((null? vlist) #f)
+                                         ((and (string=? "element" (% "type" (car vlist)))
+                                               (string=? "period" (% "ref" (car vlist)))) #t)
+                                         (else (loop (cdr vlist)))))))
+                (if has-variants
+                    ($
+                      (if has-datetime
+                          ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ,
+")
+                          "")
+                      (if has-period
+                          ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
+    "(string-replace search-name "-" "_")"_period_end TIMESTAMPTZ,
+")
+                          ""))
+                    ($"    "(string-replace search-name "-" "_")" DATE,
+"))))
             (("number")
               ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
 "))

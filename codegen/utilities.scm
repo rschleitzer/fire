@@ -246,3 +246,26 @@
                 (string=? "identifier" ref-attr)
                 #f))
           #f)))
+
+; Check if a property has choice type variants
+(define (property-has-variants? property)
+    (if property
+        (let ((variants-node (select-children "variants" property)))
+          (not (node-list-empty? variants-node)))
+        #f))
+
+; Get the variants from a property
+(define (property-variants property)
+    (if property
+        (let ((variants-node (select-children "variants" property)))
+          (if (not (node-list-empty? variants-node))
+              (select-children "variant" (node-list-first variants-node))
+              (empty-node-list)))
+        (empty-node-list)))
+
+; Check if a search parameter references a simple code type (not Coding/CodeableConcept)
+(define (search-is-simple-code? search)
+    (let ((property (search-property search)))
+      (if property
+          (string=? "code" (% "type" property))
+          #f)))
