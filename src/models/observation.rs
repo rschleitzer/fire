@@ -85,7 +85,6 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         content.clone()
     }
 }
-
 /// Extract search parameters from FHIR Observation JSON
 pub fn extract_observation_search_params(content: &Value) -> ObservationSearchParams {
     let mut params = ObservationSearchParams::default();

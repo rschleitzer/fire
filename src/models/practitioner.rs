@@ -85,7 +85,6 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         content.clone()
     }
 }
-
 /// Extract search parameters from FHIR Practitioner JSON
 pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearchParams {
     let mut params = PractitionerSearchParams::default();

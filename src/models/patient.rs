@@ -85,7 +85,6 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         content.clone()
     }
 }
-
 /// Extract search parameters from FHIR Patient JSON
 pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     let mut params = PatientSearchParams::default();

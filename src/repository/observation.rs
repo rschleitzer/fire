@@ -25,7 +25,7 @@ fn capitalize_first(s: &str) -> String {
 /// Returns (joins, where_clause, bind_count_increment, bind_values)
 fn build_chain_joins(
     chain: &[crate::search::ChainLink],
-    source_table: &str,
+    _source_table: &str,
     source_alias: &str,
     reference_field: &str,
     join_counter: &mut usize,

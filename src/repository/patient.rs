@@ -1825,7 +1825,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                                 // Split on comma and create OR conditions
                                 let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
                                 let mut or_conditions = Vec::new();
-                                for value in &values {
+                                for _value in &values {
                                     bind_count += 1;
                                     or_conditions.push(format!("fn ILIKE ${}", bind_count));
                                 }
@@ -1847,7 +1847,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                                 // Split on comma and create OR conditions
                                 let values: Vec<&str> = chain.search_value.split(',').map(|v| v.trim()).collect();
                                 let mut or_conditions = Vec::new();
-                                for value in &values {
+                                for _value in &values {
                                     bind_count += 1;
                                     or_conditions.push(format!("gn ILIKE ${}", bind_count));
                                 }
