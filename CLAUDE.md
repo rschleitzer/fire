@@ -1463,8 +1463,44 @@ This ensures Fire maintains FHIR R5 compliance throughout development.
 - [x] Generate 3 resources (Patient, Observation, Practitioner)
 - [x] Validate with pyrtest (198/198 tests passing)
 - [x] Observation validates all search parameter types (47 parameters)
-- [ ] Add extractors/repositories/handlers generators
-- [ ] Scale to more resources when needed
+- [x] Document DSSSL patterns comprehensively
+- [ ] Build extractors/repositories/handlers generators (deferred - see strategy below)
+- [ ] Scale to more resources when needed (after generators complete)
+
+**Code Generation Strategy: Depth-First**
+
+Fire follows a **depth-first approach** rather than breadth-first:
+
+1. **Start with 3 representative resources** (Patient, Observation, Practitioner)
+   - Patient: Simple resource with basic search patterns
+   - Observation: Complex resource with 47 search parameters covering all types
+   - Practitioner: Medium complexity, demonstrates reference patterns
+
+2. **Generate all layers for these 3 resources**
+   - ✅ Schema (migrations) - Done
+   - ✅ Models (structs) - Done
+   - 🚧 Extractors - Next
+   - 🚧 Repositories - Next
+   - 🚧 Handlers - Next
+
+3. **Why depth-first?**
+   - Keeps compilation times manageable (adding more resources explodes compile time)
+   - Validates generators work for diverse patterns before scaling
+   - Easier to debug issues with fewer resources
+   - Observation alone covers nearly all FHIR search patterns
+   - Can test end-to-end workflows with 3 resources
+
+4. **Why NOT breadth-first?**
+   - Adding 50 resources × 2 tables = 100 tables → slow compilation
+   - Hard to identify generator bugs when dealing with many resources
+   - Testing becomes unwieldy
+   - Premature scaling before patterns are proven
+
+5. **When to scale horizontally**
+   - After all generator layers work for 3 resources
+   - After 198/198 tests pass
+   - After patterns are documented and stable
+   - Then add resources incrementally (5-10 at a time)
 
 ### Phase 3: Production Features
 - [ ] Authentication/Authorization (SMART on FHIR)
