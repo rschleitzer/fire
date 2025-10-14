@@ -263,9 +263,27 @@
               (empty-node-list)))
         (empty-node-list)))
 
-; Check if a search parameter references a simple code type (not Coding/CodeableConcept)
+; Check if a search parameter references a simple code or boolean type (not Coding/CodeableConcept)
 (define (search-is-simple-code? search)
     (let ((property (search-property search)))
       (if property
-          (string=? "code" (% "type" property))
+          (case (% "type" property)
+            (("code" "boolean") #t)
+            (else #f))
           #f)))
+
+; Check if there are any following siblings that will generate output
+; (i.e., not composite, not special)
+(define (has-output-following-siblings? search)
+    (let loop ((sibling (ifollow search)))
+      (cond
+        ((node-list-empty? sibling) #f)
+        ((string=? "composite" (% "type" sibling))
+         (loop (ifollow sibling)))
+        ((string=? "special" (% "type" sibling))
+         (loop (ifollow sibling)))
+        (else #t))))
+
+; Return comma or empty string based on whether there are more output-generating siblings
+(define (trailing-comma search)
+    (if (has-output-following-siblings? search) "," ""))

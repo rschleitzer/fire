@@ -11,24 +11,23 @@ CREATE TABLE "table-name" (
     content JSONB NOT NULL,
 
     -- Extracted search parameters (indexed)
-"(for-selected-children-of searches "search" (lambda (search)
+"(for-selected-children-of searches "search" (lambda (search) ($
     (let ((search-name (% "name" search))
           (search-type (% "type" search))
           (is-collection (search-is-collection? search)))
-      (if (not (string=? "_lastUpdated" search-name))
-          (case search-type
+      (case search-type
             (("string")
-              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
+              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")(trailing-comma search)"
 "))
             (("token")
               (if (search-is-simple-code? search)
                   ; Simple code type - single column
-                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",
+                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")(trailing-comma search)"
 ")
                   ; Coding/CodeableConcept/Identifier - system and code/value columns
                   (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
                     ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
-    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")(trailing-comma search)"
 "))))
             (("date")
               (let* ((property (search-property search))
@@ -42,61 +41,61 @@ CREATE TABLE "table-name" (
                                          ((and (string=? "element" (% "type" (car vlist)))
                                                (string=? "period" (% "ref" (car vlist)))) #t)
                                          (else (loop (cdr vlist)))))))
-                (if has-variants
+                  (if has-variants
                     ($
-                      (if has-datetime
-                          ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ,
-")
-                          "")
-                      (if has-period
-                          ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
-    "(string-replace search-name "-" "_")"_period_end TIMESTAMPTZ,
-")
-                          ""))
-                    ($"    "(string-replace search-name "-" "_")" DATE,
-"))))
+                      (if has-datetime ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ"(if has-period "," (trailing-comma search))"
+")"")
+                      (if has-period ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
+    "(string-replace search-name "-" "_")"_period_end TIMESTAMPTZ"(trailing-comma search)"
+")"")
+                    )
+                    ($"    "(string-replace search-name "-" "_")" DATE"(trailing-comma search)"
+"                   )
+                  )
+              )
+            )
             (("number")
-              ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
+              ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6)"(trailing-comma search)"
 "))
             (("quantity")
               ($"    "(string-replace search-name "-" "_")"_value NUMERIC(20, 6),
     "(string-replace search-name "-" "_")"_unit TEXT,
-    "(string-replace search-name "-" "_")"_system TEXT,
+    "(string-replace search-name "-" "_")"_system TEXT"(trailing-comma search)"
 "))
             (("uri")
-              ($"    "(string-replace search-name "-" "_")" TEXT,
+              ($"    "(string-replace search-name "-" "_")" TEXT"(trailing-comma search)"
 "))
             (("reference")
-              ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
+              ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}'"(trailing-comma search)"
 "))
             (("composite")
               "")  ; TODO: Handle composite searches when components are defined
             (("special")
               "")  ; Skip special searches like _text
-            (else ""))
-          ""))))
+            (else "")))
+        )
+      ))
 ");
 
 -- Create indexes for current table
 CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
-"(for-selected-children-of searches "search" (lambda (search)
+"(for-selected-children-of searches "search" (lambda (search) ($
     (let* ((search-name (% "name" search))
            (search-type (% "type" search))
            (is-collection (search-is-collection? search))
            (col-name (string-replace search-name "-" "_")))
-      (if (not (string=? "_lastUpdated" search-name))
-          (case search-type
+      (case search-type
             (("string")
-              ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name" "(if is-collection "USING GIN" "")" ("col-name"_name);
+              ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name(if is-collection " USING GIN" "")" ("col-name"_name);
 "))
             (("token")
               (if (search-is-simple-code? search)
                   ; Simple code - single index
-                  ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" "(if is-collection "USING GIN" "")" ("col-name");
+                  ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name(if is-collection " USING GIN" "")" ("col-name");
 ")
                   ; Coding/CodeableConcept - index on code/value column
                   (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                    ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name" "(if is-collection "USING GIN" "")" ("col-name token-suffix");
+                    ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name(if is-collection " USING GIN" "")" ("col-name token-suffix");
 "))))
             (("date")
               (let* ((property (search-property search))
@@ -132,10 +131,11 @@ CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
               ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" ("col-name");
 "))
             (("reference")
-              ($"CREATE INDEX idx_"table-name"_"col-name"_reference ON "table-name" "(if is-collection "USING GIN" "")" ("col-name"_reference);
+              ($"CREATE INDEX idx_"table-name"_"col-name"_reference ON "table-name(if is-collection " USING GIN" "")" ("col-name"_reference);
 "))
             (else ""))
-          ""))))
+  ))
+))
 "
 -- Create GIN index for JSONB content
 CREATE INDEX idx_"table-name"_content ON "table-name" USING GIN (content);
@@ -152,8 +152,7 @@ CREATE TABLE "table-name"_history (
     (let ((search-name (% "name" search))
           (search-type (% "type" search))
           (is-collection (search-is-collection? search)))
-      (if (not (string=? "_lastUpdated" search-name))
-          (case search-type
+      (case search-type
             (("string")
               ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
 "))
@@ -181,17 +180,16 @@ CREATE TABLE "table-name"_history (
                                          (else (loop (cdr vlist)))))))
                 (if has-variants
                     ($
-                      (if has-datetime
-                          ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ,
-")
-                          "")
-                      (if has-period
-                          ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
+                      (if has-datetime ($"    "(string-replace search-name "-" "_")"_datetime TIMESTAMPTZ,
+")"")
+                      (if has-period ($"    "(string-replace search-name "-" "_")"_period_start TIMESTAMPTZ,
     "(string-replace search-name "-" "_")"_period_end TIMESTAMPTZ,
-")
-                          ""))
+")"")
+                    )
                     ($"    "(string-replace search-name "-" "_")" DATE,
-"))))
+")
+                )
+            ))
             (("number")
               ($"    "(string-replace search-name "-" "_")" NUMERIC(20, 6),
 "))
@@ -210,8 +208,7 @@ CREATE TABLE "table-name"_history (
               "")  ; TODO: Handle composite searches when components are defined
             (("special")
               "")  ; Skip special searches like _text
-            (else ""))
-          ""))))
+            (else "")))))
 "
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,
