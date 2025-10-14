@@ -6,6 +6,8 @@ CREATE TABLE observation (
     content JSONB NOT NULL,
 
     -- Extracted search parameters (indexed)
+    identifier_system TEXT[],
+    identifier_value TEXT[],
     code_system TEXT,
     code_code TEXT,
     effective_datetime TIMESTAMPTZ,
@@ -57,6 +59,8 @@ CREATE TABLE observation_history (
     content JSONB NOT NULL,
 
     -- Same search parameters as current
+    identifier_system TEXT[],
+    identifier_value TEXT[],
     code_system TEXT,
     code_code TEXT,
     effective_datetime TIMESTAMPTZ,
