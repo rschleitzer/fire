@@ -1132,7 +1132,7 @@ impl PatientRepository {
                     // Determine target table and reference column
                     let (target_table, reference_column) = match chain.reference_param.as_str() {
                         "general-practitioner" => ("practitioner", "patient.general_practitioner_reference"),
-                        "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.patient_reference"),
+                        "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.subject_reference"),
                         _ => {
                             tracing::warn!("Unsupported chained reference: {}", chain.reference_param);
                             continue;
@@ -1377,7 +1377,7 @@ impl PatientRepository {
                                     sql.push_str(&format!(
                                         " AND EXISTS (
                                             SELECT 1 FROM observation AS {}
-                                            WHERE {}.patient_reference = 'Patient/' || patient.id
+                                            WHERE {}.subject_reference = 'Patient/' || patient.id
                                             AND {}.code_code = ${}
                                         )",
                                         alias, alias, alias, bind_count
@@ -1724,7 +1724,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 // Determine target table and reference column
                 let (target_table, reference_column) = match chain.reference_param.as_str() {
                     "general-practitioner" => ("practitioner", "patient.general_practitioner_reference"),
-                    "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.patient_reference"),
+                    "subject" if chain.resource_type.as_deref() == Some("Patient") => ("patient", "observation.subject_reference"),
                     _ => {
                         tracing::warn!("Unsupported chained reference in count: {}", chain.reference_param);
                         continue;
@@ -1929,7 +1929,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
                                 sql.push_str(&format!(
                                     " AND EXISTS (
                                         SELECT 1 FROM observation AS {}
-                                        WHERE {}.patient_reference = 'Patient/' || patient.id
+                                        WHERE {}.subject_reference = 'Patient/' || patient.id
                                         AND {}.code_code = ${}
                                     )",
                                     alias, alias, alias, bind_count
@@ -1991,7 +1991,7 @@ impl PatientRepository {
                 id, version_id, last_updated,
                 content as "content: Value"
             FROM observation
-            WHERE patient_reference = $1
+            WHERE subject_reference = $1
             "#,
             patient_ref
         )

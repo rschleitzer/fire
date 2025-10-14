@@ -63,7 +63,7 @@ fn build_chain_joins(
 
         // Get the reference column for THIS join from the source table
         // The reference_field parameter should already contain the fully qualified column name
-        // (e.g., "chain_0.general_practitioner_reference" or "observation.patient_reference")
+        // (e.g., "chain_0.general_practitioner_reference" or "observation.subject_reference")
         let reference_type = capitalize_first(target_table);
         let join_sql = format!(
             "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
@@ -160,7 +160,7 @@ fn get_reference_column(table: &str, param: &str) -> Result<String> {
     match (table, param) {
         ("patient", "general-practitioner") => Ok("general_practitioner_reference".to_string()),
         ("observation", "subject") => Ok("subject_reference".to_string()),
-        ("observation", "patient") => Ok("patient_reference".to_string()),
+        ("observation", "patient") => Ok("subject_reference".to_string()),
         _ => Err(FhirError::InvalidSearchParameter(format!(
             "Unsupported reference parameter '{}' for table '{}'",
             param, table
@@ -207,13 +207,13 @@ impl ObservationRepository {
                 id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
+                subject_reference, encounter_reference,
                 date_datetime, date_period_start, date_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_concept_code,
+                performer_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             "#,
             id,
             version_id,
@@ -225,22 +225,15 @@ impl ObservationRepository {
             params.code_system,
             params.code_code,
             params.subject_reference,
-            params.patient_reference,
             params.encounter_reference,
             params.date_datetime,
             params.date_period_start,
             params.date_period_end,
-            params.issued,
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
-            params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
-            params.body_structure_reference,
+                params.value_concept_code,
+                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -318,14 +311,14 @@ impl ObservationRepository {
                     id, version_id, last_updated, content,
                     status, category_system, category_code,
                     code_system, code_code,
-                    subject_reference, patient_reference, encounter_reference,
+                    subject_reference, encounter_reference,
                     date_datetime, date_period_start, date_period_end,
-                    issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_codeable_concept_code, value_string, performer_reference,
-                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
+                    value_quantity_value, value_quantity_unit, value_quantity_system,
+                    value_concept_code,
+                    performer_reference,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
                 "#,
                 old_observation.id,
                 old_observation.version_id,
@@ -337,22 +330,15 @@ impl ObservationRepository {
                 old_params.code_system,
                 old_params.code_code,
                 old_params.subject_reference,
-                old_params.patient_reference,
                 old_params.encounter_reference,
                 old_params.date_datetime,
                 old_params.date_period_start,
                 old_params.date_period_end,
-                old_params.issued,
                 old_value_qty_decimal,
                 old_params.value_quantity_unit,
                 old_params.value_quantity_system,
-                old_params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&old_params.value_codeable_concept_code[..])),
-                old_params.value_string,
+                old_params.value_concept_code,
                 old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
-                old_params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_observation[..])),
-                old_params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_type[..])),
-                old_params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.focus_reference[..])),
-                old_params.body_structure_reference,
                 if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
                 Utc::now(),
             )
@@ -382,22 +368,15 @@ impl ObservationRepository {
                     code_system = $8,
                     code_code = $9,
                     subject_reference = $10,
-                    patient_reference = $11,
-                    encounter_reference = $12,
-                    date_datetime = $13,
-                    date_period_start = $14,
-                    date_period_end = $15,
-                    issued = $16,
-                    value_quantity_value = $17,
-                    value_quantity_unit = $18,
-                    value_quantity_system = $19,
-                    value_codeable_concept_code = $20,
-                    value_string = $21,
-                    performer_reference = $22,
-                    triggered_by_observation = $23,
-                    triggered_by_type = $24,
-                    focus_reference = $25,
-                    body_structure_reference = $26
+                    encounter_reference = $11,
+                    date_datetime = $12,
+                    date_period_start = $13,
+                    date_period_end = $14,
+                    value_quantity_value = $15,
+                    value_quantity_unit = $16,
+                    value_quantity_system = $17,
+                    value_concept_code = $18,
+                    performer_reference = $19
                 WHERE id = $1
                 "#,
                 id,
@@ -410,22 +389,15 @@ impl ObservationRepository {
                 params.code_system,
                 params.code_code,
                 params.subject_reference,
-                params.patient_reference,
-                params.encounter_reference,
+            params.encounter_reference,
                 params.date_datetime,
                 params.date_period_start,
                 params.date_period_end,
-                params.issued,
                 value_qty_decimal,
                 params.value_quantity_unit,
                 params.value_quantity_system,
-                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
-                params.value_string,
+                params.value_concept_code,
                 params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
-                params.body_structure_reference,
             )
             .execute(&mut *tx)
             .await?;
@@ -474,13 +446,13 @@ impl ObservationRepository {
                     id, version_id, last_updated, content,
                     status, category_system, category_code,
                     code_system, code_code,
-                    subject_reference, patient_reference, encounter_reference,
+                    subject_reference, encounter_reference,
                     date_datetime, date_period_start, date_period_end,
-                    issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_codeable_concept_code, value_string, performer_reference,
-                    triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference
+                    value_quantity_value, value_quantity_unit, value_quantity_system,
+                    value_concept_code,
+                    performer_reference
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 "#,
                 id,
                 version_id,
@@ -492,22 +464,15 @@ impl ObservationRepository {
                 params.code_system,
                 params.code_code,
                 params.subject_reference,
-                params.patient_reference,
                 params.encounter_reference,
                 params.date_datetime,
                 params.date_period_start,
                 params.date_period_end,
-                params.issued,
                 value_qty_decimal,
                 params.value_quantity_unit,
                 params.value_quantity_system,
-                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
-                params.value_string,
+                params.value_concept_code,
                 params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
-                params.body_structure_reference,
             )
             .execute(&mut *tx)
             .await?;
@@ -575,14 +540,14 @@ impl ObservationRepository {
                 id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
+                subject_reference, encounter_reference,
                 date_datetime, date_period_start, date_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_concept_code,
+                performer_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#,
             id,
             new_version_id,
@@ -593,23 +558,15 @@ impl ObservationRepository {
             params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
             params.code_system,
             params.code_code,
-            params.subject_reference,
-            params.patient_reference,
-            params.encounter_reference,
+            params.subject_reference,            params.encounter_reference,
             params.date_datetime,
             params.date_period_start,
             params.date_period_end,
-            params.issued,
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
-            params.value_string,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-            params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-            params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-            params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
-            params.body_structure_reference,
+                params.value_concept_code,
+                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
             "DELETE",
             Utc::now(),
         )
@@ -653,14 +610,14 @@ impl ObservationRepository {
                 id, version_id, last_updated, content,
                 status, category_system, category_code,
                 code_system, code_code,
-                subject_reference, patient_reference, encounter_reference,
+                subject_reference, encounter_reference,
                 date_datetime, date_period_start, date_period_end,
-                issued, value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_codeable_concept_code, value_string, performer_reference,
-                triggered_by_observation, triggered_by_type, focus_reference, body_structure_reference,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_concept_code,
+                performer_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             "#,
             old_observation.id,
             old_observation.version_id,
@@ -672,22 +629,15 @@ impl ObservationRepository {
             old_params.code_system,
             old_params.code_code,
             old_params.subject_reference,
-            old_params.patient_reference,
             old_params.encounter_reference,
             old_params.date_datetime,
             old_params.date_period_start,
             old_params.date_period_end,
-            old_params.issued,
             old_value_qty_decimal,
             old_params.value_quantity_unit,
             old_params.value_quantity_system,
-            old_params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&old_params.value_codeable_concept_code[..])),
-            old_params.value_string,
-            old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
-            old_params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_observation[..])),
-            old_params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&old_params.triggered_by_type[..])),
-            old_params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.focus_reference[..])),
-            old_params.body_structure_reference,
+                old_params.value_concept_code,
+                old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
             if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
             Utc::now(),
         )
@@ -717,22 +667,15 @@ impl ObservationRepository {
                 code_system = $8,
                 code_code = $9,
                 subject_reference = $10,
-                patient_reference = $11,
-                encounter_reference = $12,
-                date_datetime = $13,
-                date_period_start = $14,
-                date_period_end = $15,
-                issued = $16,
-                value_quantity_value = $17,
-                value_quantity_unit = $18,
-                value_quantity_system = $19,
-                value_codeable_concept_code = $20,
-                value_string = $21,
-                performer_reference = $22,
-                triggered_by_observation = $23,
-                triggered_by_type = $24,
-                focus_reference = $25,
-                body_structure_reference = $26
+                encounter_reference = $11,
+                date_datetime = $12,
+                date_period_start = $13,
+                date_period_end = $14,
+                value_quantity_value = $15,
+                value_quantity_unit = $16,
+                value_quantity_system = $17,
+                value_concept_code = $18,
+                performer_reference = $19
             WHERE id = $1
             "#,
             id,
@@ -740,55 +683,20 @@ impl ObservationRepository {
             last_updated,
             content,
             params.status,
-            params
-                .category_system
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.category_system[..])),
-            params
-                .category_code
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.category_code[..])),
+            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
+            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
             params.code_system,
             params.code_code,
             params.subject_reference,
-            params.patient_reference,
             params.encounter_reference,
             params.date_datetime,
             params.date_period_start,
             params.date_period_end,
-            params.issued,
             value_qty_decimal,
             params.value_quantity_unit,
             params.value_quantity_system,
-            params
-                .value_codeable_concept_code
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.value_codeable_concept_code[..])),
-            params.value_string,
-            params
-                .performer_reference
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.performer_reference[..])),
-            params
-                .triggered_by_observation
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.triggered_by_observation[..])),
-            params
-                .triggered_by_type
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.triggered_by_type[..])),
-            params
-                .focus_reference
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&params.focus_reference[..])),
-            params.body_structure_reference,
+            params.value_concept_code,
+            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -942,7 +850,7 @@ impl ObservationRepository {
                 }
                 SearchCondition::ObservationPatient(patient_id) => {
                     bind_count += 1;
-                    sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_count));
+                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
                     bind_values.push(format!("Patient/{}", patient_id));
                 }
                 SearchCondition::ObservationSubject(subject_ref) => {
@@ -1001,7 +909,7 @@ impl ObservationRepository {
                     if let Some(sys) = &composite.code_system {
                         bind_count += 3; // code_system, code, value_code
                         sql.push_str(&format!(
-                            " AND observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                            " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_concept_code = ${}",
                             bind_count - 2, bind_count - 1, bind_count
                         ));
                         bind_values.push(sys.clone());
@@ -1010,7 +918,7 @@ impl ObservationRepository {
                     } else {
                         bind_count += 2; // code, value_code
                         sql.push_str(&format!(
-                            " AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                            " AND observation.code_code = ${} AND observation.value_concept_code = ${}",
                             bind_count - 1, bind_count
                         ));
                         bind_values.push(composite.code.clone());
@@ -1063,13 +971,13 @@ impl ObservationRepository {
                     // Determine target table and reference column for the first hop
                     let (target_table, reference_column) = match chain.reference_param.as_str() {
                         "subject" if chain.resource_type.as_deref() == Some("Patient") => {
-                            ("patient", "observation.patient_reference")
+                            ("patient", "observation.subject_reference")
                         }
                         "subject" => {
                             // Generic subject - could be various types, default to patient
                             ("patient", "observation.subject_reference")
                         }
-                        "patient" => ("patient", "observation.patient_reference"),
+                        "patient" => ("patient", "observation.subject_reference"),
                         _ => {
                             tracing::warn!(
                                 "Unsupported chained reference in observation: {}",
@@ -1333,22 +1241,15 @@ impl ObservationRepository {
                     code_system = $8,
                     code_code = $9,
                     subject_reference = $10,
-                    patient_reference = $11,
-                    encounter_reference = $12,
-                    date_datetime = $13,
-                    date_period_start = $14,
-                    date_period_end = $15,
-                    issued = $16,
-                    value_quantity_value = $17,
-                    value_quantity_unit = $18,
-                    value_quantity_system = $19,
-                    value_codeable_concept_code = $20,
-                    value_string = $21,
-                    performer_reference = $22,
-                    triggered_by_observation = $23,
-                    triggered_by_type = $24,
-                    focus_reference = $25,
-                    body_structure_reference = $26
+                    encounter_reference = $11,
+                    date_datetime = $12,
+                    date_period_start = $13,
+                    date_period_end = $14,
+                    value_quantity_value = $15,
+                    value_quantity_unit = $16,
+                    value_quantity_system = $17,
+                    value_concept_code = $18,
+                    performer_reference = $19
                 WHERE id = $1
                 "#,
                 id,
@@ -1361,22 +1262,15 @@ impl ObservationRepository {
                 params.code_system,
                 params.code_code,
                 params.subject_reference,
-                params.patient_reference,
-                params.encounter_reference,
+            params.encounter_reference,
                 params.date_datetime,
                 params.date_period_start,
                 params.date_period_end,
-                params.issued,
                 value_qty_decimal,
                 params.value_quantity_unit,
                 params.value_quantity_system,
-                params.value_codeable_concept_code.is_empty().then_some(None).unwrap_or(Some(&params.value_codeable_concept_code[..])),
-                params.value_string,
+                params.value_concept_code,
                 params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-                params.triggered_by_observation.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_observation[..])),
-                params.triggered_by_type.is_empty().then_some(None).unwrap_or(Some(&params.triggered_by_type[..])),
-                params.focus_reference.is_empty().then_some(None).unwrap_or(Some(&params.focus_reference[..])),
-                params.body_structure_reference,
             )
             .execute(&mut *tx)
             .await?;
@@ -1448,7 +1342,7 @@ fn build_count_sql(query: &SearchQuery) -> String {
             }
             SearchCondition::ObservationPatient(_patient_id) => {
                 bind_count += 1;
-                sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_count));
+                sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
             }
             SearchCondition::ObservationSubject(_subject_ref) => {
                 bind_count += 1;
@@ -1498,13 +1392,13 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 if composite.code_system.is_some() {
                     bind_count += 3;
                     sql.push_str(&format!(
-                        " AND observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                        " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_concept_code = ${}",
                         bind_count - 2, bind_count - 1, bind_count
                     ));
                 } else {
                     bind_count += 2;
                     sql.push_str(&format!(
-                        " AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code)",
+                        " AND observation.code_code = ${} AND observation.value_concept_code = ${}",
                         bind_count - 1, bind_count
                     ));
                 }
@@ -1549,13 +1443,13 @@ fn build_count_sql(query: &SearchQuery) -> String {
                 // Determine target table and reference column for the first hop
                 let (target_table, reference_column) = match chain.reference_param.as_str() {
                     "subject" if chain.resource_type.as_deref() == Some("Patient") => {
-                        ("patient", "observation.patient_reference")
+                        ("patient", "observation.subject_reference")
                     }
                     "subject" => {
                         // Generic subject - could be various types, default to patient
                         ("patient", "observation.subject_reference")
                     }
-                    "patient" => ("patient", "observation.patient_reference"),
+                    "patient" => ("patient", "observation.subject_reference"),
                     _ => {
                         tracing::warn!(
                             "Unsupported chained reference in observation count: {}",

@@ -131,9 +131,6 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|r| r.as_str())
     {
         params.subject_reference = Some(subject.to_string());
-        if subject.starts_with("Patient/") {
-            params.patient_reference = Some(subject.to_string());
-        }
     }
 
     // Extract encounter
@@ -145,31 +142,24 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         params.encounter_reference = Some(encounter.to_string());
     }
 
-    // Extract effectiveDateTime
+    // Extract effectiveDateTime (maps to date_datetime in DB)
     if let Some(effective) = content.get("effectiveDateTime").and_then(|e| e.as_str()) {
         if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {
-            params.effective_datetime = Some(dt.with_timezone(&Utc));
+            params.date_datetime = Some(dt.with_timezone(&Utc));
         }
     }
 
-    // Extract effectivePeriod
+    // Extract effectivePeriod (maps to date_period_start/end in DB)
     if let Some(period) = content.get("effectivePeriod") {
         if let Some(start) = period.get("start").and_then(|s| s.as_str()) {
             if let Ok(dt) = DateTime::parse_from_rfc3339(start) {
-                params.effective_period_start = Some(dt.with_timezone(&Utc));
+                params.date_period_start = Some(dt.with_timezone(&Utc));
             }
         }
         if let Some(end) = period.get("end").and_then(|e| e.as_str()) {
             if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
-                params.effective_period_end = Some(dt.with_timezone(&Utc));
+                params.date_period_end = Some(dt.with_timezone(&Utc));
             }
-        }
-    }
-
-    // Extract issued
-    if let Some(issued) = content.get("issued").and_then(|i| i.as_str()) {
-        if let Ok(dt) = DateTime::parse_from_rfc3339(issued) {
-            params.issued = Some(dt.with_timezone(&Utc));
         }
     }
 
@@ -187,19 +177,14 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     }
 
     // Extract valueCodeableConcept
-    if let Some(value_cc) = content.get("valueCodeableConcept") {
-        if let Some(codings) = value_cc.get("coding").and_then(|c| c.as_array()) {
-            for coding in codings {
-                if let Some(code) = coding.get("code").and_then(|c| c.as_str()) {
-                    params.value_codeable_concept_code.push(code.to_string());
+    if let Some(value_concept) = content.get("valueCodeableConcept") {
+        if let Some(codings) = value_concept.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.value_concept_code = Some(code.to_string());
                 }
             }
         }
-    }
-
-    // Extract valueString
-    if let Some(value_str) = content.get("valueString").and_then(|v| v.as_str()) {
-        params.value_string = Some(value_str.to_string());
     }
 
     // Extract performer
@@ -209,40 +194,6 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
                 params.performer_reference.push(reference.to_string());
             }
         }
-    }
-
-    // R5: Extract triggeredBy
-    if let Some(triggered_by) = content.get("triggeredBy").and_then(|t| t.as_array()) {
-        for trigger in triggered_by {
-            if let Some(obs_ref) = trigger
-                .get("observation")
-                .and_then(|o| o.get("reference"))
-                .and_then(|r| r.as_str())
-            {
-                params.triggered_by_observation.push(obs_ref.to_string());
-            }
-            if let Some(trigger_type) = trigger.get("type").and_then(|t| t.as_str()) {
-                params.triggered_by_type.push(trigger_type.to_string());
-            }
-        }
-    }
-
-    // R5: Extract focus
-    if let Some(focus) = content.get("focus").and_then(|f| f.as_array()) {
-        for focus_item in focus {
-            if let Some(reference) = focus_item.get("reference").and_then(|r| r.as_str()) {
-                params.focus_reference.push(reference.to_string());
-            }
-        }
-    }
-
-    // R5: Extract bodyStructure
-    if let Some(body_structure) = content
-        .get("bodyStructure")
-        .and_then(|b| b.get("reference"))
-        .and_then(|r| r.as_str())
-    {
-        params.body_structure_reference = Some(body_structure.to_string());
     }
 
     params
@@ -256,22 +207,13 @@ pub struct ObservationSearchParams {
     pub code_system: Option<String>,
     pub code_code: Option<String>,
     pub subject_reference: Option<String>,
-    pub patient_reference: Option<String>,
     pub encounter_reference: Option<String>,
-    pub effective_datetime: Option<DateTime<Utc>>,
-    pub effective_period_start: Option<DateTime<Utc>>,
-    pub effective_period_end: Option<DateTime<Utc>>,
-    pub issued: Option<DateTime<Utc>>,
+    pub date_datetime: Option<DateTime<Utc>>,
+    pub date_period_start: Option<DateTime<Utc>>,
+    pub date_period_end: Option<DateTime<Utc>>,
     pub value_quantity_value: Option<f64>,
     pub value_quantity_unit: Option<String>,
     pub value_quantity_system: Option<String>,
-    pub value_codeable_concept_code: Vec<String>,
-    pub value_string: Option<String>,
+    pub value_concept_code: Option<String>,
     pub performer_reference: Vec<String>,
-
-    // R5 specific fields
-    pub triggered_by_observation: Vec<String>,
-    pub triggered_by_type: Vec<String>,
-    pub focus_reference: Vec<String>,
-    pub body_structure_reference: Option<String>,
 }
