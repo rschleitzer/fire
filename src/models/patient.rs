@@ -75,7 +75,7 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         // 4. All other fields from content (skip resourceType, id, meta if client sent them)
         for (key, value) in content_obj {
             if key != "resourceType" && key != "id" && key != "meta" {
-                resources.insert(key.clone(), value.clone());
+                resource.insert(key.clone(), value.clone());
             }
         }
 
