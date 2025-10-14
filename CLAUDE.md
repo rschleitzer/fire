@@ -328,32 +328,33 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/fhir_dev cargo sqlx pre
 
 ### Generated Code Architecture
 
-**For Each Resource, Generate:**
+**Generated Code:**
 
-1. **Rust Model** (`src/models/{resource}.rs`)
+1. **Single SQL Migration** (`migrations/001_initial_schema.sql`)
+   - Contains all active resources in one file
+   - For each resource: current table + history table
+   - Search parameter columns (extracted from JSON)
+   - Indexes (GIN for arrays, BTREE for singles)
+   - All resources deployed together
+
+2. **Rust Model** (per resource: `src/models/{resource}.rs`)
    - Struct with FHIR fields
    - Serde serialization
    - Type conversions
 
-2. **SQL Migration** (`migrations/{NNN}_create_{resource}.sql`)
-   - Current table with search columns
-   - History table
-   - Indexes (GIN, BTREE)
-   - Foreign key constraints
-
-3. **Repository** (`src/repository/{resource}.rs`)
+3. **Repository** (per resource: `src/repository/{resource}.rs`)
    - CRUD methods using sqlx
    - Search with dynamic query building
    - History operations
    - Helper methods (find_by_reference, etc.)
 
-4. **Handler** (`src/api/handlers/{resource}.rs`)
+4. **Handler** (per resource: `src/api/handlers/{resource}.rs`)
    - Axum route handlers
    - Content negotiation (JSON/XML/HTML)
    - Bundle building
    - Pagination links
 
-5. **Search Extractor** (`src/models/{resource}.rs`)
+5. **Search Extractor** (per resource: `src/models/{resource}.rs`)
    - `extract_{resource}_search_params(&content)` function
    - Extracts values from JSON for indexed columns
 
