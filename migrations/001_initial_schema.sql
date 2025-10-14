@@ -6,28 +6,28 @@ CREATE TABLE observation (
     content JSONB NOT NULL,
 
     -- Extracted search parameters (indexed)
-    status TEXT,                           -- registered | preliminary | final | amended +
-    category_system TEXT[],                -- e.g., ["http://terminology.hl7.org/CodeSystem/observation-category"]
-    category_code TEXT[],                  -- e.g., ["vital-signs", "laboratory"]
-    code_system TEXT,                      -- e.g., "http://loinc.org"
-    code_code TEXT,                        -- e.g., "8867-4" (heart rate)
-    subject_reference TEXT,                -- e.g., "Patient/123"
-    patient_reference TEXT,                -- Same as subject for Patient
-    encounter_reference TEXT,              -- e.g., "Encounter/456"
-    effective_datetime TIMESTAMPTZ,        -- When observation was made
+    status TEXT,
+    category_system TEXT,
+    category_code TEXT,
+    code_system TEXT,
+    code_code TEXT,
+    subject_reference TEXT,
+    patient_reference TEXT,
+    encounter_reference TEXT,
+    effective_datetime TIMESTAMPTZ,
     effective_period_start TIMESTAMPTZ,
     effective_period_end TIMESTAMPTZ,
-    issued TIMESTAMPTZ,                    -- When observation was issued
-    value_quantity_value NUMERIC(20, 6),  -- Numeric value
-    value_quantity_unit TEXT,              -- Unit of measure
-    value_quantity_system TEXT,            -- Unit system
-    value_codeable_concept_code TEXT[],    -- For coded values
-    value_string TEXT,                     -- For string values
-    performer_reference TEXT[],            -- Who performed observation
-    triggered_by_observation TEXT[],       -- References to observations that triggered this observation
-    triggered_by_type TEXT[],              -- Trigger type (reflex | repeat | re-run)
-    focus_reference TEXT[],                -- What the observation is about when not about the subject
-    body_structure_reference TEXT          -- Observed body structure
+    issued TIMESTAMPTZ,
+    value_quantity_value NUMERIC(20, 6),
+    value_quantity_unit TEXT,
+    value_quantity_system TEXT,
+    value_codeable_concept_code TEXT,
+    value_string TEXT,
+    performer_reference TEXT,
+    triggered_by_observation TEXT,
+    triggered_by_type TEXT,
+    focus_reference TEXT,
+    body_structure_reference TEXT,
 );
 
 -- Create indexes for current table
@@ -153,7 +153,7 @@ CREATE TABLE patient_history (
     general_practitioner_reference TEXT[] DEFAULT '{}',
 
     -- History metadata
-    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
+    history_operation VARCHAR(10),
     history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     PRIMARY KEY (id, version_id)
@@ -217,7 +217,7 @@ CREATE TABLE practitioner_history (
     active BOOLEAN,
 
     -- History metadata
-    history_operation VARCHAR(10) NOT NULL,  -- CREATE, UPDATE, DELETE
+    history_operation VARCHAR(10),
     history_timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     PRIMARY KEY (id, version_id)
