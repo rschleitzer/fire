@@ -79,7 +79,64 @@ CREATE TABLE "table-name" (
 
 -- Create indexes for current table
 CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
-
+"(for-selected-children-of searches "search" (lambda (search)
+    (let* ((search-name (% "name" search))
+           (search-type (% "type" search))
+           (is-collection (search-is-collection? search))
+           (col-name (string-replace search-name "-" "_")))
+      (if (not (string=? "_lastUpdated" search-name))
+          (case search-type
+            (("string")
+              ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name" "(if is-collection "USING GIN" "")" ("col-name"_name);
+"))
+            (("token")
+              (if (search-is-simple-code? search)
+                  ; Simple code - single index
+                  ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" "(if is-collection "USING GIN" "")" ("col-name");
+")
+                  ; Coding/CodeableConcept - index on code/value column
+                  (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
+                    ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name" "(if is-collection "USING GIN" "")" ("col-name token-suffix");
+"))))
+            (("date")
+              (let* ((property (search-property search))
+                     (has-variants (property-has-variants? property))
+                     (variants (if has-variants (property-variants property) (empty-node-list)))
+                     (variant-list (node-list->list variants))
+                     (variant-types (map (lambda (v) (% "type" v)) variant-list))
+                     (has-datetime (or (member "dateTime" variant-types) (member "instant" variant-types)))
+                     (has-period (let loop ((vlist variant-list))
+                                   (cond ((null? vlist) #f)
+                                         ((and (string=? "element" (% "type" (car vlist)))
+                                               (string=? "period" (% "ref" (car vlist)))) #t)
+                                         (else (loop (cdr vlist)))))))
+                (if has-variants
+                    ($
+                      (if has-datetime
+                          ($"CREATE INDEX idx_"table-name"_"col-name"_datetime ON "table-name" ("col-name"_datetime);
+")
+                          "")
+                      (if has-period
+                          ($"CREATE INDEX idx_"table-name"_"col-name"_period ON "table-name" ("col-name"_period_start, "col-name"_period_end);
+")
+                          ""))
+                    ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" ("col-name");
+"))))
+            (("number")
+              ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" ("col-name");
+"))
+            (("quantity")
+              ($"CREATE INDEX idx_"table-name"_"col-name"_value ON "table-name" ("col-name"_value);
+"))
+            (("uri")
+              ($"CREATE INDEX idx_"table-name"_"col-name" ON "table-name" ("col-name");
+"))
+            (("reference")
+              ($"CREATE INDEX idx_"table-name"_"col-name"_reference ON "table-name" "(if is-collection "USING GIN" "")" ("col-name"_reference);
+"))
+            (else ""))
+          ""))))
+"
 -- Create GIN index for JSONB content
 CREATE INDEX idx_"table-name"_content ON "table-name" USING GIN (content);
 
