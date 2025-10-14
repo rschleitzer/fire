@@ -42,6 +42,10 @@ CREATE TABLE "table-name" (
             (("reference")
               ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
 "))
+            (("composite")
+              "")  ; TODO: Handle composite searches when components are defined
+            (("special")
+              "")  ; Skip special searches like _text
             (else ""))
           ""))))
 ");
@@ -91,6 +95,10 @@ CREATE TABLE "table-name"_history (
             (("reference")
               ($"    "(string-replace search-name "-" "_")"_reference TEXT"(if is-collection "[]" "")" DEFAULT '{}',
 "))
+            (("composite")
+              "")  ; TODO: Handle composite searches when components are defined
+            (("special")
+              "")  ; Skip special searches like _text
             (else ""))
           ""))))
 "
