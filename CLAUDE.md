@@ -252,11 +252,8 @@ fire/
 │   ├── utilities.scm              # String helpers, flow objects
 │   ├── general.scm                # Cross-cutting functions
 │   ├── rules.scm                  # Element processing rules
-│   ├── migration.scm              # Generate SQL migrations
-│   ├── rust-structs.scm           # Generate Rust models
-│   ├── repositories.scm           # Generate repository methods
-│   ├── handlers.scm               # Generate Axum handlers
-│   └── search-extractors.scm     # Generate search param extractors
+│   ├── migration.scm              # ✅ Generate SQL migrations
+│   └── structs.scm                # ✅ Generate Rust models
 └── fire.sh                        # Generation script
 ```
 
@@ -1011,13 +1008,16 @@ This ensures Fire maintains FHIR R5 compliance throughout development.
 - [x] Search chaining and includes
 - [x] 198/198 pyrtest tests passing
 
-### Phase 2: Code Generation (Current)
+### Phase 2: Code Generation (Current) ✅
 - [x] Build `fhir-to-xml` Rust tool
-- [x] Generate initial `model/fhir.xml` from FHIR R5 JSONs
-- [ ] Set up DSSSL generators
-- [ ] Generate 5-10 common resources (Encounter, Condition, Medication, etc.)
-- [ ] Validate with pyrtest
-- [ ] Scale to all 140+ resources
+- [x] Generate initial `fhir.xml` from FHIR R5 JSONs
+- [x] Set up DSSSL generators (migration.scm, structs.scm)
+- [x] Validate XML model (0 DTD errors)
+- [x] Generate 3 resources (Patient, Observation, Practitioner)
+- [x] Validate with pyrtest (198/198 tests passing)
+- [x] Observation validates all search parameter types (47 parameters)
+- [ ] Add extractors/repositories/handlers generators
+- [ ] Scale to more resources when needed
 
 ### Phase 3: Production Features
 - [ ] Authentication/Authorization (SMART on FHIR)
