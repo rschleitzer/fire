@@ -527,16 +527,7 @@ fn is_resource(type_name: &str) -> bool {
 fn is_active(type_name: &str) -> bool {
     matches!(
         type_name,
-        "ActivityDefinition" | "Appointment" | "Basic" | "Binary" | "CarePlan"
-        | "CareTeam" | "Citation" | "CodeSystem" | "Communication" | "Composition"
-        | "Condition" | "Device" | "DeviceDefinition" | "DeviceRequest"
-        | "DiagnosticReport" | "DocumentReference" | "Encounter" | "EpisodeOfCare"
-        | "Goal" | "Group" | "Ingredient" | "Location" | "Media" | "Medication"
-        | "MedicationStatement" | "Observation" | "Organization" | "Patient"
-        | "PlanDefinition" | "Practitioner" | "Provenance" | "Questionnaire"
-        | "QuestionnaireResponse" | "RelatedPerson" | "ResearchStudy"
-        | "ResearchSubject" | "RiskAssessment" | "Schedule" | "StructureDefinition"
-        | "Subscription" | "Task" | "TestScript" | "ValueSet"
+        "Observation" | "Patient" | "Practitioner"
     )
 }
 
