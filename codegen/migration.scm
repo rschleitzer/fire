@@ -21,7 +21,7 @@ CREATE TABLE "table-name" (
 "))
             (("token")
               ($"    "(string-replace search-name "-" "_")"_system TEXT[],
-    "(string-replace search-name "-" "_")"_value TEXT[],
+    "(string-replace search-name "-" "_")"_code TEXT[],
 "))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
@@ -57,7 +57,7 @@ CREATE TABLE "table-name"_history (
 "))
             (("token")
               ($"    "(string-replace search-name "-" "_")"_system TEXT[],
-    "(string-replace search-name "-" "_")"_value TEXT[],
+    "(string-replace search-name "-" "_")"_code TEXT[],
 "))
             (("date")
               ($"    "(string-replace search-name "-" "_")" DATE,
