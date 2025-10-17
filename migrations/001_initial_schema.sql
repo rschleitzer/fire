@@ -217,16 +217,16 @@ CREATE TABLE patient (
     language_system TEXT[],
     language_code TEXT[],
     link_reference TEXT[] DEFAULT '{}',
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
     name_name TEXT[],
     organization_reference TEXT DEFAULT '{}',
     phone_system TEXT[],
     phone_code TEXT[],
     phonetic_name TEXT[],
     telecom_system TEXT[],
-    telecom_code TEXT[],
-    prefix TEXT[],
-    suffix TEXT[],
-    name_text TEXT[]
+    telecom_code TEXT[]
 );
 
 -- Create indexes for current table
@@ -292,6 +292,9 @@ CREATE TABLE patient_history (
     language_system TEXT[],
     language_code TEXT[],
     link_reference TEXT[] DEFAULT '{}',
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
     name_name TEXT[],
     organization_reference TEXT DEFAULT '{}',
     phone_system TEXT[],
@@ -299,9 +302,6 @@ CREATE TABLE patient_history (
     phonetic_name TEXT[],
     telecom_system TEXT[],
     telecom_code TEXT[],
-    prefix TEXT[],
-    suffix TEXT[],
-    name_text TEXT[],
 
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,
@@ -352,10 +352,10 @@ CREATE TABLE practitioner (
     identifier_system TEXT[],
     identifier_value TEXT[],
     name_name TEXT[],
-    qualification_period DATE,
     prefix TEXT[],
     suffix TEXT[],
     name_text TEXT[],
+    qualification_period DATE,
     telecom_value TEXT[]
 );
 
@@ -423,10 +423,10 @@ CREATE TABLE practitioner_history (
     identifier_system TEXT[],
     identifier_value TEXT[],
     name_name TEXT[],
-    qualification_period DATE,
     prefix TEXT[],
     suffix TEXT[],
     name_text TEXT[],
+    qualification_period DATE,
     telecom_value TEXT[],
 
     -- History metadata
