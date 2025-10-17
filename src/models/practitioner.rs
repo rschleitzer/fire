@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
@@ -53,7 +53,12 @@ impl VersionedResource for Practitioner {
 
 /// Inject id and meta fields into a FHIR Practitioner resource
 /// This is used at storage time to ensure all stored resources have complete id/meta
-pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
+pub fn inject_id_meta(
+    content: &Value,
+    id: &str,
+    version_id: i32,
+    last_updated: &DateTime<Utc>,
+) -> Value {
     if let Some(content_obj) = content.as_object() {
         // Create new object with fields in FHIR-standard order
         let mut resource = serde_json::Map::new();
@@ -67,10 +72,13 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         resource.insert("id".to_string(), serde_json::json!(id));
 
         // 3. meta (always inject)
-        resource.insert("meta".to_string(), serde_json::json!({
-            "versionId": version_id.to_string(),
-            "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-        }));
+        resource.insert(
+            "meta".to_string(),
+            serde_json::json!({
+                "versionId": version_id.to_string(),
+                "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            }),
+        );
 
         // 4. All other fields from content (skip resourceType, id, meta if client sent them)
         for (key, value) in content_obj {
@@ -88,6 +96,22 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
 /// Extract search parameters from FHIR Practitioner JSON
 pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearchParams {
     let mut params = PractitionerSearchParams::default();
+
+    // Extract _lastUpdated
+    if let Some(_lastUpdated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(_lastUpdated, "%Y-%m-%d") {
+            params._lastUpdated = Some(date);
+        }
+    }
+
+    // Extract telecom values (email, phone, etc.)
+    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
+        for telecom in telecoms {
+            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
+                params.telecom_value.push(value.to_string());
+            }
+        }
+    }
 
     // Extract names
     if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
@@ -131,6 +155,16 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
         }
     }
 
+    // Extract gender
+    if let Some(gender) = content.get("gender").and_then(|g| g.as_str()) {
+        params.gender = Some(gender.to_string());
+    }
+
+    // Extract active
+    if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
+        params.active = Some(active);
+    }
+
     // Extract identifiers
     if let Some(identifiers) = content.get("identifier").and_then(|i| i.as_array()) {
         for identifier in identifiers {
@@ -143,18 +177,12 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
         }
     }
 
-    // Extract telecom
-    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
-        for telecom in telecoms {
-            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
-                params.telecom_value.push(value.to_string());
-            }
+    // Extract qualification-period
+    if let Some(qualification_period) = content.get("qualificationPeriod").and_then(|b| b.as_str())
+    {
+        if let Ok(date) = NaiveDate::parse_from_str(qualification_period, "%Y-%m-%d") {
+            params.qualification_period = Some(date);
         }
-    }
-
-    // Extract active
-    if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
-        params.active = Some(active);
     }
 
     params
@@ -162,13 +190,16 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
 
 #[derive(Debug, Default)]
 pub struct PractitionerSearchParams {
+    pub _lastUpdated: Option<NaiveDate>,
+    pub telecom_value: Vec<String>,
     pub family_name: Vec<String>,
     pub given_name: Vec<String>,
     pub prefix: Vec<String>,
     pub suffix: Vec<String>,
     pub name_text: Vec<String>,
+    pub gender: Option<String>,
+    pub active: Option<bool>,
     pub identifier_system: Vec<String>,
     pub identifier_value: Vec<String>,
-    pub telecom_value: Vec<String>,
-    pub active: Option<bool>,
+    pub qualification_period: Option<NaiveDate>,
 }

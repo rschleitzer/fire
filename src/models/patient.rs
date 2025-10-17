@@ -53,7 +53,12 @@ impl VersionedResource for Patient {
 
 /// Inject id and meta fields into a FHIR Patient resource
 /// This is used at storage time to ensure all stored resources have complete id/meta
-pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
+pub fn inject_id_meta(
+    content: &Value,
+    id: &str,
+    version_id: i32,
+    last_updated: &DateTime<Utc>,
+) -> Value {
     if let Some(content_obj) = content.as_object() {
         // Create new object with fields in FHIR-standard order
         let mut resource = serde_json::Map::new();
@@ -67,10 +72,13 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
         resource.insert("id".to_string(), serde_json::json!(id));
 
         // 3. meta (always inject)
-        resource.insert("meta".to_string(), serde_json::json!({
-            "versionId": version_id.to_string(),
-            "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-        }));
+        resource.insert(
+            "meta".to_string(),
+            serde_json::json!({
+                "versionId": version_id.to_string(),
+                "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+            }),
+        );
 
         // 4. All other fields from content (skip resourceType, id, meta if client sent them)
         for (key, value) in content_obj {
@@ -88,6 +96,34 @@ pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: 
 /// Extract search parameters from FHIR Patient JSON
 pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     let mut params = PatientSearchParams::default();
+
+    // Extract _lastUpdated
+    if let Some(_lastUpdated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(_lastUpdated, "%Y-%m-%d") {
+            params._lastUpdated = Some(date);
+        }
+    }
+
+    // Extract active
+    if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
+        params.active = Some(active);
+    }
+
+    // Extract birthdate
+    if let Some(birthdate) = content.get("birthdate").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
+            params.birthdate = Some(date);
+        }
+    }
+
+    // Extract telecom values (email, phone, etc.)
+    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
+        for telecom in telecoms {
+            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
+                params.telecom_value.push(value.to_string());
+            }
+        }
+    }
 
     // Extract names
     if let Some(names) = content.get("name").and_then(|n| n.as_array()) {
@@ -131,6 +167,25 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
         }
     }
 
+    // Extract gender
+    if let Some(gender) = content.get("gender").and_then(|g| g.as_str()) {
+        params.gender = Some(gender.to_string());
+    }
+
+    // Extract general-practitioner references
+    if let Some(refs) = content
+        .get("generalPractitioner")
+        .and_then(|g| g.as_array())
+    {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params
+                    .general_practitioner_reference
+                    .push(reference.to_string());
+            }
+        }
+    }
+
     // Extract identifiers
     if let Some(identifiers) = content.get("identifier").and_then(|i| i.as_array()) {
         for identifier in identifiers {
@@ -143,39 +198,22 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
         }
     }
 
-    // Extract birthdate
-    if let Some(birthdate) = content.get("birthDate").and_then(|b| b.as_str()) {
-        if let Ok(date) = NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
-            params.birthdate = Some(date);
-        }
-    }
-
-    // Extract gender
-    if let Some(gender) = content.get("gender").and_then(|g| g.as_str()) {
-        params.gender = Some(gender.to_string());
-    }
-
-    // Extract active
-    if let Some(active) = content.get("active").and_then(|a| a.as_bool()) {
-        params.active = Some(active);
-    }
-
-    // Extract general practitioner references
-    if let Some(gps) = content.get("generalPractitioner").and_then(|g| g.as_array()) {
-        for gp in gps {
-            if let Some(reference) = gp.get("reference").and_then(|r| r.as_str()) {
-                params.general_practitioner_reference.push(reference.to_string());
+    // Extract link references
+    if let Some(refs) = content.get("link").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.link_reference.push(reference.to_string());
             }
         }
     }
 
-    // Extract telecom values (email, phone, etc.)
-    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
-        for telecom in telecoms {
-            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
-                params.telecom_value.push(value.to_string());
-            }
-        }
+    // Extract organization reference
+    if let Some(reference) = content
+        .get("organization")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.organization_reference = Some(reference.to_string());
     }
 
     params
@@ -183,16 +221,19 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
 
 #[derive(Debug, Default)]
 pub struct PatientSearchParams {
+    pub _lastUpdated: Option<NaiveDate>,
+    pub active: Option<bool>,
+    pub birthdate: Option<NaiveDate>,
+    pub telecom_value: Vec<String>,
     pub family_name: Vec<String>,
     pub given_name: Vec<String>,
     pub prefix: Vec<String>,
     pub suffix: Vec<String>,
     pub name_text: Vec<String>,
+    pub gender: Option<String>,
+    pub general_practitioner_reference: Vec<String>,
     pub identifier_system: Vec<String>,
     pub identifier_value: Vec<String>,
-    pub birthdate: Option<NaiveDate>,
-    pub gender: Option<String>,
-    pub active: Option<bool>,
-    pub general_practitioner_reference: Vec<String>,
-    pub telecom_value: Vec<String>,
+    pub link_reference: Vec<String>,
+    pub organization_reference: Option<String>,
 }
