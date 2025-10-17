@@ -169,6 +169,15 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
         }
     }
 
+    // Extract telecom values (email, phone, etc.)
+    if let Some(telecoms) = content.get("telecom").and_then(|t| t.as_array()) {
+        for telecom in telecoms {
+            if let Some(value) = telecom.get("value").and_then(|v| v.as_str()) {
+                params.telecom_value.push(value.to_string());
+            }
+        }
+    }
+
     params
 }
 
@@ -185,4 +194,5 @@ pub struct PatientSearchParams {
     pub gender: Option<String>,
     pub active: Option<bool>,
     pub general_practitioner_reference: Vec<String>,
+    pub telecom_value: Vec<String>,
 }

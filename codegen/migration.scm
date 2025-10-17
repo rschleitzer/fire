@@ -17,18 +17,35 @@ CREATE TABLE "table-name" (
           (is-collection (search-is-collection? search)))
       (case search-type
             (("string")
-              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")(trailing-comma search)"
-"))
+              ; For "name" search on HumanName, also emit the component fields
+              (if (and (string=? "name" search-name) (search-is-humanname? search))
+                  ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[]"(trailing-comma search)"
+")
+                  ; Normal string search
+                  ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")(trailing-comma search)"
+")))
             (("token")
               (if (search-is-simple-code? search)
-                  ; Simple code type - single column
-                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")(trailing-comma search)"
-")
+                  ; Simple code/boolean type - single column with appropriate type
+                  (let* ((property (search-property search))
+                         (property-type (if property (% "type" property) "code"))
+                         (sql-type (postgres-type property-type)))
+                    ($"    "(string-replace search-name "-" "_")" "sql-type(if is-collection "[]" "")(trailing-comma search)"
+"))
                   ; Coding/CodeableConcept/Identifier - system and code/value columns
                   (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                    ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+                    ; For "telecom" search on ContactPoint, also add the _value field
+                    (if (and (string=? "telecom" search-name) (search-is-contactpoint? search))
+                        ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")"_value TEXT"(if is-collection "[]" "")(trailing-comma search)"
+")
+                        ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
     "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")(trailing-comma search)"
-"))))
+")))))
             (("date")
               (let* ((property (search-property search))
                      (has-variants (property-has-variants? property))
@@ -86,8 +103,15 @@ CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
            (col-name (string-replace search-name "-" "_")))
       (case search-type
             (("string")
-              ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name(if is-collection " USING GIN" "")" ("col-name"_name);
-"))
+              ; For "name" search on HumanName, also create indexes for component fields
+              (if (and (string=? (% "name" search) "name") (search-is-humanname? search))
+                  ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name(if is-collection " USING GIN" "")" ("col-name"_name);
+CREATE INDEX idx_"table-name"_prefix ON "table-name" USING GIN (prefix);
+CREATE INDEX idx_"table-name"_suffix ON "table-name" USING GIN (suffix);
+CREATE INDEX idx_"table-name"_name_text ON "table-name" USING GIN (name_text);
+")
+                  ($"CREATE INDEX idx_"table-name"_"col-name"_name ON "table-name(if is-collection " USING GIN" "")" ("col-name"_name);
+")))
             (("token")
               (if (search-is-simple-code? search)
                   ; Simple code - single index
@@ -95,8 +119,13 @@ CREATE INDEX idx_"table-name"_last_updated ON "table-name" (last_updated);
 ")
                   ; Coding/CodeableConcept - index on code/value column
                   (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                    ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name(if is-collection " USING GIN" "")" ("col-name token-suffix");
-"))))
+                    ; For "telecom" search on ContactPoint, also create index for _value
+                    (if (and (string=? "telecom" (% "name" search)) (search-is-contactpoint? search))
+                        ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name(if is-collection " USING GIN" "")" ("col-name token-suffix");
+CREATE INDEX idx_"table-name"_"col-name"_value ON "table-name(if is-collection " USING GIN" "")" ("col-name"_value);
+")
+                        ($"CREATE INDEX idx_"table-name"_"col-name token-suffix" ON "table-name(if is-collection " USING GIN" "")" ("col-name token-suffix");
+")))))
             (("date")
               (let* ((property (search-property search))
                      (has-variants (property-has-variants? property))
@@ -154,18 +183,35 @@ CREATE TABLE "table-name"_history (
           (is-collection (search-is-collection? search)))
       (case search-type
             (("string")
-              ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
-"))
+              ; For "name" search on HumanName, also emit the component fields
+              (if (and (string=? "name" search-name) (search-is-humanname? search))
+                  ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
+    prefix TEXT[],
+    suffix TEXT[],
+    name_text TEXT[],
+")
+                  ; Normal string search
+                  ($"    "(string-replace search-name "-" "_")"_name TEXT"(if is-collection "[]" "")",
+")))
             (("token")
               (if (search-is-simple-code? search)
-                  ; Simple code type - single column
-                  ($"    "(string-replace search-name "-" "_")" TEXT"(if is-collection "[]" "")",
-")
+                  ; Simple code/boolean type - single column with appropriate type
+                  (let* ((property (search-property search))
+                         (property-type (if property (% "type" property) "code"))
+                         (sql-type (postgres-type property-type)))
+                    ($"    "(string-replace search-name "-" "_")" "sql-type(if is-collection "[]" "")",
+"))
                   ; Coding/CodeableConcept/Identifier - system and code/value columns
                   (let ((token-suffix (if (search-is-identifier? search) "_value" "_code")))
-                    ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+                    ; For "telecom" search on ContactPoint, also add the _value field
+                    (if (and (string=? "telecom" search-name) (search-is-contactpoint? search))
+                        ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
     "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
-"))))
+    "(string-replace search-name "-" "_")"_value TEXT"(if is-collection "[]" "")",
+")
+                        ($"    "(string-replace search-name "-" "_")"_system TEXT"(if is-collection "[]" "")",
+    "(string-replace search-name "-" "_")token-suffix" TEXT"(if is-collection "[]" "")",
+")))))
             (("date")
               (let* ((property (search-property search))
                      (has-variants (property-has-variants? property))

@@ -287,3 +287,23 @@
 ; Return comma or empty string based on whether there are more output-generating siblings
 (define (trailing-comma search)
     (if (has-output-following-siblings? search) "," ""))
+
+; Check if a search parameter references a HumanName element
+(define (search-is-humanname? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "humanname" ref-attr)
+                #f))
+          #f)))
+
+; Check if a search parameter references a ContactPoint element
+(define (search-is-contactpoint? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "contactpoint" ref-attr)
+                #f))
+          #f)))

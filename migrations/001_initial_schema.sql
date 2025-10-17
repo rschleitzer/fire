@@ -217,16 +217,17 @@ CREATE TABLE patient (
     language_system TEXT[],
     language_code TEXT[],
     link_reference TEXT[] DEFAULT '{}',
+    name_name TEXT[],
     prefix TEXT[],
     suffix TEXT[],
     name_text TEXT[],
-    name_name TEXT[],
     organization_reference TEXT DEFAULT '{}',
     phone_system TEXT[],
     phone_code TEXT[],
     phonetic_name TEXT[],
     telecom_system TEXT[],
-    telecom_code TEXT[]
+    telecom_code TEXT[],
+    telecom_value TEXT[]
 );
 
 -- Create indexes for current table
@@ -250,13 +251,14 @@ CREATE INDEX idx_patient_identifier_value ON patient USING GIN (identifier_value
 CREATE INDEX idx_patient_language_code ON patient USING GIN (language_code);
 CREATE INDEX idx_patient_link_reference ON patient USING GIN (link_reference);
 CREATE INDEX idx_patient_name_name ON patient USING GIN (name_name);
+CREATE INDEX idx_patient_prefix ON patient USING GIN (prefix);
+CREATE INDEX idx_patient_suffix ON patient USING GIN (suffix);
+CREATE INDEX idx_patient_name_text ON patient USING GIN (name_text);
 CREATE INDEX idx_patient_organization_reference ON patient (organization_reference);
 CREATE INDEX idx_patient_phone_code ON patient USING GIN (phone_code);
 CREATE INDEX idx_patient_phonetic_name ON patient USING GIN (phonetic_name);
 CREATE INDEX idx_patient_telecom_code ON patient USING GIN (telecom_code);
-CREATE INDEX idx_patient_prefix ON patient USING GIN (prefix);
-CREATE INDEX idx_patient_suffix ON patient USING GIN (suffix);
-CREATE INDEX idx_patient_name_text ON patient USING GIN (name_text);
+CREATE INDEX idx_patient_telecom_value ON patient USING GIN (telecom_value);
 
 -- Create GIN index for JSONB content
 CREATE INDEX idx_patient_content ON patient USING GIN (content);
@@ -292,16 +294,17 @@ CREATE TABLE patient_history (
     language_system TEXT[],
     language_code TEXT[],
     link_reference TEXT[] DEFAULT '{}',
+    name_name TEXT[],
     prefix TEXT[],
     suffix TEXT[],
     name_text TEXT[],
-    name_name TEXT[],
     organization_reference TEXT DEFAULT '{}',
     phone_system TEXT[],
     phone_code TEXT[],
     phonetic_name TEXT[],
     telecom_system TEXT[],
     telecom_code TEXT[],
+    telecom_value TEXT[],
 
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,
@@ -344,6 +347,7 @@ CREATE TABLE practitioner (
     phonetic_name TEXT[],
     telecom_system TEXT[],
     telecom_code TEXT[],
+    telecom_value TEXT[],
     active BOOLEAN,
     communication_system TEXT[],
     communication_code TEXT[],
@@ -355,8 +359,7 @@ CREATE TABLE practitioner (
     prefix TEXT[],
     suffix TEXT[],
     name_text TEXT[],
-    qualification_period DATE,
-    telecom_value TEXT[]
+    qualification_period DATE
 );
 
 -- Create indexes for current table
@@ -375,16 +378,16 @@ CREATE INDEX idx_practitioner_given_name ON practitioner USING GIN (given_name);
 CREATE INDEX idx_practitioner_phone_code ON practitioner USING GIN (phone_code);
 CREATE INDEX idx_practitioner_phonetic_name ON practitioner USING GIN (phonetic_name);
 CREATE INDEX idx_practitioner_telecom_code ON practitioner USING GIN (telecom_code);
+CREATE INDEX idx_practitioner_telecom_value ON practitioner USING GIN (telecom_value);
 CREATE INDEX idx_practitioner_active ON practitioner (active);
 CREATE INDEX idx_practitioner_communication_code ON practitioner USING GIN (communication_code);
 CREATE INDEX idx_practitioner_deceased_code ON practitioner (deceased_code);
 CREATE INDEX idx_practitioner_identifier_value ON practitioner USING GIN (identifier_value);
 CREATE INDEX idx_practitioner_name_name ON practitioner USING GIN (name_name);
-CREATE INDEX idx_practitioner_qualification_period ON practitioner (qualification_period);
 CREATE INDEX idx_practitioner_prefix ON practitioner USING GIN (prefix);
 CREATE INDEX idx_practitioner_suffix ON practitioner USING GIN (suffix);
 CREATE INDEX idx_practitioner_name_text ON practitioner USING GIN (name_text);
-CREATE INDEX idx_practitioner_telecom_value ON practitioner USING GIN (telecom_value);
+CREATE INDEX idx_practitioner_qualification_period ON practitioner (qualification_period);
 
 -- Create GIN index for JSONB content
 CREATE INDEX idx_practitioner_content ON practitioner USING GIN (content);
@@ -415,6 +418,7 @@ CREATE TABLE practitioner_history (
     phonetic_name TEXT[],
     telecom_system TEXT[],
     telecom_code TEXT[],
+    telecom_value TEXT[],
     active BOOLEAN,
     communication_system TEXT[],
     communication_code TEXT[],
@@ -427,7 +431,6 @@ CREATE TABLE practitioner_history (
     suffix TEXT[],
     name_text TEXT[],
     qualification_period DATE,
-    telecom_value TEXT[],
 
     -- History metadata
     history_operation VARCHAR(10) NOT NULL,

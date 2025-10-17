@@ -95,6 +95,16 @@ FHIR R5 JSONs → Curated XML Model → Generated Code
 
 **Note:** `onsgmls -s xml.dcl fhir.xml` validation is only for quick validation during `fhir-to-xml` development, not part of regular codegen workflow.
 
+**Fixing Code Generators:**
+When fixing a code generator:
+1. The baseline file (e.g., manually crafted `migrations/001_initial_schema.sql`) is what we want to generate
+2. Run `./fire.sh` - this overwrites the baseline file with generated code
+3. Compare generated output against the baseline (what we want)
+4. Adjust the generator file (`codegen/*.scm`) to match the baseline
+5. Re-run `./fire.sh` and check if diffs are gone
+6. Repeat until generated output matches the baseline exactly
+7. Sometimes necessary to change the baseline file itself (reordering, bug fixes, etc.) during this process
+
 **Current Status:**
 - ✅ 0 DTD validation errors
 - 3 active resources: Observation, Patient, Practitioner

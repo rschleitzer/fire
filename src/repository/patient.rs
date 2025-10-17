@@ -56,9 +56,10 @@ impl PatientRepository {
                 id, version_id, last_updated, content,
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
-                birthdate, gender, active, general_practitioner_reference
+                birthdate, gender, active, general_practitioner_reference,
+                telecom_value
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             "#,
             id,
             version_id,
@@ -107,6 +108,11 @@ impl PatientRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.general_practitioner_reference[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -199,9 +205,10 @@ impl PatientRepository {
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
                     birthdate, gender, active, general_practitioner_reference,
+                    telecom_value,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
                 "#,
                 old_patient.id,
                 old_patient.version_id,
@@ -250,6 +257,11 @@ impl PatientRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&old_params.general_practitioner_reference[..])),
+                old_params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&old_params.telecom_value[..])),
                 if old_patient.version_id == 1 {
                     "CREATE"
                 } else {
@@ -281,7 +293,8 @@ impl PatientRepository {
                     birthdate = $12,
                     gender = $13,
                     active = $14,
-                    general_practitioner_reference = $15
+                    general_practitioner_reference = $15,
+                    telecom_value = $16
                 WHERE id = $1
                 "#,
                 id,
@@ -331,6 +344,11 @@ impl PatientRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&params.general_practitioner_reference[..])),
+                params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.telecom_value[..])),
             )
             .execute(&mut *tx)
             .await?;
@@ -375,9 +393,10 @@ impl PatientRepository {
                     id, version_id, last_updated, content,
                     family_name, given_name, prefix, suffix, name_text,
                     identifier_system, identifier_value,
-                    birthdate, gender, active, general_practitioner_reference
+                    birthdate, gender, active, general_practitioner_reference,
+                    telecom_value
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 "#,
                 id,
                 version_id,
@@ -426,6 +445,11 @@ impl PatientRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&params.general_practitioner_reference[..])),
+                params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.telecom_value[..])),
             )
             .execute(&mut *tx)
             .await?;
@@ -478,9 +502,10 @@ impl PatientRepository {
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
                 birthdate, gender, active, general_practitioner_reference,
+                telecom_value,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             "#,
             old_patient.id,
             old_patient.version_id,
@@ -529,6 +554,11 @@ impl PatientRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&old_params.general_practitioner_reference[..])),
+            old_params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.telecom_value[..])),
             if old_patient.version_id == 1 {
                 "CREATE"
             } else {
@@ -560,7 +590,8 @@ impl PatientRepository {
                 birthdate = $12,
                 gender = $13,
                 active = $14,
-                general_practitioner_reference = $15
+                general_practitioner_reference = $15,
+                telecom_value = $16
             WHERE id = $1
             "#,
             id,
@@ -610,6 +641,11 @@ impl PatientRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.general_practitioner_reference[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
         )
         .execute(&mut *tx)
         .await?;
@@ -666,9 +702,10 @@ impl PatientRepository {
                 family_name, given_name, prefix, suffix, name_text,
                 identifier_system, identifier_value,
                 birthdate, gender, active, general_practitioner_reference,
+                telecom_value,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             "#,
             id,
             new_version_id,
@@ -717,6 +754,11 @@ impl PatientRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.general_practitioner_reference[..])),
+            params
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.telecom_value[..])),
             "DELETE",
             Utc::now(),
         )
@@ -2135,7 +2177,8 @@ impl PatientRepository {
                     birthdate = $12,
                     gender = $13,
                     active = $14,
-                    general_practitioner_reference = $15
+                    general_practitioner_reference = $15,
+                    telecom_value = $16
                 WHERE id = $1
                 "#,
                 id,
@@ -2185,6 +2228,11 @@ impl PatientRepository {
                     .is_empty()
                     .then_some(None)
                     .unwrap_or(Some(&params.general_practitioner_reference[..])),
+                params
+                    .telecom_value
+                    .is_empty()
+                    .then_some(None)
+                    .unwrap_or(Some(&params.telecom_value[..])),
             )
             .execute(&mut *tx)
             .await?;
