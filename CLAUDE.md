@@ -90,9 +90,10 @@ FHIR R5 JSONs → Curated XML Model → Generated Code
 **Workflow:**
 1. Run generator → fix compile errors
 2. Edit `fhir.xml` (document fixes), edit generator if needed
-3. Validate: `onsgmls -s xml.dcl fhir.xml` (must have 0 errors)
-4. Re-run generator
-5. Commit XML model and generated code
+3. Re-run generator
+4. Commit XML model and generated code
+
+**Note:** `onsgmls -s xml.dcl fhir.xml` validation is only for quick validation during `fhir-to-xml` development, not part of regular codegen workflow.
 
 **Current Status:**
 - ✅ 0 DTD validation errors
@@ -134,12 +135,12 @@ openjade -t sgml -d codegen/map.dsl fhir.xml
 
 **Usage:**
 ```bash
-cargo run --bin fhir-to-xml              # Regenerate fhir.xml
-onsgmls -s xml.dcl fhir.xml              # Validate (0 errors required)
+cargo run --bin fhir-to-xml              # Regenerate fhir.xml (if needed)
 ./fire.sh                                # Generate code
-cargo fmt                                # Format
 DATABASE_URL=... cargo sqlx prepare      # Update sqlx metadata
 ```
+
+**Note:** Do NOT run `cargo fmt` on generated code - it makes comparison against codegen output difficult.
 
 ### Generated Code Architecture
 
