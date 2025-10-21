@@ -1714,7 +1714,13 @@ fn build_components(
         let expressions: Vec<&str> = comp_def.expression.split(" | ").collect();
 
         for expr in expressions {
-            let expr = expr.trim();
+            let mut expr = expr.trim();
+
+            // Strip leading and trailing parentheses
+            // e.g., "(value.ofType(CodeableConcept))" -> "value.ofType(CodeableConcept)"
+            while expr.starts_with('(') && expr.ends_with(')') {
+                expr = &expr[1..expr.len()-1].trim();
+            }
 
             // Handle simple property references (e.g., "code")
             // For composite searches, the expression is relative to the resource
