@@ -19,7 +19,7 @@
 			"args": [],
 			"cwd": "${workspaceFolder}",
 			"env": {
-				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir",
+				"DATABASE_URL": "postgres://postgres:postgres@localhost:5432/fhir_dev",
 				"SERVER_HOST": "127.0.0.1",
 				"SERVER_PORT": "3000",
 				"RUST_LOG": "fire=debug,tower_http=debug,sqlx=info"
