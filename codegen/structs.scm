@@ -150,7 +150,7 @@ pub struct "resource-name"SearchParams {
 (define (generate-extractor-for-search search)
   (let* ((search-name (% "name" search))
          (search-type (% "type" search))
-         (col-name (string-replace search-name "-" "_"))
+         (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (is-humanname (search-is-humanname? search))
          (is-contactpoint (search-is-contactpoint? search)))
     (case search-type
@@ -317,7 +317,7 @@ pub struct "resource-name"SearchParams {
 (define (generate-search-params-field search)
   (let* ((search-name (% "name" search))
          (search-type (% "type" search))
-         (col-name (string-replace search-name "-" "_"))
+         (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (is-collection (search-is-collection? search))
          (is-humanname (search-is-humanname? search)))
     (case search-type

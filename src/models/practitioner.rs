@@ -53,12 +53,7 @@ impl VersionedResource for Practitioner {
 
 /// Inject id and meta fields into a FHIR Practitioner resource
 /// This is used at storage time to ensure all stored resources have complete id/meta
-pub fn inject_id_meta(
-    content: &Value,
-    id: &str,
-    version_id: i32,
-    last_updated: &DateTime<Utc>,
-) -> Value {
+pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
     if let Some(content_obj) = content.as_object() {
         // Create new object with fields in FHIR-standard order
         let mut resource = serde_json::Map::new();
@@ -72,13 +67,10 @@ pub fn inject_id_meta(
         resource.insert("id".to_string(), serde_json::json!(id));
 
         // 3. meta (always inject)
-        resource.insert(
-            "meta".to_string(),
-            serde_json::json!({
-                "versionId": version_id.to_string(),
-                "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            }),
-        );
+        resource.insert("meta".to_string(), serde_json::json!({
+            "versionId": version_id.to_string(),
+            "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        }));
 
         // 4. All other fields from content (skip resourceType, id, meta if client sent them)
         for (key, value) in content_obj {
@@ -178,8 +170,7 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
     }
 
     // Extract qualification-period
-    if let Some(qualification_period) = content.get("qualificationPeriod").and_then(|b| b.as_str())
-    {
+    if let Some(qualification_period) = content.get("qualificationPeriod").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str(qualification_period, "%Y-%m-%d") {
             params.qualification_period = Some(date);
         }

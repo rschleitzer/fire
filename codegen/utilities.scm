@@ -307,3 +307,35 @@
                 (string=? "contactpoint" ref-attr)
                 #f))
           #f)))
+
+; Helper to check if a character is uppercase
+(define (is-upper? ch)
+  (not (char=? ch (char-downcase ch))))
+
+; Helper to check if a character is lowercase
+(define (is-lower? ch)
+  (not (char=? ch (char-upcase ch))))
+
+; Convert camelCase to snake_case (handles leading underscores)
+; Examples: "_lastUpdated" -> "_last_updated", "fooBar" -> "foo_bar"
+(define (camel-to-snake str)
+  (let loop ((chars (string->list str))
+             (result '())
+             (prev-was-lower #f))
+    (cond
+      ((null? chars)
+       (list->string (reverse result)))
+      ((is-upper? (car chars))
+       (if (and prev-was-lower (not (null? result)))
+           ; Insert underscore before uppercase letter if previous was lowercase
+           (loop (cdr chars)
+                 (cons (char-downcase (car chars)) (cons #\_ result))
+                 #f)
+           ; Just downcase the uppercase letter
+           (loop (cdr chars)
+                 (cons (char-downcase (car chars)) result)
+                 #f)))
+      (else
+       (loop (cdr chars)
+             (cons (car chars) result)
+             (is-lower? (car chars)))))))
