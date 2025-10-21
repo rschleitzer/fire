@@ -325,6 +325,22 @@
                 #f))
           #f)))
 
+; Check if a search parameter has CodeableConcept as a variant (choice type)
+(define (search-has-codeableconcept-variant? search)
+    (let ((property (search-property search)))
+      (if property
+          (if (property-has-variants? property)
+              (let ((variants (property-variants property)))
+                (let loop ((v-list (node-list->list variants)))
+                  (cond
+                    ((null? v-list) #f)
+                    ((let ((ref-attr (% "ref" (car v-list))))
+                       (and ref-attr (string=? "codeableconcept" ref-attr)))
+                     #t)
+                    (else (loop (cdr v-list))))))
+              #f)
+          #f)))
+
 ; Check if a search parameter references a Quantity element
 (define (search-is-quantity? search)
     (let ((property (search-property search)))

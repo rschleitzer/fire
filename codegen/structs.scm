@@ -154,7 +154,8 @@ pub struct "resource-name"SearchParams {
          (is-humanname (search-is-humanname? search))
          (is-contactpoint (search-is-contactpoint? search))
          (is-codeableconcept (search-is-codeableconcept? search))
-         (is-quantity (search-is-quantity? search)))
+         (is-quantity (search-is-quantity? search))
+         (has-codeableconcept-variant (search-has-codeableconcept-variant? search)))
     (case search-type
       (("string")
         (if is-humanname
@@ -169,7 +170,9 @@ pub struct "resource-name"SearchParams {
                     (generate-contactpoint-extractor search-name col-name)
                     (if is-codeableconcept
                         (generate-codeableconcept-extractor search-name col-name search)
-                        "")))))  ; Other token searches not yet implemented
+                        (if has-codeableconcept-variant
+                            (generate-choice-codeableconcept-extractor search-name col-name search)
+                            ""))))))  ; Other token searches not yet implemented
       (("date")
         (generate-date-extractor search-name col-name search))
       (("reference")
@@ -275,6 +278,23 @@ pub struct "resource-name"SearchParams {
         }
     }
 "))
+
+; Generate choice-type CodeableConcept extractor (e.g., valueCodeableConcept)
+; Note: Only extracts code, not system (matches hand-written observation.rs)
+(define (generate-choice-codeableconcept-extractor search-name col-name search)
+  (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name))))
+    ($"
+    // Extract "search-name"
+    if let Some("col-name"_concept) = content.get(\""fhir-field"CodeableConcept\") {
+        if let Some(codings) = "col-name"_concept.get(\"coding\").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(code) = first.get(\"code\").and_then(|c| c.as_str()) {
+                    params."col-name"_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+")))
 
 ; Generate CodeableConcept extractor (category, code fields)
 (define (generate-codeableconcept-extractor search-name col-name search)
@@ -454,7 +474,11 @@ pub struct "resource-name"SearchParams {
                             ($"    pub "col-name"_system: Option<""String>,
     pub "col-name"_code: Option<""String>,
 "))
-                        "")))))
+                        ; Check for choice-type CodeableConcept (e.g., valueCodeableConcept)
+                        (if (search-has-codeableconcept-variant? search)
+                            ($"    pub "col-name"_code: Option<""String>,
+")
+                            ""))))))
       (("date")
         (let* ((has-variants (search-has-variants? search))
                (variant-types (if has-variants (search-variant-types search) '())))

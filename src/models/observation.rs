@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::FromRow;
@@ -53,12 +53,7 @@ impl VersionedResource for Observation {
 
 /// Inject id and meta fields into a FHIR Observation resource
 /// This is used at storage time to ensure all stored resources have complete id/meta
-pub fn inject_id_meta(
-    content: &Value,
-    id: &str,
-    version_id: i32,
-    last_updated: &DateTime<Utc>,
-) -> Value {
+pub fn inject_id_meta(content: &Value, id: &str, version_id: i32, last_updated: &DateTime<Utc>) -> Value {
     if let Some(content_obj) = content.as_object() {
         // Create new object with fields in FHIR-standard order
         let mut resource = serde_json::Map::new();
@@ -72,13 +67,10 @@ pub fn inject_id_meta(
         resource.insert("id".to_string(), serde_json::json!(id));
 
         // 3. meta (always inject)
-        resource.insert(
-            "meta".to_string(),
-            serde_json::json!({
-                "versionId": version_id.to_string(),
-                "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-            }),
-        );
+        resource.insert("meta".to_string(), serde_json::json!({
+            "versionId": version_id.to_string(),
+            "lastUpdated": last_updated.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        }));
 
         // 4. All other fields from content (skip resourceType, id, meta if client sent them)
         for (key, value) in content_obj {
@@ -97,23 +89,21 @@ pub fn inject_id_meta(
 pub fn extract_observation_search_params(content: &Value) -> ObservationSearchParams {
     let mut params = ObservationSearchParams::default();
 
-    // Extract status
-    if let Some(status) = content.get("status").and_then(|s| s.as_str()) {
-        params.status = Some(status.to_string());
+    // Extract _lastUpdated
+    if let Some(_last_updated) = content.get("meta").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(_last_updated, "%Y-%m-%d") {
+            params._last_updated = Some(date);
+        }
     }
 
-    // Extract category
-    if let Some(categories) = content.get("category").and_then(|c| c.as_array()) {
-        for category in categories {
-            if let Some(codings) = category.get("coding").and_then(|c| c.as_array()) {
-                for coding in codings {
-                    if let Some(system) = coding.get("system").and_then(|s| s.as_str()) {
-                        params.category_system.push(system.to_string());
-                    }
-                    if let Some(code) = coding.get("code").and_then(|c| c.as_str()) {
-                        params.category_code.push(code.to_string());
-                    }
-                }
+    // Extract identifiers
+    if let Some(identifiers) = content.get("identifier").and_then(|i| i.as_array()) {
+        for identifier in identifiers {
+            if let Some(system) = identifier.get("system").and_then(|s| s.as_str()) {
+                params.identifier_system.push(system.to_string());
+            }
+            if let Some(value) = identifier.get("value").and_then(|v| v.as_str()) {
+                params.identifier_value.push(value.to_string());
             }
         }
     }
@@ -130,24 +120,6 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
                 }
             }
         }
-    }
-
-    // Extract subject
-    if let Some(subject) = content
-        .get("subject")
-        .and_then(|s| s.get("reference"))
-        .and_then(|r| r.as_str())
-    {
-        params.subject_reference = Some(subject.to_string());
-    }
-
-    // Extract encounter
-    if let Some(encounter) = content
-        .get("encounter")
-        .and_then(|e| e.get("reference"))
-        .and_then(|r| r.as_str())
-    {
-        params.encounter_reference = Some(encounter.to_string());
     }
 
     // Extract effectiveDateTime (maps to date_datetime in DB)
@@ -171,22 +143,196 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
-    // Extract valueQuantity
-    if let Some(value_qty) = content.get("valueQuantity") {
-        if let Some(value) = value_qty.get("value").and_then(|v| v.as_f64()) {
-            params.value_quantity_value = Some(value);
-        }
-        if let Some(unit) = value_qty.get("unit").and_then(|u| u.as_str()) {
-            params.value_quantity_unit = Some(unit.to_string());
-        }
-        if let Some(system) = value_qty.get("system").and_then(|s| s.as_str()) {
-            params.value_quantity_system = Some(system.to_string());
+    // Extract encounter reference
+    if let Some(reference) = content
+        .get("encounter")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.encounter_reference = Some(reference.to_string());
+    }
+
+    // Extract based-on references
+    if let Some(refs) = content.get("basedOn").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.based_on_reference.push(reference.to_string());
+            }
         }
     }
 
-    // Extract valueCodeableConcept
-    if let Some(value_concept) = content.get("valueCodeableConcept") {
-        if let Some(codings) = value_concept.get("coding").and_then(|c| c.as_array()) {
+    // Extract category
+    if let Some(categorys) = content.get("category").and_then(|c| c.as_array()) {
+        for category in categorys {
+            if let Some(codings) = category.get("coding").and_then(|c| c.as_array()) {
+                for coding in codings {
+                    if let Some(system) = coding.get("system").and_then(|s| s.as_str()) {
+                        params.category_system.push(system.to_string());
+                    }
+                    if let Some(code) = coding.get("code").and_then(|c| c.as_str()) {
+                        params.category_code.push(code.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract combo-code
+    if let Some(combo_code_obj) = content.get("code") {
+        if let Some(codings) = combo_code_obj.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get("system").and_then(|s| s.as_str()) {
+                    params.combo_code_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.combo_code_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract combo-data-absent-reason
+    if let Some(combo_data_absent_reason_obj) = content.get("dataAbsentReason") {
+        if let Some(codings) = combo_data_absent_reason_obj.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get("system").and_then(|s| s.as_str()) {
+                    params.combo_data_absent_reason_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.combo_data_absent_reason_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract combo-value-concept
+    if let Some(combo_value_concept_concept) = content.get("valueCodeableConcept") {
+        if let Some(codings) = combo_value_concept_concept.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.combo_value_concept_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract component-value-reference references
+    if let Some(refs) = content.get("component").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.component_value_reference_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract data-absent-reason
+    if let Some(data_absent_reason_obj) = content.get("dataAbsentReason") {
+        if let Some(codings) = data_absent_reason_obj.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get("system").and_then(|s| s.as_str()) {
+                    params.data_absent_reason_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.data_absent_reason_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract derived-from references
+    if let Some(refs) = content.get("derivedFrom").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.derived_from_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract device reference
+    if let Some(reference) = content
+        .get("device")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.device_reference = Some(reference.to_string());
+    }
+
+    // Extract focus references
+    if let Some(refs) = content.get("focus").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.focus_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract has-member references
+    if let Some(refs) = content.get("hasMember").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.has_member_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract method
+    if let Some(method_obj) = content.get("method") {
+        if let Some(codings) = method_obj.get("coding").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get("system").and_then(|s| s.as_str()) {
+                    params.method_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
+                    params.method_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+
+    // Extract part-of references
+    if let Some(refs) = content.get("partOf").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.part_of_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract performer references
+    if let Some(refs) = content.get("performer").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
+                params.performer_reference.push(reference.to_string());
+            }
+        }
+    }
+
+    // Extract specimen reference
+    if let Some(reference) = content
+        .get("specimen")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.specimen_reference = Some(reference.to_string());
+    }
+
+    // Extract status
+    if let Some(status) = content.get("status").and_then(|g| g.as_str()) {
+        params.status = Some(status.to_string());
+    }
+
+    // Extract subject reference
+    if let Some(reference) = content
+        .get("subject")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.subject_reference = Some(reference.to_string());
+    }
+
+    // Extract value-concept
+    if let Some(value_concept_concept) = content.get("valueCodeableConcept") {
+        if let Some(codings) = value_concept_concept.get("coding").and_then(|c| c.as_array()) {
             if let Some(first) = codings.first() {
                 if let Some(code) = first.get("code").and_then(|c| c.as_str()) {
                     params.value_concept_code = Some(code.to_string());
@@ -195,13 +341,34 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
-    // Extract performer
-    if let Some(performers) = content.get("performer").and_then(|p| p.as_array()) {
-        for performer in performers {
-            if let Some(reference) = performer.get("reference").and_then(|r| r.as_str()) {
-                params.performer_reference.push(reference.to_string());
+    // Extract valueDateTime (maps to value_date_datetime in DB)
+    if let Some(effective) = content.get("valueDateTime").and_then(|e| e.as_str()) {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {
+            params.value_date_datetime = Some(dt.with_timezone(&Utc));
+        }
+    }
+
+    // Extract valuePeriod (maps to value_date_period_start/end in DB)
+    if let Some(period) = content.get("valuePeriod") {
+        if let Some(start) = period.get("start").and_then(|s| s.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(start) {
+                params.value_date_period_start = Some(dt.with_timezone(&Utc));
             }
         }
+        if let Some(end) = period.get("end").and_then(|e| e.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
+                params.value_date_period_end = Some(dt.with_timezone(&Utc));
+            }
+        }
+    }
+
+    // Extract value-reference reference
+    if let Some(reference) = content
+        .get("value")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        params.value_reference_reference = Some(reference.to_string());
     }
 
     params
@@ -209,19 +376,49 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
 
 #[derive(Debug, Default)]
 pub struct ObservationSearchParams {
-    pub status: Option<String>,
-    pub category_system: Vec<String>,
-    pub category_code: Vec<String>,
+    pub _last_updated: Option<NaiveDate>,
+    pub identifier_system: Vec<String>,
+    pub identifier_value: Vec<String>,
     pub code_system: Option<String>,
     pub code_code: Option<String>,
-    pub subject_reference: Option<String>,
-    pub encounter_reference: Option<String>,
     pub date_datetime: Option<DateTime<Utc>>,
     pub date_period_start: Option<DateTime<Utc>>,
     pub date_period_end: Option<DateTime<Utc>>,
+    pub encounter_reference: Option<String>,
+    pub based_on_reference: Vec<String>,
+    pub category_system: Vec<String>,
+    pub category_code: Vec<String>,
+    pub combo_code_system: Option<String>,
+    pub combo_code_code: Option<String>,
+    pub combo_data_absent_reason_system: Option<String>,
+    pub combo_data_absent_reason_code: Option<String>,
+    pub combo_value_concept_code: Option<String>,
+    pub combo_value_quantity_value: Option<f64>,
+    pub combo_value_quantity_unit: Option<String>,
+    pub combo_value_quantity_system: Option<String>,
+    pub component_value_quantity_value: Option<f64>,
+    pub component_value_quantity_unit: Option<String>,
+    pub component_value_quantity_system: Option<String>,
+    pub component_value_reference_reference: Vec<String>,
+    pub data_absent_reason_system: Option<String>,
+    pub data_absent_reason_code: Option<String>,
+    pub derived_from_reference: Vec<String>,
+    pub device_reference: Option<String>,
+    pub focus_reference: Vec<String>,
+    pub has_member_reference: Vec<String>,
+    pub method_system: Option<String>,
+    pub method_code: Option<String>,
+    pub part_of_reference: Vec<String>,
+    pub performer_reference: Vec<String>,
+    pub specimen_reference: Option<String>,
+    pub status: Option<String>,
+    pub subject_reference: Option<String>,
+    pub value_concept_code: Option<String>,
+    pub value_date_datetime: Option<DateTime<Utc>>,
+    pub value_date_period_start: Option<DateTime<Utc>>,
+    pub value_date_period_end: Option<DateTime<Utc>>,
     pub value_quantity_value: Option<f64>,
     pub value_quantity_unit: Option<String>,
     pub value_quantity_system: Option<String>,
-    pub value_concept_code: Option<String>,
-    pub performer_reference: Vec<String>,
+    pub value_reference_reference: Option<String>,
 }
