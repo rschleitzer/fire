@@ -341,7 +341,7 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
-    // Extract valueQuantity
+    // Extract value-quantity
     if let Some(value_qty) = content.get("valueQuantity") {
         if let Some(value) = value_qty.get("value").and_then(|v| v.as_f64()) {
             params.value_quantity_value = Some(value);

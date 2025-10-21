@@ -222,10 +222,16 @@ pub struct Path {
     pub parts: Parts,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub casts: Option<Casts>,
-    #[serde(default, rename = "component", skip_serializing_if = "Vec::is_empty")]
-    pub components: Vec<Component>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub components: Option<Components>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub targets: Option<Targets>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Components {
+    #[serde(default, rename = "component")]
+    pub component: Vec<Component>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1341,7 +1347,7 @@ fn build_searches(
                         ],
                     },
                     casts: None,
-                    components: Vec::new(),
+                    components: None,
                     targets: None,
                 }],
             },
@@ -1396,7 +1402,7 @@ fn build_searches(
                                     }],
                                 },
                                 casts: None,
-                                components: Vec::new(),
+                                components: None,
                                 targets: None,
                             }],
                         },
@@ -1435,7 +1441,7 @@ fn build_searches(
                             }],
                         },
                         casts: None,
-                        components: Vec::new(),
+                        components: None,
                         targets: None,
                     });
                 }
@@ -1688,7 +1694,7 @@ fn parse_single_path(
         Some(Path {
             parts: Parts { part: parts },
             casts,
-            components: Vec::new(),
+            components: None,
             targets,
         })
     }
@@ -1699,8 +1705,8 @@ fn build_components(
     components_def: &[SearchParameterComponent],
     resource_name: &str,
     _dict_property: &HashMap<String, Property>,
-) -> Vec<Component> {
-    let mut components = Vec::new();
+) -> Option<Components> {
+    let mut component_vec = Vec::new();
 
     for comp_def in components_def {
         // Parse the component expression
@@ -1743,14 +1749,20 @@ fn build_components(
                 cast: vec![Cast { to: cast }],
             });
 
-            components.push(Component {
+            component_vec.push(Component {
                 ref_attr: prop_ref,
                 casts,
             });
         }
     }
 
-    components
+    if component_vec.is_empty() {
+        None
+    } else {
+        Some(Components {
+            component: component_vec,
+        })
+    }
 }
 
 // Parse .where() clause
