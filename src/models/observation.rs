@@ -216,19 +216,16 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
-    // Extract value-quantity (combo-value-quantity)
-    if let Some(value_quantity) = content.get("valueQuantity") {
-        if let Some(value) = value_quantity.get("value").and_then(|v| v.as_f64()) {
+    // Extract combo-value-quantity
+    if let Some(combo_value_quantity_qty) = content.get("valueQuantity") {
+        if let Some(value) = combo_value_quantity_qty.get("value").and_then(|v| v.as_f64()) {
             params.combo_value_quantity_value = Some(value);
-            params.value_quantity_value = Some(value);
         }
-        if let Some(unit) = value_quantity.get("unit").and_then(|u| u.as_str()) {
+        if let Some(unit) = combo_value_quantity_qty.get("unit").and_then(|u| u.as_str()) {
             params.combo_value_quantity_unit = Some(unit.to_string());
-            params.value_quantity_unit = Some(unit.to_string());
         }
-        if let Some(system) = value_quantity.get("system").and_then(|s| s.as_str()) {
+        if let Some(system) = combo_value_quantity_qty.get("system").and_then(|s| s.as_str()) {
             params.combo_value_quantity_system = Some(system.to_string());
-            params.value_quantity_system = Some(system.to_string());
         }
     }
 
@@ -375,6 +372,19 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
             if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
                 params.value_date_period_end = Some(dt.with_timezone(&Utc));
             }
+        }
+    }
+
+    // Extract value-quantity
+    if let Some(value_quantity_qty) = content.get("valueQuantity") {
+        if let Some(value) = value_quantity_qty.get("value").and_then(|v| v.as_f64()) {
+            params.value_quantity_value = Some(value);
+        }
+        if let Some(unit) = value_quantity_qty.get("unit").and_then(|u| u.as_str()) {
+            params.value_quantity_unit = Some(unit.to_string());
+        }
+        if let Some(system) = value_quantity_qty.get("system").and_then(|s| s.as_str()) {
+            params.value_quantity_system = Some(system.to_string());
         }
     }
 

@@ -155,7 +155,8 @@ pub struct "resource-name"SearchParams {
          (is-contactpoint (search-is-contactpoint? search))
          (is-codeableconcept (search-is-codeableconcept? search))
          (is-quantity (search-is-quantity? search))
-         (has-codeableconcept-variant (search-has-codeableconcept-variant? search)))
+         (has-codeableconcept-variant (search-has-codeableconcept-variant? search))
+         (has-quantity-variant (search-has-quantity-variant? search)))
     (case search-type
       (("string")
         (if is-humanname
@@ -178,7 +179,7 @@ pub struct "resource-name"SearchParams {
       (("reference")
         (generate-reference-extractor search-name col-name search))
       (("quantity")
-        (if is-quantity
+        (if (or is-quantity has-quantity-variant)
             (generate-quantity-extractor search-name col-name search)
             ""))
       (else ""))))

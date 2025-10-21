@@ -351,6 +351,22 @@
                 #f))
           #f)))
 
+; Check if a search parameter has Quantity as a variant (choice type)
+(define (search-has-quantity-variant? search)
+    (let ((property (search-property search)))
+      (if property
+          (if (property-has-variants? property)
+              (let ((variants (property-variants property)))
+                (let loop ((v-list (node-list->list variants)))
+                  (cond
+                    ((null? v-list) #f)
+                    ((let ((ref-attr (% "ref" (car v-list))))
+                       (and ref-attr (string=? "quantity" ref-attr)))
+                     #t)
+                    (else (loop (cdr v-list))))))
+              #f)
+          #f)))
+
 ; Check if a search's property has choice type variants
 (define (search-has-variants? search)
     (let ((property (search-property search)))
