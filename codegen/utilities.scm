@@ -335,6 +335,21 @@
                 #f))
           #f)))
 
+; Check if a search's property has choice type variants
+(define (search-has-variants? search)
+    (let ((property (search-property search)))
+      (if property
+          (property-has-variants? property)
+          #f)))
+
+; Get variant types from a search's property
+(define (search-variant-types search)
+    (let ((property (search-property search)))
+      (if property
+          (map (lambda (v) (% "type" v))
+               (node-list->list (property-variants property)))
+          '())))
+
 ; Helper to check if a character is uppercase
 (define (is-upper? ch)
   (not (char=? ch (char-downcase ch))))

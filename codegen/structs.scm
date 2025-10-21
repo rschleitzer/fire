@@ -153,7 +153,8 @@ pub struct "resource-name"SearchParams {
          (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (is-humanname (search-is-humanname? search))
          (is-contactpoint (search-is-contactpoint? search))
-         (is-codeableconcept (search-is-codeableconcept? search)))
+         (is-codeableconcept (search-is-codeableconcept? search))
+         (is-quantity (search-is-quantity? search)))
     (case search-type
       (("string")
         (if is-humanname
@@ -173,6 +174,10 @@ pub struct "resource-name"SearchParams {
         (generate-date-extractor search-name col-name search))
       (("reference")
         (generate-reference-extractor search-name col-name search))
+      (("quantity")
+        (if is-quantity
+            (generate-quantity-extractor search-name col-name search)
+            ""))
       (else ""))))
 
 ; Generate HumanName extractor (name field)
@@ -311,17 +316,68 @@ pub struct "resource-name"SearchParams {
     }
 "))))
 
-; Generate date extractor
-(define (generate-date-extractor search-name col-name search)
+; Generate Quantity extractor (valueQuantity field)
+(define (generate-quantity-extractor search-name col-name search)
   (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name))))
     ($"
+    // Extract "search-name"
+    if let Some("col-name"_qty) = content.get(\""fhir-field"Quantity\") {
+        if let Some(value) = "col-name"_qty.get(\"value\").and_then(|v| v.as_f64()) {
+            params."col-name"_value = Some(value);
+        }
+        if let Some(unit) = "col-name"_qty.get(\"unit\").and_then(|u| u.as_str()) {
+            params."col-name"_unit = Some(unit.to_string());
+        }
+        if let Some(system) = "col-name"_qty.get(\"system\").and_then(|s| s.as_str()) {
+            params."col-name"_system = Some(system.to_string());
+        }
+    }
+")))
+
+; Generate date extractor
+(define (generate-date-extractor search-name col-name search)
+  (let* ((fhir-field (or (search-fhir-field-name search) (camel-case search-name)))
+         (has-variants (search-has-variants? search))
+         (variant-types (if has-variants (search-variant-types search) '())))
+    (if has-variants
+        ; Choice type - generate extractors for dateTime and Period variants
+        ($
+          (if (member "dateTime" variant-types)
+              ($"
+    // Extract "fhir-field"DateTime (maps to "col-name"_datetime in DB)
+    if let Some(effective) = content.get(\""fhir-field"DateTime\").and_then(|e| e.as_str()) {
+        if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {
+            params."col-name"_datetime = Some(dt.with_timezone(&""Utc));
+        }
+    }
+")
+              "")
+          (if (member "element" variant-types) ; Period is an element type
+              ($"
+    // Extract "fhir-field"Period (maps to "col-name"_period_start/end in DB)
+    if let Some(period) = content.get(\""fhir-field"Period\") {
+        if let Some(start) = period.get(\"start\").and_then(|s| s.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(start) {
+                params."col-name"_period_start = Some(dt.with_timezone(&""Utc));
+            }
+        }
+        if let Some(end) = period.get(\"end\").and_then(|e| e.as_str()) {
+            if let Ok(dt) = DateTime::parse_from_rfc3339(end) {
+                params."col-name"_period_end = Some(dt.with_timezone(&""Utc));
+            }
+        }
+    }
+")
+              ""))
+        ; Simple date field
+        ($"
     // Extract "search-name"
     if let Some("col-name") = content.get(\""fhir-field"\").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str("col-name", \"%Y-%m-%d\") {
             params."col-name" = Some(date);
         }
     }
-")))
+"))))
 
 ; Generate reference extractor
 (define (generate-reference-extractor search-name col-name search)
@@ -400,14 +456,34 @@ pub struct "resource-name"SearchParams {
 "))
                         "")))))
       (("date")
-        ($"    pub "col-name": Option<""NaiveDate>,
-"))
+        (let* ((has-variants (search-has-variants? search))
+               (variant-types (if has-variants (search-variant-types search) '())))
+          (if has-variants
+              ; Choice type - generate fields for dateTime and Period
+              ($
+                (if (member "dateTime" variant-types)
+                    ($"    pub "col-name"_datetime: Option<""DateTime<""Utc>>,
+")
+                    "")
+                (if (member "element" variant-types) ; Period
+                    ($"    pub "col-name"_period_start: Option<""DateTime<""Utc>>,
+    pub "col-name"_period_end: Option<""DateTime<""Utc>>,
+")
+                    ""))
+              ; Simple date field
+              ($"    pub "col-name": Option<""NaiveDate>,
+"))))
       (("reference")
         (if is-collection
             ($"    pub "col-name"_reference: Vec<""String>,
 ")
             ($"    pub "col-name"_reference: Option<""String>,
 ")))
+      (("quantity")
+        ($"    pub "col-name"_value: Option<""f64>,
+    pub "col-name"_unit: Option<""String>,
+    pub "col-name"_system: Option<""String>,
+"))
       (else ""))))
 
 ; Convert hyphen-separated to camelCase for FHIR field names
