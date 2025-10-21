@@ -315,6 +315,26 @@
         (% "name" property)
         #f)))
 
+; Check if a search parameter references a CodeableConcept element
+(define (search-is-codeableconcept? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "codeableconcept" ref-attr)
+                #f))
+          #f)))
+
+; Check if a search parameter references a Quantity element
+(define (search-is-quantity? search)
+    (let ((property (search-property search)))
+      (if property
+          (let ((ref-attr (% "ref" property)))
+            (if ref-attr
+                (string=? "quantity" ref-attr)
+                #f))
+          #f)))
+
 ; Helper to check if a character is uppercase
 (define (is-upper? ch)
   (not (char=? ch (char-downcase ch))))

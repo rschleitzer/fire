@@ -152,7 +152,8 @@ pub struct "resource-name"SearchParams {
          (search-type (% "type" search))
          (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (is-humanname (search-is-humanname? search))
-         (is-contactpoint (search-is-contactpoint? search)))
+         (is-contactpoint (search-is-contactpoint? search))
+         (is-codeableconcept (search-is-codeableconcept? search)))
     (case search-type
       (("string")
         (if is-humanname
@@ -165,7 +166,9 @@ pub struct "resource-name"SearchParams {
                 (generate-identifier-extractor search-name col-name)
                 (if is-contactpoint
                     (generate-contactpoint-extractor search-name col-name)
-                    ""))))  ; Other token searches not yet implemented
+                    (if is-codeableconcept
+                        (generate-codeableconcept-extractor search-name col-name search)
+                        "")))))  ; Other token searches not yet implemented
       (("date")
         (generate-date-extractor search-name col-name search))
       (("reference")
@@ -268,6 +271,46 @@ pub struct "resource-name"SearchParams {
     }
 "))
 
+; Generate CodeableConcept extractor (category, code fields)
+(define (generate-codeableconcept-extractor search-name col-name search)
+  (let* ((fhir-field (or (search-fhir-field-name search) (camel-case search-name)))
+         (is-collection (search-is-collection? search)))
+    (if is-collection
+        ; Collection of CodeableConcepts (e.g., category)
+        ($"
+    // Extract "search-name"
+    if let Some("col-name"s) = content.get(\""fhir-field"\").and_then(|c| c.as_array()) {
+        for "col-name" in "col-name"s {
+            if let Some(codings) = "col-name".get(\"coding\").and_then(|c| c.as_array()) {
+                for coding in codings {
+                    if let Some(system) = coding.get(\"system\").and_then(|s| s.as_str()) {
+                        params."col-name"_system.push(system.to_string());
+                    }
+                    if let Some(code) = coding.get(\"code\").and_then(|c| c.as_str()) {
+                        params."col-name"_code.push(code.to_string());
+                    }
+                }
+            }
+        }
+    }
+")
+        ; Single CodeableConcept (e.g., code)
+        ($"
+    // Extract "search-name"
+    if let Some("col-name"_obj) = content.get(\""fhir-field"\") {
+        if let Some(codings) = "col-name"_obj.get(\"coding\").and_then(|c| c.as_array()) {
+            if let Some(first) = codings.first() {
+                if let Some(system) = first.get(\"system\").and_then(|s| s.as_str()) {
+                    params."col-name"_system = Some(system.to_string());
+                }
+                if let Some(code) = first.get(\"code\").and_then(|c| c.as_str()) {
+                    params."col-name"_code = Some(code.to_string());
+                }
+            }
+        }
+    }
+"))))
+
 ; Generate date extractor
 (define (generate-date-extractor search-name col-name search)
   (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name))))
@@ -319,7 +362,8 @@ pub struct "resource-name"SearchParams {
          (search-type (% "type" search))
          (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (is-collection (search-is-collection? search))
-         (is-humanname (search-is-humanname? search)))
+         (is-humanname (search-is-humanname? search))
+         (is-codeableconcept (search-is-codeableconcept? search)))
     (case search-type
       (("string")
         (if is-humanname
@@ -346,7 +390,15 @@ pub struct "resource-name"SearchParams {
                 (if (search-is-contactpoint? search)
                     ($"    pub telecom_value: Vec<""String>,
 ")
-                    ""))))
+                    (if is-codeableconcept
+                        (if is-collection
+                            ($"    pub "col-name"_system: Vec<""String>,
+    pub "col-name"_code: Vec<""String>,
+")
+                            ($"    pub "col-name"_system: Option<""String>,
+    pub "col-name"_code: Option<""String>,
+"))
+                        "")))))
       (("date")
         ($"    pub "col-name": Option<""NaiveDate>,
 "))
