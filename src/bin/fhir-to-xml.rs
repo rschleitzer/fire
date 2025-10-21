@@ -1578,7 +1578,7 @@ fn parse_single_path(
                 if let Some(ref_attr) = &variant.ref_attr {
                     // Check if the reference starts with current_path (without dots) AND is a direct child
                     // This indicates it's a backbone element under the current path (not a contentReference)
-                    let current_path_no_dots = current_path.replace('.', "");
+                    let _current_path_no_dots = current_path.replace('.', "");
                     let property_id_no_dots = property_id.replace('.', "");
                     if ref_attr == &property_id_no_dots {
                         // It's a backbone element defined by this property - keep the full dotted path

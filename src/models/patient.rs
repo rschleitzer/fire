@@ -98,9 +98,9 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     let mut params = PatientSearchParams::default();
 
     // Extract _lastUpdated
-    if let Some(_lastUpdated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
-        if let Ok(date) = NaiveDate::parse_from_str(_lastUpdated, "%Y-%m-%d") {
-            params._lastUpdated = Some(date);
+    if let Some(_last_updated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(_last_updated, "%Y-%m-%d") {
+            params._last_updated = Some(date);
         }
     }
 
@@ -221,7 +221,7 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
 
 #[derive(Debug, Default)]
 pub struct PatientSearchParams {
-    pub _lastUpdated: Option<NaiveDate>,
+    pub _last_updated: Option<NaiveDate>,
     pub active: Option<bool>,
     pub birthdate: Option<NaiveDate>,
     pub telecom_value: Vec<String>,

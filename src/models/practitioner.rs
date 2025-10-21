@@ -98,9 +98,9 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
     let mut params = PractitionerSearchParams::default();
 
     // Extract _lastUpdated
-    if let Some(_lastUpdated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
-        if let Ok(date) = NaiveDate::parse_from_str(_lastUpdated, "%Y-%m-%d") {
-            params._lastUpdated = Some(date);
+    if let Some(_last_updated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+        if let Ok(date) = NaiveDate::parse_from_str(_last_updated, "%Y-%m-%d") {
+            params._last_updated = Some(date);
         }
     }
 
@@ -190,7 +190,7 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
 
 #[derive(Debug, Default)]
 pub struct PractitionerSearchParams {
-    pub _lastUpdated: Option<NaiveDate>,
+    pub _last_updated: Option<NaiveDate>,
     pub telecom_value: Vec<String>,
     pub family_name: Vec<String>,
     pub given_name: Vec<String>,
