@@ -90,7 +90,7 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     let mut params = PatientSearchParams::default();
 
     // Extract _lastUpdated
-    if let Some(_last_updated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+    if let Some(_last_updated) = content.get("meta").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str(_last_updated, "%Y-%m-%d") {
             params._last_updated = Some(date);
         }
@@ -102,7 +102,7 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     }
 
     // Extract birthdate
-    if let Some(birthdate) = content.get("birthdate").and_then(|b| b.as_str()) {
+    if let Some(birthdate) = content.get("birthDate").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
             params.birthdate = Some(date);
         }
@@ -196,7 +196,7 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
 
     // Extract organization reference
     if let Some(reference) = content
-        .get("organization")
+        .get("managingOrganization")
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {

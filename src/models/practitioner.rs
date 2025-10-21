@@ -90,7 +90,7 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
     let mut params = PractitionerSearchParams::default();
 
     // Extract _lastUpdated
-    if let Some(_last_updated) = content.get("_lastUpdated").and_then(|b| b.as_str()) {
+    if let Some(_last_updated) = content.get("meta").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str(_last_updated, "%Y-%m-%d") {
             params._last_updated = Some(date);
         }
@@ -170,7 +170,7 @@ pub fn extract_practitioner_search_params(content: &Value) -> PractitionerSearch
     }
 
     // Extract qualification-period
-    if let Some(qualification_period) = content.get("qualificationPeriod").and_then(|b| b.as_str()) {
+    if let Some(qualification_period) = content.get("qualification").and_then(|b| b.as_str()) {
         if let Ok(date) = NaiveDate::parse_from_str(qualification_period, "%Y-%m-%d") {
             params.qualification_period = Some(date);
         }

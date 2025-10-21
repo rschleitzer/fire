@@ -308,6 +308,13 @@
                 #f))
           #f)))
 
+; Get the FHIR field name for a search parameter by following its path to the property
+(define (search-fhir-field-name search)
+  (let ((property (search-property search)))
+    (if property
+        (% "name" property)
+        #f)))
+
 ; Helper to check if a character is uppercase
 (define (is-upper? ch)
   (not (char=? ch (char-downcase ch))))

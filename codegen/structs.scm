@@ -222,7 +222,7 @@ pub struct "resource-name"SearchParams {
 (define (generate-simple-token-extractor search-name col-name search)
   (let* ((property (search-property search))
          (property-type (if property (% "type" property) "code"))
-         (fhir-field (camel-case search-name)))
+         (fhir-field (or (search-fhir-field-name search) (camel-case search-name))))
     (case property-type
       (("boolean")
         ($"
@@ -270,7 +270,7 @@ pub struct "resource-name"SearchParams {
 
 ; Generate date extractor
 (define (generate-date-extractor search-name col-name search)
-  (let ((fhir-field (camel-case search-name)))
+  (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name))))
     ($"
     // Extract "search-name"
     if let Some("col-name") = content.get(\""fhir-field"\").and_then(|b| b.as_str()) {
@@ -282,7 +282,7 @@ pub struct "resource-name"SearchParams {
 
 ; Generate reference extractor
 (define (generate-reference-extractor search-name col-name search)
-  (let ((fhir-field (camel-case search-name))
+  (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name)))
         (is-collection (search-is-collection? search)))
     (if is-collection
         ($"
