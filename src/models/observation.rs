@@ -341,6 +341,19 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
+    // Extract valueQuantity
+    if let Some(value_qty) = content.get("valueQuantity") {
+        if let Some(value) = value_qty.get("value").and_then(|v| v.as_f64()) {
+            params.value_quantity_value = Some(value);
+        }
+        if let Some(unit) = value_qty.get("unit").and_then(|u| u.as_str()) {
+            params.value_quantity_unit = Some(unit.to_string());
+        }
+        if let Some(system) = value_qty.get("system").and_then(|s| s.as_str()) {
+            params.value_quantity_system = Some(system.to_string());
+        }
+    }
+
     // Extract valueDateTime (maps to value_date_datetime in DB)
     if let Some(effective) = content.get("valueDateTime").and_then(|e| e.as_str()) {
         if let Ok(dt) = DateTime::parse_from_rfc3339(effective) {

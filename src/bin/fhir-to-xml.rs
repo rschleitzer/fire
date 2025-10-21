@@ -1410,12 +1410,48 @@ fn build_searches(
         // Parse FHIRPath expressions
         for base_resource in &search_param.base {
             if let Some(resource) = model.resources.resource.iter_mut().find(|r| &r.name == base_resource) {
-                let paths = parse_fhirpath_expression(
+                let mut paths = parse_fhirpath_expression(
                     expression,
                     base_resource,
                     search_param,
                     dict_property,
                 );
+
+                // For composite searches with resource-only expression, create a simple path
+                if search_param.r#type == "composite" && paths.is_empty() && expression == base_resource {
+                    // Create a path that just points to the resource
+                    paths.push(Path {
+                        parts: Parts {
+                            part: vec![Part {
+                                ref_attr: base_resource.to_lowercase(),
+                                resolve: None,
+                                property: None,
+                                type_attr: None,
+                                first: None,
+                                not_null: None,
+                                variant: None,
+                                op: None,
+                                value: None,
+                            }],
+                        },
+                        casts: None,
+                        components: Vec::new(),
+                        targets: None,
+                    });
+                }
+
+                // Process composite search components
+                if search_param.r#type == "composite" {
+                    if let Some(components_def) = &search_param.component {
+                        for path in &mut paths {
+                            path.components = build_components(
+                                components_def,
+                                base_resource,
+                                dict_property,
+                            );
+                        }
+                    }
+                }
 
                 if !paths.is_empty() {
                     let search = Search {
@@ -1656,6 +1692,65 @@ fn parse_single_path(
             targets,
         })
     }
+}
+
+// Build components for composite searches
+fn build_components(
+    components_def: &[SearchParameterComponent],
+    resource_name: &str,
+    _dict_property: &HashMap<String, Property>,
+) -> Vec<Component> {
+    let mut components = Vec::new();
+
+    for comp_def in components_def {
+        // Parse the component expression
+        // Split on | for union expressions (some components have alternates)
+        let expressions: Vec<&str> = comp_def.expression.split(" | ").collect();
+
+        for expr in expressions {
+            let expr = expr.trim();
+
+            // Handle simple property references (e.g., "code")
+            // For composite searches, the expression is relative to the resource
+            let full_expr = if expr.contains('.') {
+                // Already has dots, prepend resource name if not present
+                if expr.to_lowercase().starts_with(&resource_name.to_lowercase()) {
+                    expr.to_string()
+                } else {
+                    format!("{}.{}", resource_name, expr)
+                }
+            } else {
+                // Simple property name
+                format!("{}.{}", resource_name, expr)
+            };
+
+            // Check for .ofType() cast
+            let (base_expr, cast_type) = if let Some(idx) = full_expr.find(".ofType(") {
+                let base = &full_expr[..idx];
+                let cast_start = idx + 8; // ".ofType(".len()
+                let cast_end = full_expr[cast_start..].find(')').map(|i| cast_start + i);
+                let cast = cast_end.map(|end| full_expr[cast_start..end].to_string());
+                (base.to_string(), cast)
+            } else {
+                (full_expr, None)
+            };
+
+            // Build the property reference
+            let prop_ref = base_expr.to_lowercase();
+
+            // Create cast if needed
+            let casts = cast_type.map(|cast| Casts {
+                cast: vec![Cast { to: cast }],
+            });
+
+            components.push(Component {
+                ref_attr: prop_ref,
+                casts,
+            });
+        }
+    }
+
+    components
 }
 
 // Parse .where() clause
