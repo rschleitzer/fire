@@ -216,6 +216,22 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
+    // Extract value-quantity (combo-value-quantity)
+    if let Some(value_quantity) = content.get("valueQuantity") {
+        if let Some(value) = value_quantity.get("value").and_then(|v| v.as_f64()) {
+            params.combo_value_quantity_value = Some(value);
+            params.value_quantity_value = Some(value);
+        }
+        if let Some(unit) = value_quantity.get("unit").and_then(|u| u.as_str()) {
+            params.combo_value_quantity_unit = Some(unit.to_string());
+            params.value_quantity_unit = Some(unit.to_string());
+        }
+        if let Some(system) = value_quantity.get("system").and_then(|s| s.as_str()) {
+            params.combo_value_quantity_system = Some(system.to_string());
+            params.value_quantity_system = Some(system.to_string());
+        }
+    }
+
     // Extract component-value-reference references
     if let Some(refs) = content.get("component").and_then(|g| g.as_array()) {
         for ref_item in refs {

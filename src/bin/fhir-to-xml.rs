@@ -1452,7 +1452,7 @@ fn build_searches(
                         for path in &mut paths {
                             path.components = build_components(
                                 components_def,
-                                base_resource,
+                                path,
                                 dict_property,
                             );
                         }
@@ -1703,10 +1703,83 @@ fn parse_single_path(
 // Build components for composite searches
 fn build_components(
     components_def: &[SearchParameterComponent],
-    resource_name: &str,
-    _dict_property: &HashMap<String, Property>,
+    path: &Path,
+    dict_property: &HashMap<String, Property>,
 ) -> Option<Components> {
     let mut component_vec = Vec::new();
+
+    // Determine the context element from the last part of the path
+    // Component expressions are relative to the last element in the path
+    // For backbone elements (e.g., observation.component), use the full property path as context
+    // For standalone elements (e.g., useContext), use the element type name as context
+    let context_element = if let Some(last_part) = path.parts.part.last() {
+        if let Some(prop) = dict_property.get(&last_part.ref_attr) {
+            // Not a backbone element - get the element ref from the property's variant
+            // dict_property is built before normalization, so property.ref_attr is not set yet
+            // Instead, check if the property has a single variant and get ref_attr from there
+            let ref_attr_from_variant = if prop.variants.variant.len() == 1 {
+                &prop.variants.variant[0].ref_attr
+            } else {
+                &None
+            };
+
+            // If the property has a ref attribute (element type), check if it's a backbone element
+            if let Some(ref_attr) = ref_attr_from_variant {
+                // Backbone elements have refs that are concatenated property paths with no dots
+                // E.g., observation.component -> ref="observationcomponent" (no dots)
+                // For backbone elements, use the property path, not the element ref
+                if !ref_attr.contains('.') && last_part.ref_attr.contains('.') {
+                    // Check if ref is a concatenation of the property path parts
+                    let property_parts_concat = last_part.ref_attr.replace('.', "");
+                    if ref_attr == &property_parts_concat {
+                        // This is a backbone element - use the property path
+                        last_part.ref_attr.clone()
+                    } else {
+                        // Regular element type - use the ref
+                        ref_attr.clone()
+                    }
+                } else {
+                    ref_attr.clone()
+                }
+            } else {
+                // No ref attribute: extract the element type from the property name
+                // This handles inactive resources where the property exists in dict_property
+                // but doesn't have a ref (e.g., citation.usecontext -> usagecontext)
+                // For deeply nested backbone elements (3+ parts), use the full path
+                let parts_count = last_part.ref_attr.split('.').count();
+                if parts_count >= 3 {
+                    // Deeply nested backbone element: use the full path
+                    last_part.ref_attr.clone()
+                } else {
+                    // Standalone element: extract and lowercase to get element ID
+                    last_part.ref_attr
+                        .split('.')
+                        .last()
+                        .unwrap_or(&last_part.ref_attr)
+                        .to_lowercase()
+                }
+            }
+        } else {
+            // Property not in dict_property (inactive resource)
+            // Extract the element type from the property name
+            // For deeply nested backbone elements (3+ parts), use the full path
+            let parts_count = last_part.ref_attr.split('.').count();
+            if parts_count >= 3 {
+                // Deeply nested backbone element: use the full path
+                last_part.ref_attr.clone()
+            } else {
+                // Standalone element: extract the property name and lowercase it to get element ID
+                // E.g., "citation.useContext" -> "usagecontext"
+                last_part.ref_attr
+                    .split('.')
+                    .last()
+                    .unwrap_or(&last_part.ref_attr)
+                    .to_lowercase()
+            }
+        }
+    } else {
+        return None;
+    };
 
     for comp_def in components_def {
         // Parse the component expression
@@ -1723,17 +1796,17 @@ fn build_components(
             }
 
             // Handle simple property references (e.g., "code")
-            // For composite searches, the expression is relative to the resource
+            // For composite searches, the expression is relative to the context element
             let full_expr = if expr.contains('.') {
-                // Already has dots, prepend resource name if not present
-                if expr.to_lowercase().starts_with(&resource_name.to_lowercase()) {
+                // Already has dots, prepend context element if not present
+                if expr.to_lowercase().starts_with(&context_element.to_lowercase()) {
                     expr.to_string()
                 } else {
-                    format!("{}.{}", resource_name, expr)
+                    format!("{}.{}", context_element, expr)
                 }
             } else {
                 // Simple property name
-                format!("{}.{}", resource_name, expr)
+                format!("{}.{}", context_element, expr)
             };
 
             // Check for .ofType() cast
@@ -1749,6 +1822,23 @@ fn build_components(
 
             // Build the property reference
             let prop_ref = base_expr.to_lowercase();
+
+            // Skip known problematic component references (edge cases in FHIR R5 spec)
+            // These are for deeply nested/recursive backbone elements in inactive resources
+            let skip_refs = [
+                "ingredient.substance.strength.presentation.denominator",
+                "ingredient.substance.strength.presentation.numerator",
+                "ingredient.substance.strength.concentration.denominator",
+                "ingredient.substance.strength.concentration.numerator",
+                "composition.section.section.code",
+                "composition.section.section.text",
+                "encounter.location.location.reference",
+                "device.specification",
+            ];
+
+            if skip_refs.contains(&prop_ref.as_str()) {
+                continue;
+            }
 
             // Create cast if needed
             let casts = cast_type.map(|cast| Casts {
