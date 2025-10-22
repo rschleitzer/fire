@@ -413,3 +413,10 @@
        (loop (cdr chars)
              (cons (car chars) result)
              (is-lower? (car chars)))))))
+
+; Check if a string ends with a suffix
+(define (string-suffix? suffix str)
+  (let ((suffix-len (string-length suffix))
+        (str-len (string-length str)))
+    (and (>= str-len suffix-len)
+         (string=? suffix (substring str (- str-len suffix-len) str-len)))))

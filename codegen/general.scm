@@ -50,3 +50,15 @@
       "boolean" "integer" "positiveInt" "unsignedInt" "integer64"
       "decimal" "date" "dateTime" "instant" "time"
       "base64Binary" "oid" "uuid")))
+
+; Get SQL cast suffix for bind parameters (::type)
+; Returns empty string for TEXT since it doesn't need casting
+(define (sql-cast-suffix pg-type)
+  (case pg-type
+    (("DATE") "::date")
+    (("BOOLEAN") "::boolean")
+    (("TIMESTAMPTZ") "::timestamptz")
+    (("INTEGER") "::integer")
+    (("BIGINT") "::bigint")
+    (("DECIMAL") "::decimal")
+    (else "")))

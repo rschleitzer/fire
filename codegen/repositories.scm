@@ -1311,12 +1311,15 @@ impl "struct-name" {
   (cond
     ; Simple code (boolean, gender, etc.)
     ((search-is-simple-code? search)
-     ($"                \""search-name"\" => {
+     (let* ((property (search-property search))
+            (property-type (if property (% "type" property) "code"))
+            (cast-suffix (if (string=? property-type "boolean") "::boolean" "")))
+       ($"                \""search-name"\" => {
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" = ${}\", bind_idx));
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" = ${}"cast-suffix"\", bind_idx));
                     bind_values.push(param.value.clone());
                 }
-"))
+")))
     ; Identifier (system|value)
     ((search-is-identifier? search)
      ($"                \""search-name"\" => {
@@ -1368,7 +1371,16 @@ impl "struct-name" {
 
 ; Generate date parameter match
 (define (generate-date-param-match search-name col-name resource-lower)
-  ($"                \""search-name"\" => {
+  ; Determine the SQL type cast based on column name
+  ; date columns use DATE, datetime/instant use TIMESTAMPTZ
+  (let* ((is-datetime-col (or (string-ci=? col-name "last_updated")
+                               (string-ci=? col-name "_lastupdated")
+                               (string-suffix? "_datetime" col-name)
+                               (string-suffix? "_instant" col-name)
+                               (string-suffix? "_period_start" col-name)
+                               (string-suffix? "_period_end" col-name)))
+         (cast-suffix (if is-datetime-col "::timestamptz" "::date")))
+    ($"                \""search-name"\" => {
                     let bind_idx = bind_values.len() + 1;
                     let op = match param.prefix.as_deref() {
                         Some(\"eq\") | None => \"=\",
@@ -1379,10 +1391,10 @@ impl "struct-name" {
                         Some(\"le\") => \"<=\",
                         _ => \"=\",
                     };
-                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" {} ${}\", op, bind_idx));
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" {} ${}"cast-suffix"\", op, bind_idx));
                     bind_values.push(param.value.clone());
                 }
-"))
+")))
 
 ; Generate reference parameter match
 (define (generate-reference-param-match search-name col-name resource-lower is-collection)

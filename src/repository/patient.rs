@@ -1214,7 +1214,7 @@ impl PatientRepository {
             match param.name.as_str() {
                 "active" => {
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND patient.active = ${}", bind_idx));
+                    sql.push_str(&format!(" AND patient.active = ${}::boolean", bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "birthdate" => {
@@ -1228,7 +1228,7 @@ impl PatientRepository {
                         Some("le") => "<=",
                         _ => "=",
                     };
-                    sql.push_str(&format!(" AND patient.birthdate {} ${}", op, bind_idx));
+                    sql.push_str(&format!(" AND patient.birthdate {} ${}::date", op, bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "email" => {

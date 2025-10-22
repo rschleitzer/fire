@@ -1718,7 +1718,7 @@ impl ObservationRepository {
                         Some("le") => "<=",
                         _ => "=",
                     };
-                    sql.push_str(&format!(" AND observation.date {} ${}", op, bind_idx));
+                    sql.push_str(&format!(" AND observation.date {} ${}::date", op, bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "encounter" => {
@@ -1897,7 +1897,7 @@ impl ObservationRepository {
                         Some("le") => "<=",
                         _ => "=",
                     };
-                    sql.push_str(&format!(" AND observation.value_date {} ${}", op, bind_idx));
+                    sql.push_str(&format!(" AND observation.value_date {} ${}::date", op, bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "value-reference" => {

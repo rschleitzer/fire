@@ -1152,7 +1152,7 @@ impl PractitionerRepository {
                 }
                 "active" => {
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND practitioner.active = ${}", bind_idx));
+                    sql.push_str(&format!(" AND practitioner.active = ${}::boolean", bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "identifier" => {
@@ -1184,7 +1184,7 @@ impl PractitionerRepository {
                         Some("le") => "<=",
                         _ => "=",
                     };
-                    sql.push_str(&format!(" AND practitioner.qualification_period {} ${}", op, bind_idx));
+                    sql.push_str(&format!(" AND practitioner.qualification_period {} ${}::date", op, bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 _ => {
