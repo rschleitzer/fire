@@ -1,33 +1,34 @@
 ; Repository generator for Fire FHIR Server
 ; Generates CRUD and search methods for each resource
 
-(define (repositories)
-  (for-active-resources generate-repository))
+; Generate repository for current resource (called from rules.scm for each resource)
+(define (repository)
+  (let ((resource (current-node)))
+    (generate-repository-for-resource resource)))
 
 ; Generate a complete repository file for a resource
-(define (generate-repository resource)
+(define (generate-repository-for-resource resource)
   (let* ((resource-name (name-of resource))
          (resource-lower (downcase-string resource-name))
          (table-name resource-lower)
          (struct-name ($ resource-name "Repository"))
          (searches-node (select-children "searches" resource))
-         (searches (if (not (node-list-empty? searches-node))
-                      (select-children "search" (node-list-first searches-node))
-                      (empty-node-list)))
-         ; Get unique search params (deduplicate like in structs.scm)
-         (all-searches (node-list->list searches))
-         (unique-searches (deduplicate-searches all-searches)))
+         ; Get search parameters and deduplicate same as structs.scm
+         (search-list (if (not (node-list-empty? searches-node))
+                          (node-list->list (select-elements (children searches-node) "search"))
+                          '()))
+         (unique-searches (deduplicate-searches search-list)))
 
     (file ($ "src/repository/" resource-lower ".rs")
       ($"use chrono::Utc;
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
 use crate::models::"resource-lower"::{extract_"resource-lower"_search_params, "resource-name", "resource-name"History};
-use crate::search::{SearchCondition, SearchQuery};
+"(generate-cross-resource-imports resource-name)"use crate::search::{SearchQuery, SortDirection};
 use crate::services::validate_"resource-lower";
 
 pub struct "struct-name" {
@@ -46,12 +47,28 @@ impl "struct-name" {
 "(generate-delete-method resource-name resource-lower unique-searches)"
 "(generate-history-method resource-name resource-lower)"
 "(generate-read-version-method resource-name resource-lower)"
+"(generate-rollback-method resource-name resource-lower unique-searches)"
+"(generate-type-history-method resource-name resource-lower)"
+"(generate-purge-method resource-name resource-lower)"
+"(generate-search-and-helpers resource-name resource-lower)"
 }
 "))))
 
 ; Note: search-extraction-key and deduplicate-searches are defined in structs.scm
 
+; Generate cross-resource imports (for helper methods)
+(define (generate-cross-resource-imports resource-name)
+  (case resource-name
+    (("Patient") "use crate::models::observation::Observation;
+")
+    (("Observation") "use crate::models::patient::Patient;
+")
+    (("Practitioner") "use crate::models::patient::Patient;
+")
+    (else "")))
+
 ; Helper: Get column names for INSERT statement (without id, version_id, last_updated, content)
+; searches is a Scheme list (not node-list)
 (define (get-insert-columns searches)
   (if (null? searches)
       ""
@@ -61,30 +78,43 @@ impl "struct-name" {
                     searches))))
 
 (define (get-insert-columns-for-search search col-name)
-  (let ((search-type (% "type" search))
+  (let ((search-name (% "name" search))
+        (search-type (% "type" search))
         (is-collection (search-is-collection? search)))
-    (case search-type
+    ; Skip special FHIR parameters that start with underscore
+    (if (and (> (string-length search-name) 0)
+             (char=? (string-ref search-name 0) #\_))
+        ""
+        (case search-type
       (("composite" "special") "")
       (("token")
        (cond
          ((search-is-simple-code? search) ($",
                 "col-name""))
-         ((search-is-contactpoint? search) ($",
-                "col-name"_value"))
          ((search-is-identifier? search) ($",
                 identifier_system, identifier_value"))
-         ((or (search-is-codeableconcept? search) (search-has-codeableconcept-variant? search))
-          (if (search-has-codeableconcept-variant? search)
+         ((search-is-contactpoint? search)
+          ; ContactPoint: only telecom_value
+          ($",
+                telecom_value"))
+         ((search-has-codeableconcept-variant? search)
+          ($",
+                "col-name"_code"))
+         ((search-is-codeableconcept? search)
+          (if is-collection
               ($",
-                "col-name"_code")
+                "col-name"_system, "col-name"_code")
               ($",
                 "col-name"_system, "col-name"_code")))
          (else "")))
       (("string")
-       (if (search-is-humanname? search)
-           ",
-                family_name, given_name, prefix, suffix, name_text"
-           ""))
+       (cond
+         ; HumanName search: generates component fields
+         ((search-is-humanname? search)
+          ",
+                family_name, given_name, prefix, suffix, name_text")
+         ; All other string searches: skip (not in SearchParams)
+         (else "")))
       (("date")
        (if (search-has-variants? search)
            (let ((variant-types (search-variant-types search)))
@@ -104,9 +134,10 @@ impl "struct-name" {
       (("quantity")
        ($",
                 "col-name"_value, "col-name"_unit, "col-name"_system"))
-      (else ""))))
+      (else "")))))
 
 ; Helper: Get placeholders for INSERT VALUES ($5, $6, ...)
+; searches is a Scheme list
 (define (get-insert-placeholders searches)
   (let ((count (count-insert-params searches 0)))
     (let loop ((i 5) (result ""))
@@ -114,7 +145,7 @@ impl "struct-name" {
           result
           (loop (+ i 1) ($ result ", $" (number->string i)))))))
 
-; Helper: Count number of parameters
+; Helper: Count number of parameters for a Scheme list
 (define (count-insert-params searches current)
   (if (null? searches)
       current
@@ -123,19 +154,27 @@ impl "struct-name" {
         (+ current (count-params-for-search (car searches))))))
 
 (define (count-params-for-search search)
-  (let ((search-type (% "type" search)))
-    (case search-type
+  (let ((search-name (% "name" search))
+        (search-type (% "type" search)))
+    ; Skip special FHIR parameters that start with underscore
+    (if (and (> (string-length search-name) 0)
+             (char=? (string-ref search-name 0) #\_))
+        0
+        (case search-type
       (("composite" "special") 0)
       (("token")
        (cond
          ((search-is-simple-code? search) 1)
-         ((search-is-contactpoint? search) 1)
          ((search-is-identifier? search) 2)
+         ((search-is-contactpoint? search) 1)  ; only telecom_value
          ((search-has-codeableconcept-variant? search) 1)
-         ((or (search-is-codeableconcept? search)) 2)
+         ((search-is-codeableconcept? search) 2)  ; system and code
          (else 0)))
       (("string")
-       (if (search-is-humanname? search) 5 0))
+       (if (search-is-humanname? search)
+           5  ; family_name, given_name, prefix, suffix, name_text
+           0  ; other string searches not in SearchParams
+       ))
       (("date")
        (if (search-has-variants? search)
            (let ((variant-types (search-variant-types search)))
@@ -144,7 +183,7 @@ impl "struct-name" {
            1))
       (("reference") 1)
       (("quantity") 3)
-      (else 0))))
+      (else 0)))))
 
 ; Helper: Get single parameter binding for a search
 (define (get-param-binding-for-search search params-var)
@@ -153,7 +192,11 @@ impl "struct-name" {
          (search-type (% "type" search))
          (is-collection (search-is-collection? search))
          (property (search-property search)))
-    (case search-type
+    ; Skip special FHIR parameters that start with underscore
+    (if (and (> (string-length search-name) 0)
+             (char=? (string-ref search-name 0) #\_))
+        ""
+        (case search-type
       (("composite" "special") "")
       (("token")
        (cond
@@ -164,13 +207,6 @@ impl "struct-name" {
             "params-var"."col-name"")
                 ($",
             "params-var"."col-name""))))
-         ((search-is-contactpoint? search)
-          ($",
-            "params-var"
-                .telecom_value
-                .is_empty()
-                .then_some(None)
-                .unwrap_or(Some(&"params-var".telecom_value[..]))"))
          ((search-is-identifier? search)
           ($",
             "params-var"
@@ -183,6 +219,14 @@ impl "struct-name" {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&"params-var".identifier_value[..]))"))
+         ((search-is-contactpoint? search)
+          ; ContactPoint: only telecom_value
+          ($",
+            "params-var"
+                .telecom_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&"params-var".telecom_value[..]))"))
          ((search-has-codeableconcept-variant? search)
           ($",
             "params-var"."col-name"_code"))
@@ -198,14 +242,16 @@ impl "struct-name" {
                 ."col-name"_code
                 .is_empty()
                 .then_some(None)
-                .unwrap_or(Some(&"params-var"."col-name"_code[..]))"))
+                .unwrap_or(Some(&"params-var"."col-name"_code[..]))")
               ($",
             "params-var"."col-name"_system,
             "params-var"."col-name"_code")))
          (else "")))
       (("string")
-       (if (search-is-humanname? search)
-           ($",
+       (cond
+         ; HumanName: use component fields
+         ((search-is-humanname? search)
+          ($",
             "params-var"
                 .family_name
                 .is_empty()
@@ -230,8 +276,9 @@ impl "struct-name" {
                 .name_text
                 .is_empty()
                 .then_some(None)
-                .unwrap_or(Some(&"params-var".name_text[..]))")
-           ""))
+                .unwrap_or(Some(&"params-var".name_text[..]))"))
+         ; All other string searches: skip (not in SearchParams)
+         (else "")))
       (("date")
        (if (search-has-variants? search)
            (let ((variant-types (search-variant-types search)))
@@ -261,9 +308,10 @@ impl "struct-name" {
             "params-var"."col-name"_value,
             "params-var"."col-name"_unit,
             "params-var"."col-name"_system"))
-      (else ""))))
+      (else "")))))
 
 ; Helper: Get parameter bindings for INSERT/UPDATE (calls get-param-binding-for-search above)
+; searches is a Scheme list
 (define (get-param-bindings searches)
   (if (null? searches)
       ""
@@ -271,63 +319,109 @@ impl "struct-name" {
                       (get-param-binding-for-search search "params"))
                     searches))))
 
-; Helper: Get UPDATE SET assignments
+; Helper: Get UPDATE SET assignments with proper parameter numbering
+; searches is a Scheme list
 (define (get-update-assignments searches)
-  (if (null? searches)
-      ""
-      (apply $ (map get-update-assignment-for-search searches))))
+  (let ((result (get-update-assignments-with-counter searches 5)))
+    (car result)))  ; Return just the SQL string, discard final counter
 
-(define (get-update-assignment-for-search search)
+; Returns (sql-string . next-param-number)
+(define (get-update-assignments-with-counter searches param-num)
+  (if (null? searches)
+      (cons "" param-num)
+      (let* ((search (car searches))
+             (rest (cdr searches))
+             (assignment-result (get-update-assignment-for-search-with-counter search param-num))
+             (assignment-sql (car assignment-result))
+             (next-param (cdr assignment-result))
+             (rest-result (get-update-assignments-with-counter rest next-param))
+             (rest-sql (car rest-result))
+             (final-param (cdr rest-result)))
+        (cons ($ assignment-sql rest-sql) final-param))))
+
+; Returns (sql-string . next-param-number)
+(define (get-update-assignment-for-search-with-counter search param-num)
   (let* ((search-name (% "name" search))
          (col-name (camel-to-snake (string-replace search-name "-" "_")))
          (search-type (% "type" search)))
-    (case search-type
-      (("composite" "special") "")
+    ; Skip special FHIR parameters that start with underscore
+    (if (and (> (string-length search-name) 0)
+             (char=? (string-ref search-name 0) #\_))
+        (cons "" param-num)
+        (case search-type
+      (("composite" "special") (cons "" param-num))
       (("token")
        (cond
-         ((search-is-simple-code? search) ($",
-                    "col-name" = $5"))
-         ((search-is-contactpoint? search) ($",
-                    "col-name"_value = $5"))
-         ((search-is-identifier? search) ($",
-                    identifier_system = $5,
-                    identifier_value = $6"))
-         ((search-has-codeableconcept-variant? search) ($",
-                    "col-name"_code = $5"))
-         ((search-is-codeableconcept? search) ($",
-                    "col-name"_system = $5,
-                    "col-name"_code = $6"))
-         (else "")))
+         ((search-is-simple-code? search)
+          (cons ($",
+                    "col-name" = $"(number->string param-num)"")
+                (+ param-num 1)))
+         ((search-is-identifier? search)
+          (cons ($",
+                    identifier_system = $"(number->string param-num)",
+                    identifier_value = $"(number->string (+ param-num 1))"")
+                (+ param-num 2)))
+         ((search-is-contactpoint? search)
+          (cons ($",
+                    telecom_value = $"(number->string param-num)"")
+                (+ param-num 1)))
+         ((search-has-codeableconcept-variant? search)
+          (cons ($",
+                    "col-name"_code = $"(number->string param-num)"")
+                (+ param-num 1)))
+         ((search-is-codeableconcept? search)
+          (cons ($",
+                    "col-name"_system = $"(number->string param-num)",
+                    "col-name"_code = $"(number->string (+ param-num 1))"")
+                (+ param-num 2)))
+         (else (cons "" param-num))))
       (("string")
-       (if (search-is-humanname? search)
-           ($",
-                    family_name = $5,
-                    given_name = $6,
-                    prefix = $7,
-                    suffix = $8,
-                    name_text = $9")
-           ""))
+       (cond
+         ((search-is-humanname? search)
+          (cons ($",
+                    family_name = $"(number->string param-num)",
+                    given_name = $"(number->string (+ param-num 1))",
+                    prefix = $"(number->string (+ param-num 2))",
+                    suffix = $"(number->string (+ param-num 3))",
+                    name_text = $"(number->string (+ param-num 4))"")
+                (+ param-num 5)))
+         (else (cons "" param-num))))
       (("date")
        (if (search-has-variants? search)
            (let ((variant-types (search-variant-types search)))
-             ($ (if (member "dateTime" variant-types)
-                    ($",
-                    "col-name"_datetime = $5")
-                    "")
-                (if (member "element" variant-types)
-                    ($",
-                    "col-name"_period_start = $5,
-                    "col-name"_period_end = $6")
-                    "")))
-           ($",
-                    "col-name" = $5")))
-      (("reference") ($",
-                    "col-name"_reference = $5"))
-      (("quantity") ($",
-                    "col-name"_value = $5,
-                    "col-name"_unit = $6,
-                    "col-name"_system = $7"))
-      (else ""))))
+             (let ((has-datetime (member "dateTime" variant-types))
+                   (has-period (member "element" variant-types)))
+               (cond
+                 ((and has-datetime has-period)
+                  (cons ($",
+                    "col-name"_datetime = $"(number->string param-num)",
+                    "col-name"_period_start = $"(number->string (+ param-num 1))",
+                    "col-name"_period_end = $"(number->string (+ param-num 2))"")
+                        (+ param-num 3)))
+                 (has-datetime
+                  (cons ($",
+                    "col-name"_datetime = $"(number->string param-num)"")
+                        (+ param-num 1)))
+                 (has-period
+                  (cons ($",
+                    "col-name"_period_start = $"(number->string param-num)",
+                    "col-name"_period_end = $"(number->string (+ param-num 1))"")
+                        (+ param-num 2)))
+                 (else (cons "" param-num)))))
+           (cons ($",
+                    "col-name" = $"(number->string param-num)"")
+                 (+ param-num 1))))
+      (("reference")
+       (cons ($",
+                    "col-name"_reference = $"(number->string param-num)"")
+             (+ param-num 1)))
+      (("quantity")
+       (cons ($",
+                    "col-name"_value = $"(number->string param-num)",
+                    "col-name"_unit = $"(number->string (+ param-num 1))",
+                    "col-name"_system = $"(number->string (+ param-num 2))"")
+             (+ param-num 3)))
+      (else (cons "" param-num))))))
 
 ; Helpers for history table (reuse existing functions)
 (define (get-history-insert-columns searches)
@@ -486,7 +580,7 @@ impl "struct-name" {
                     id, version_id, last_updated, content"history-columns",
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4"history-placeholders", $"(+ 5 (length (node-list->list searches)))", $"(+ 6 (length (node-list->list searches)))")
+                VALUES ($1, $2, $3, $4"history-placeholders", $"(number->string (+ 5 (count-insert-params searches 0)))", $"(number->string (+ 6 (count-insert-params searches 0)))")
                 \"#,
                 old_"resource-lower".id,
                 old_"resource-lower".version_id,
@@ -645,7 +739,7 @@ impl "struct-name" {
                 id, version_id, last_updated, content"history-columns",
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4"history-placeholders", $"(+ 5 (length (node-list->list searches)))", $"(+ 6 (length (node-list->list searches)))")
+            VALUES ($1, $2, $3, $4"history-placeholders", $"(number->string (+ 5 (count-insert-params searches 0)))", $"(number->string (+ 6 (count-insert-params searches 0)))")
             \"#,
             old_"resource-lower".id,
             old_"resource-lower".version_id,
@@ -740,7 +834,7 @@ impl "struct-name" {
                 id, version_id, last_updated, content"history-columns",
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4"history-placeholders", $"(+ 5 (length (node-list->list searches)))", $"(+ 6 (length (node-list->list searches)))")
+            VALUES ($1, $2, $3, $4"history-placeholders", $"(number->string (+ 5 (count-insert-params searches 0)))", $"(number->string (+ 6 (count-insert-params searches 0)))")
             \"#,
             id,
             new_version_id,
@@ -812,3 +906,549 @@ impl "struct-name" {
         Ok(history)
     }
 "))
+
+; Generate ROLLBACK method
+(define (generate-rollback-method resource-name resource-lower searches)
+  (let ((update-assignments (get-update-assignments searches))
+        (param-bindings (get-param-bindings searches)))
+    ($"    /// Rollback a "resource-lower" to a specific version (deletes all versions >= rollback_to_version)
+    pub async fn rollback(&""self, id: &""str, rollback_to_version: i32) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Get all version IDs for this "resource-lower" from history
+        let version_ids: Vec<""i32> = sqlx::query_scalar!(
+            r#\"
+            SELECT version_id
+            FROM "resource-lower"_history
+            WHERE id = $1
+            ORDER BY version_id ASC
+            \"#,
+            id
+        )
+        .fetch_all(&""mut *tx)
+        .await?;
+
+        // Check if current resource exists and add its version
+        let current_version = sqlx::query_scalar!(
+            r#\"
+            SELECT version_id
+            FROM "resource-lower"
+            WHERE id = $1
+            \"#,
+            id
+        )
+        .fetch_optional(&""mut *tx)
+        .await?;
+
+        let mut all_versions = version_ids;
+        if let Some(cv) = current_version {
+            if !all_versions.contains(&""cv) {
+                all_versions.push(cv);
+            }
+        }
+        all_versions.sort();
+
+        // Find versions to delete (>= rollback_to_version)
+        let versions_to_delete: Vec<""i32> = all_versions
+            .iter()
+            .filter(|&""&""v| v >= rollback_to_version)
+            .copied()
+            .collect();
+
+        // Find highest version that remains (<"" rollback_to_version)
+        let new_current_version = all_versions
+            .iter()
+            .filter(|&""&""v| v <"" rollback_to_version)
+            .max()
+            .copied();
+
+        if versions_to_delete.is_empty() {
+            return Err(FhirError::BadRequest(format!(
+                \"No versions to rollback for "resource-lower" {}\",
+                id
+            )));
+        }
+
+        tracing::info!(
+            "resource-lower"_id = %id,
+            rollback_to = rollback_to_version,
+            deleting_versions = ?versions_to_delete,
+            new_current = ?new_current_version,
+            \"Rolling back "resource-lower"\"
+        );
+
+        // Delete versions from history
+        for version in &""versions_to_delete {
+            sqlx::query!(
+                r#\"
+                DELETE FROM "resource-lower"_history
+                WHERE id = $1 AND version_id = $2
+                \"#,
+                id,
+                version
+            )
+            .execute(&""mut *tx)
+            .await?;
+        }
+
+        // Update or delete current resource
+        if let Some(new_version) = new_current_version {
+            // Restore the previous version as current
+            let restored = self.read_version(id, new_version).await?;
+
+            let params = extract_"resource-lower"_search_params(&""restored.content);
+
+            sqlx::query!(
+                r#\"
+                UPDATE "resource-lower"
+                SET
+                    version_id = $2,
+                    last_updated = $3,
+                    content = $4"update-assignments"
+                WHERE id = $1
+                \"#,
+                id,
+                new_version,
+                restored.last_updated,
+                &""restored.content"param-bindings"
+            )
+            .execute(&""mut *tx)
+            .await?;
+        } else {
+            // No versions remain, delete current resource
+            sqlx::query!(
+                r#\"
+                DELETE FROM "resource-lower"
+                WHERE id = $1
+                \"#,
+                id
+            )
+            .execute(&""mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+")))
+
+; Generate TYPE_HISTORY method
+(define (generate-type-history-method resource-name resource-lower)
+  ($"    /// Get type-level history - all versions of all "resource-lower"s
+    pub async fn type_history(&""self, count: Option<""i64>) -> Result<""Vec<"resource-name"History>> {
+        // Query all history records with optional limit
+        let mut history = if let Some(limit) = count {
+            sqlx::query_as!(
+                "resource-name"History,
+                r#\"
+                SELECT
+                    id, version_id, last_updated,
+                    content as \"content: Value\",
+                    history_operation, history_timestamp
+                FROM "resource-lower"_history
+                ORDER BY history_timestamp DESC
+                LIMIT $1
+                \"#,
+                limit
+            )
+            .fetch_all(&""self.pool)
+            .await?
+        } else {
+            sqlx::query_as!(
+                "resource-name"History,
+                r#\"
+                SELECT
+                    id, version_id, last_updated,
+                    content as \"content: Value\",
+                    history_operation, history_timestamp
+                FROM "resource-lower"_history
+                ORDER BY history_timestamp DESC
+                \"#
+            )
+            .fetch_all(&""self.pool)
+            .await?
+        };
+
+        // Also get all current versions
+        let current_resources = sqlx::query_as!(
+            "resource-name",
+            r#\"
+            SELECT
+                id, version_id, last_updated,
+                content as \"content: Value\"
+            FROM "resource-lower"
+            \"#
+        )
+        .fetch_all(&""self.pool)
+        .await?;
+
+        // Add current versions to history if not already present and not at limit
+        for current in current_resources {
+            // Check if we're at the limit
+            let at_limit = count.map(|c| history.len() >= c as usize).unwrap_or(false);
+
+            if at_limit {
+                break;
+            }
+
+            let current_version_exists = history
+                .iter()
+                .any(|h| h.id == current.id &""&"" h.version_id == current.version_id);
+
+            if !current_version_exists {
+                let current_as_history = "resource-name"History {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    history_operation: if current.version_id == 1 {
+                        \"CREATE\".to_string()
+                    } else {
+                        \"UPDATE\".to_string()
+                    },
+                    history_timestamp: current.last_updated,
+                };
+                history.push(current_as_history);
+            }
+        }
+
+        // Sort by timestamp descending
+        history.sort_by(|a, b| b.history_timestamp.cmp(&""a.history_timestamp));
+
+        // Apply final truncation if needed (after merging and sorting)
+        if let Some(limit) = count {
+            history.truncate(limit as usize);
+        }
+
+        Ok(history)
+    }
+
+"))
+
+; Generate PURGE method
+(define (generate-purge-method resource-name resource-lower)
+  ($"    /// Purge all "resource-lower" history records - FOR TESTING ONLY
+    /// This removes ALL history records to ensure test isolation
+    /// Note: This does NOT delete current (non-deleted) "resource-lower" records
+    pub async fn purge(&""self) -> Result<()> {
+        // Delete all history records for test isolation
+        sqlx::query!(\"DELETE FROM "resource-lower"_history\")
+            .execute(&""self.pool)
+            .await?;
+
+        Ok(())
+    }
+"))
+
+; Replace the search generator functions in repositories.scm
+; This generates search() using the new SearchParam architecture
+
+; Generate SEARCH method and helpers (using new SearchParam architecture)
+(define (generate-search-and-helpers resource-name resource-lower)
+  (let* ((resource (current-node))
+         (searches-node (select-children "searches" resource))
+         (search-list (if (not (node-list-empty? searches-node))
+                          (node-list->list (select-elements (children searches-node) "search"))
+                          '()))
+         (unique-searches (deduplicate-searches search-list)))
+    ($ ($"
+    /// Search for "resource-lower"s based on FHIR search parameters
+    pub async fn search(
+        &""self,
+        params: &""HashMap<""String, String>,
+        include_total: bool,
+    ) -> Result<""(Vec<"resource-name">, Option<""i64>)> {
+        let query = SearchQuery::from_params(params)?;
+
+        let mut sql = String::from(
+            r#\"SELECT "resource-lower".id, "resource-lower".version_id, "resource-lower".last_updated, "resource-lower".content
+               FROM "resource-lower" WHERE 1=1\"#,
+        );
+
+        let mut bind_values: Vec<""String> = Vec::new();
+
+        // Build WHERE clause from search parameters
+        for param in &""query.params {
+            match param.name.as_str() {
+")
+       (generate-search-param-matches resource-name resource-lower unique-searches)
+       ($"                _ => {
+                    // Unknown parameter - ignore per FHIR spec
+                    tracing::warn!(\"Unknown search parameter for "resource-name": {}\", param.name);
+                }
+            }
+        }
+
+        // Add sorting
+        if !query.sort.is_empty() {
+            sql.push_str(\" ORDER BY \");
+            for (i, sort) in query.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(\", \");
+                }
+                sql.push_str(&""sort.field);
+                match sort.direction {
+                    SortDirection::Ascending => sql.push_str(\" ASC\"),
+                    SortDirection::Descending => sql.push_str(\" DESC\"),
+                }
+            }
+        }
+
+        // Add pagination
+        sql.push_str(&""format!(\" LIMIT {} OFFSET {}\", query.limit, query.offset));
+
+        // Execute query
+        let mut query_builder = sqlx::query_as::<""_, "resource-name">(&""sql);
+        for value in &""bind_values {
+            query_builder = query_builder.bind(value);
+        }
+
+        let resources = query_builder
+            .fetch_all(&""self.pool)
+            .await?;
+
+        // Get total count if requested
+        let total = if include_total {
+            let count_sql = sql.replace(
+                &""format!(\"SELECT "resource-lower".id, "resource-lower".version_id, "resource-lower".last_updated, "resource-lower".content\\n               FROM "resource-lower"\"),
+                \"SELECT COUNT(*) FROM "resource-lower"\"
+            ).split(\" ORDER BY\").next().unwrap().to_string();
+
+            let mut count_query = sqlx::query_scalar::<""_, i64>(&""count_sql);
+            for value in &""bind_values {
+                count_query = count_query.bind(value);
+            }
+            Some(count_query.fetch_one(&""self.pool).await?)
+        } else {
+            None
+        };
+
+        Ok((resources, total))
+    }
+")
+       (generate-helper-methods resource-name resource-lower))))
+
+; Generate match arms for each search parameter
+(define (generate-search-param-matches resource-name resource-lower searches)
+  (if (null? searches)
+      ""
+      (apply $ (map (lambda (search)
+                      (generate-search-param-match resource-name resource-lower search))
+                    searches))))
+
+; Generate a single search parameter match arm
+(define (generate-search-param-match resource-name resource-lower search)
+  (let* ((search-name (% "name" search))
+         (search-type (% "type" search))
+         (col-name (camel-to-snake (string-replace search-name "-" "_")))
+         (extraction-key (search-extraction-key search))
+         (is-collection (search-is-collection? search)))
+    ; Skip special parameters like _lastUpdated
+    (if (and (> (string-length search-name) 0)
+             (string=? (substring search-name 0 1) "_"))
+        ""
+        (case search-type
+          (("string") (generate-string-param-match search-name extraction-key resource-lower))
+          (("token") (generate-token-param-match search-name col-name search resource-lower is-collection))
+          (("date") (generate-date-param-match search-name col-name resource-lower))
+          (("reference") (generate-reference-param-match search-name col-name resource-lower is-collection))
+          (("composite") "") ; Skip composite for now
+          (("special") "")
+          (else "")))))
+
+; Generate string parameter match (HumanName searches across multiple columns)
+(define (generate-string-param-match search-name extraction-key resource-lower)
+  (if (string=? extraction-key "name")
+      ; HumanName - searches family_name, given_name, prefix, suffix, name_text
+      ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref().unwrap_or(\"contains\");
+                    let bind_idx = bind_values.len() + 1;
+
+                    match modifier {
+                        \"contains\" => {
+                            sql.push_str(&""format!(
+                                \" AND (EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn ILIKE ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".given_name) AS gn WHERE gn ILIKE ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".prefix) AS p WHERE p ILIKE ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".suffix) AS s WHERE s ILIKE ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".name_text) AS nt WHERE nt ILIKE ${}))\",
+                                bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                            ));
+                            bind_values.push(format!(\"%{}%\", param.value));
+                        }
+                        \"exact\" => {
+                            sql.push_str(&""format!(
+                                \" AND (EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn = ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".given_name) AS gn WHERE gn = ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".prefix) AS p WHERE p = ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".suffix) AS s WHERE s = ${}) \\
+                                 OR EXISTS (SELECT 1 FROM unnest("resource-lower".name_text) AS nt WHERE nt = ${}))\",
+                                bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                            ));
+                            bind_values.push(param.value.clone());
+                        }
+                        \"missing\" => {
+                            sql.push_str(\" AND ("resource-lower".family_name IS NULL OR array_length("resource-lower".family_name, 1) IS NULL)\");
+                        }
+                        \"not\" => {
+                            sql.push_str(&""format!(
+                                \" AND NOT (EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn ILIKE ${}))\",
+                                bind_idx
+                            ));
+                            bind_values.push(format!(\"%{}%\", param.value));
+                        }
+                        _ => {}
+                    }
+                }
+")
+      ; Other string searches - skip for now
+      ""))
+
+; Generate token parameter match
+(define (generate-token-param-match search-name col-name search resource-lower is-collection)
+  (cond
+    ; Simple code (boolean, gender, etc.)
+    ((search-is-simple-code? search)
+     ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" = ${}\", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+"))
+    ; Identifier (system|value)
+    ((search-is-identifier? search)
+     ($"                \""search-name"\" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<""&""str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(
+                                \" AND EXISTS (SELECT 1 FROM unnest("resource-lower".identifier_system, "resource-lower".identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${})\",
+                                bind_idx, bind_idx + 1
+                            ));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower".identifier_value) AS iv WHERE iv = ${})\", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+"))
+    ; ContactPoint (email, phone, telecom)
+    ((search-is-contactpoint? search)
+     ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower".telecom_value) AS tv WHERE tv = ${})\", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+"))
+    ; CodeableConcept
+    ((or (search-is-codeableconcept? search) (search-has-codeableconcept-variant? search))
+     ($"                \""search-name"\" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<""&""str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(\" AND "resource-lower"."col-name"_system = ${} AND "resource-lower"."col-name"_code = ${}\", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&""format!(\" AND "resource-lower"."col-name"_code = ${}\", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+"))
+    (else "")))
+
+; Generate date parameter match
+(define (generate-date-param-match search-name col-name resource-lower)
+  ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let op = match param.prefix.as_deref() {
+                        Some(\"eq\") | None => \"=\",
+                        Some(\"ne\") => \"!=\",
+                        Some(\"gt\") => \">\",
+                        Some(\"lt\") => \"<\",
+                        Some(\"ge\") => \">=\",
+                        Some(\"le\") => \"<=\",
+                        _ => \"=\",
+                    };
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" {} ${}\", op, bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+"))
+
+; Generate reference parameter match
+(define (generate-reference-param-match search-name col-name resource-lower is-collection)
+  (if is-collection
+      ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+")
+      ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+")))
+
+; Generate helper methods (resource-specific)
+(define (generate-helper-methods resource-name resource-lower)
+  (case resource-name
+    (("Patient") ($"
+    /// Find observations by patient ID (for _revinclude support)
+    pub async fn find_observations_by_patient(&""self, patient_id: &""str) -> Result<""Vec<""Observation>> {
+        let patient_ref = format!(\"Patient/{}\", patient_id);
+        let observations = sqlx::query_as!(
+            Observation,
+            r#\"SELECT id, version_id, last_updated, content as \"content: Value\" FROM observation WHERE subject_reference = $1\"#,
+            patient_ref
+        ).fetch_all(&""self.pool).await?;
+        Ok(observations)
+    }
+
+    /// Find practitioners by IDs (for _include support)
+    pub async fn find_practitioners_by_ids(&""self, practitioner_ids: &""[String]) -> Result<""Vec<""crate::models::practitioner::Practitioner>> {
+        use crate::models::practitioner::Practitioner;
+        if practitioner_ids.is_empty() { return Ok(Vec::new()); }
+        let practitioners = sqlx::query_as!(
+            Practitioner,
+            r#\"SELECT id, version_id, last_updated, content as \"content: Value\" FROM practitioner WHERE id = ANY($1)\"#,
+            practitioner_ids
+        ).fetch_all(&""self.pool).await?;
+        Ok(practitioners)
+    }
+"))
+    (("Observation") ($"
+    /// Read a patient by ID (for chaining support)
+    pub async fn read_patient(&""self, id: &""str) -> Result<""Patient> {
+        let patient = sqlx::query_as!(
+            Patient,
+            r#\"SELECT id, version_id, last_updated, content as \"content: Value\" FROM patient WHERE id = $1\"#,
+            id
+        ).fetch_optional(&""self.pool).await?.ok_or(FhirError::NotFound)?;
+        Ok(patient)
+    }
+"))
+    (("Practitioner") ($"
+    /// Find patients by practitioner ID (for _revinclude support)
+    pub async fn find_patients_by_practitioner(&""self, practitioner_id: &""str) -> Result<""Vec<""Patient>> {
+        let practitioner_ref = format!(\"Practitioner/{}\", practitioner_id);
+        let patients = sqlx::query_as!(
+            Patient,
+            r#\"SELECT id, version_id, last_updated, content as \"content: Value\" FROM patient WHERE general_practitioner_reference @> ARRAY[$1]::text[]\"#,
+            practitioner_ref
+        ).fetch_all(&""self.pool).await?;
+        Ok(patients)
+    }
+"))
+    (else "")))
+

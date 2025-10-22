@@ -344,7 +344,8 @@ pub struct "resource-name"SearchParams {
     // Extract "search-name"
     if let Some("col-name"_qty) = content.get(\""fhir-field"Quantity\") {
         if let Some(value) = "col-name"_qty.get(\"value\").and_then(|v| v.as_f64()) {
-            params."col-name"_value = Some(value);
+            params."col-name"_value = sqlx::types::BigDecimal::try_from(value)
+                .ok();
         }
         if let Some(unit) = "col-name"_qty.get(\"unit\").and_then(|u| u.as_str()) {
             params."col-name"_unit = Some(unit.to_string());
@@ -505,7 +506,7 @@ pub struct "resource-name"SearchParams {
             ($"    pub "col-name"_reference: Option<""String>,
 ")))
       (("quantity")
-        ($"    pub "col-name"_value: Option<""f64>,
+        ($"    pub "col-name"_value: Option<""sqlx::types::BigDecimal>,
     pub "col-name"_unit: Option<""String>,
     pub "col-name"_system: Option<""String>,
 "))

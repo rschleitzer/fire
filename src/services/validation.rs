@@ -353,3 +353,99 @@ pub fn validate_observation(content: &Value) -> Result<()> {
 
     Ok(())
 }
+/// Validates a FHIR Practitioner resource
+pub fn validate_practitioner(content: &Value) -> Result<()> {
+    // Validate resourceType
+    let resource_type = content
+        .get("resourceType")
+        .and_then(|r| r.as_str())
+        .ok_or_else(|| FhirError::InvalidResource("Missing resourceType".to_string()))?;
+
+    if resource_type != "Practitioner" {
+        return Err(FhirError::InvalidResource(format!(
+            "Expected resourceType 'Practitioner', got '{}'",
+            resource_type
+        )));
+    }
+
+    // Validate name structure if present
+    if let Some(names) = content.get("name") {
+        if !names.is_array() {
+            return Err(FhirError::ValidationError(
+                "name must be an array".to_string(),
+            ));
+        }
+
+        for (i, name) in names.as_array().unwrap().iter().enumerate() {
+            if !name.is_object() {
+                return Err(FhirError::ValidationError(format!(
+                    "name[{}] must be an object",
+                    i
+                )));
+            }
+
+            // Validate given is array if present
+            if let Some(given) = name.get("given") {
+                if !given.is_array() {
+                    return Err(FhirError::ValidationError(format!(
+                        "name[{}].given must be an array",
+                        i
+                    )));
+                }
+            }
+        }
+    }
+
+    // Validate identifier structure if present
+    if let Some(identifiers) = content.get("identifier") {
+        if !identifiers.is_array() {
+            return Err(FhirError::ValidationError(
+                "identifier must be an array".to_string(),
+            ));
+        }
+
+        for (i, identifier) in identifiers.as_array().unwrap().iter().enumerate() {
+            if !identifier.is_object() {
+                return Err(FhirError::ValidationError(format!(
+                    "identifier[{}] must be an object",
+                    i
+                )));
+            }
+
+            // Identifier must have a value
+            if identifier.get("value").is_none() {
+                return Err(FhirError::ValidationError(format!(
+                    "identifier[{}] must have a value",
+                    i
+                )));
+            }
+        }
+    }
+
+    // Validate gender if present
+    if let Some(gender) = content.get("gender") {
+        if let Some(gender_str) = gender.as_str() {
+            if !["male", "female", "other", "unknown"].contains(&gender_str) {
+                return Err(FhirError::ValidationError(format!(
+                    "Invalid gender value '{}'. Must be one of: male, female, other, unknown",
+                    gender_str
+                )));
+            }
+        } else {
+            return Err(FhirError::ValidationError(
+                "gender must be a string".to_string(),
+            ));
+        }
+    }
+
+    // Validate active if present
+    if let Some(active) = content.get("active") {
+        if !active.is_boolean() {
+            return Err(FhirError::ValidationError(
+                "active must be a boolean".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}

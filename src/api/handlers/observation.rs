@@ -293,7 +293,7 @@ pub async fn get_observation_history(
     // Validate FHIR ID format
     validate_fhir_id(&id)?;
 
-    let history = repo.history(&id).await?;
+    let history = repo.history(&id, None).await?;
 
     // Build Bundle using efficient string concatenation
     let total = history.len();

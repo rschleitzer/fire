@@ -1,13 +1,14 @@
 (element resources
     (sosofo-append
         (migration)
-        (repositories)
         (process-children))
 )
 
 (element resource
     (if (active? (current-node))
-        (struct)
+        (sosofo-append
+            (struct)
+            (repository))
         (empty-sosofo)))
 
 (element elements (empty-sosofo))

@@ -219,7 +219,8 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     // Extract combo-value-quantity
     if let Some(combo_value_quantity_qty) = content.get("valueQuantity") {
         if let Some(value) = combo_value_quantity_qty.get("value").and_then(|v| v.as_f64()) {
-            params.combo_value_quantity_value = Some(value);
+            params.combo_value_quantity_value = sqlx::types::BigDecimal::try_from(value)
+                .ok();
         }
         if let Some(unit) = combo_value_quantity_qty.get("unit").and_then(|u| u.as_str()) {
             params.combo_value_quantity_unit = Some(unit.to_string());
@@ -378,7 +379,8 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     // Extract value-quantity
     if let Some(value_quantity_qty) = content.get("valueQuantity") {
         if let Some(value) = value_quantity_qty.get("value").and_then(|v| v.as_f64()) {
-            params.value_quantity_value = Some(value);
+            params.value_quantity_value = sqlx::types::BigDecimal::try_from(value)
+                .ok();
         }
         if let Some(unit) = value_quantity_qty.get("unit").and_then(|u| u.as_str()) {
             params.value_quantity_unit = Some(unit.to_string());
@@ -419,10 +421,10 @@ pub struct ObservationSearchParams {
     pub combo_data_absent_reason_system: Option<String>,
     pub combo_data_absent_reason_code: Option<String>,
     pub combo_value_concept_code: Option<String>,
-    pub combo_value_quantity_value: Option<f64>,
+    pub combo_value_quantity_value: Option<sqlx::types::BigDecimal>,
     pub combo_value_quantity_unit: Option<String>,
     pub combo_value_quantity_system: Option<String>,
-    pub component_value_quantity_value: Option<f64>,
+    pub component_value_quantity_value: Option<sqlx::types::BigDecimal>,
     pub component_value_quantity_unit: Option<String>,
     pub component_value_quantity_system: Option<String>,
     pub component_value_reference_reference: Vec<String>,
@@ -443,7 +445,7 @@ pub struct ObservationSearchParams {
     pub value_date_datetime: Option<DateTime<Utc>>,
     pub value_date_period_start: Option<DateTime<Utc>>,
     pub value_date_period_end: Option<DateTime<Utc>>,
-    pub value_quantity_value: Option<f64>,
+    pub value_quantity_value: Option<sqlx::types::BigDecimal>,
     pub value_quantity_unit: Option<String>,
     pub value_quantity_system: Option<String>,
     pub value_reference_reference: Option<String>,

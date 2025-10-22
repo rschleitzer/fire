@@ -1,172 +1,14 @@
 use chrono::Utc;
 use serde_json::Value;
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
-use crate::models::observation::{
-    extract_observation_search_params, Observation, ObservationHistory,
-};
+use crate::models::observation::{extract_observation_search_params, Observation, ObservationHistory};
 use crate::models::patient::Patient;
-use crate::search::{SearchCondition, SearchQuery};
+use crate::search::{SearchQuery, SortDirection};
 use crate::services::validate_observation;
-
-// Helper function to capitalize first letter
-fn capitalize_first(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        None => String::new(),
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-    }
-}
-
-/// Recursively build JOINs and WHERE conditions for a chained search
-/// Returns (joins, where_clause, bind_count_increment, bind_values)
-fn build_chain_joins(
-    chain: &[crate::search::ChainLink],
-    _source_table: &str,
-    source_alias: &str,
-    reference_field: &str,
-    join_counter: &mut usize,
-    bind_counter: &mut usize,
-    search_value: &str,
-) -> Result<(Vec<String>, Option<String>, Vec<String>)> {
-    if chain.is_empty() {
-        return Ok((Vec::new(), None, Vec::new()));
-    }
-
-    let current_param = &chain[0].param;
-    let remaining_chain = &chain[1..];
-
-    // Determine if this is a reference parameter (leads to another resource)
-    // or a search parameter (final value to search for)
-    let is_reference = !remaining_chain.is_empty();
-
-    if is_reference {
-        // This is a reference to another resource - need to follow it
-        // Determine target table based on reference parameter name
-        let target_table = match current_param.as_str() {
-            "general-practitioner" => "practitioner",
-            "subject" => "patient", // Could be other types, but for Observation it's usually Patient
-            "patient" => "patient",
-            _ => {
-                return Err(FhirError::InvalidSearchParameter(format!(
-                    "Unsupported reference parameter in chain: {}",
-                    current_param
-                )))
-            }
-        };
-
-        let alias = format!("chain_{}", *join_counter);
-        *join_counter += 1;
-
-        // Get the reference column for THIS join from the source table
-        // The reference_field parameter should already contain the fully qualified column name
-        // (e.g., "chain_0.general_practitioner_reference" or "observation.subject_reference")
-        let reference_type = capitalize_first(target_table);
-        let join_sql = format!(
-            "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
-            target_table,
-            alias,
-            alias,
-            reference_type,
-            reference_field,
-            reference_type
-        );
-
-        // Determine the reference field for the next level (if any)
-        // Only get the reference column if the next parameter is also a reference
-        // (i.e., if there are more than 1 elements remaining in the chain)
-        let next_reference_field = if remaining_chain.len() > 1 {
-            format!("{}.{}", alias, get_reference_column(target_table, &remaining_chain[0].param)?)
-        } else {
-            // Next param is the final search parameter, no reference field needed
-            String::new()
-        };
-
-        // Recurse to build the rest of the chain
-        let (mut sub_joins, sub_where, sub_binds) = build_chain_joins(
-            remaining_chain,
-            target_table,
-            &alias,
-            &next_reference_field,
-            join_counter,
-            bind_counter,
-            search_value,
-        )?;
-
-        // Prepend our JOIN to the sub-joins
-        let mut all_joins = vec![join_sql];
-        all_joins.append(&mut sub_joins);
-
-        Ok((all_joins, sub_where, sub_binds))
-    } else {
-        // This is the final search parameter - generate WHERE clause
-        *bind_counter += 1;
-        let bind_num = *bind_counter;
-
-        let (where_clause, bind_value) = match current_param.as_str() {
-            "family" => (
-                format!(
-                    "EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${})",
-                    source_alias, bind_num
-                ),
-                format!("{}%", search_value),
-            ),
-            "given" => (
-                format!(
-                    "EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${})",
-                    source_alias, bind_num
-                ),
-                format!("{}%", search_value),
-            ),
-            "identifier" => (
-                format!(
-                    "EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${})",
-                    source_alias, bind_num
-                ),
-                search_value.to_string(),
-            ),
-            "name" => (
-                format!(
-                    "(EXISTS (SELECT 1 FROM unnest({}.family_name) AS fn WHERE fn ILIKE ${}) OR EXISTS (SELECT 1 FROM unnest({}.given_name) AS gn WHERE gn ILIKE ${}))",
-                    source_alias, bind_num, source_alias, bind_num
-                ),
-                format!("{}%", search_value),
-            ),
-            "telecom" | "email" => (
-                format!(
-                    "EXISTS (SELECT 1 FROM unnest({}.telecom_value) AS tv WHERE tv ILIKE ${})",
-                    source_alias, bind_num
-                ),
-                format!("%{}%", search_value),
-            ),
-            _ => {
-                *bind_counter -= 1; // Undo the increment
-                return Err(FhirError::InvalidSearchParameter(format!(
-                    "Unsupported search parameter in chain: {}",
-                    current_param
-                )));
-            }
-        };
-
-        Ok((Vec::new(), Some(where_clause), vec![bind_value]))
-    }
-}
-
-/// Get the reference column name for a given table and reference parameter
-fn get_reference_column(table: &str, param: &str) -> Result<String> {
-    match (table, param) {
-        ("patient", "general-practitioner") => Ok("general_practitioner_reference".to_string()),
-        ("observation", "subject") => Ok("subject_reference".to_string()),
-        ("observation", "patient") => Ok("subject_reference".to_string()),
-        _ => Err(FhirError::InvalidSearchParameter(format!(
-            "Unsupported reference parameter '{}' for table '{}'",
-            param, table
-        ))),
-    }
-}
 
 pub struct ObservationRepository {
     pool: PgPool,
@@ -179,12 +21,16 @@ impl ObservationRepository {
 
     /// Create a new observation resource (version 1)
     pub async fn create(&self, mut content: Value) -> Result<Observation> {
+        tracing::debug!("Creating new observation resource");
+
         // Validate resource
         validate_observation(&content)?;
 
         let id = Uuid::new_v4().to_string();
         let version_id = 1;
         let last_updated = Utc::now();
+
+        tracing::info!(observation_id = %id, "Creating observation");
 
         // Inject id and meta fields into content before storing
         content = crate::models::observation::inject_id_meta(&content, &id, version_id, &last_updated);
@@ -194,46 +40,135 @@ impl ObservationRepository {
 
         let mut tx = self.pool.begin().await?;
 
-        // Convert f64 to BigDecimal for database
-        let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v)
-                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-        });
-
-        // Insert into current table (simplified - not using query_as! due to complexity)
+        // Insert into current table
         sqlx::query!(
             r#"
             INSERT INTO observation (
                 id, version_id, last_updated, content,
-                status, category_system, category_code,
+                identifier_system, identifier_value,
                 code_system, code_code,
-                subject_reference, encounter_reference,
-                date_datetime, date_period_start, date_period_end,
-                value_quantity_value, value_quantity_unit, value_quantity_system,
+                date_datetime,
+                date_period_start, date_period_end,
+                encounter_reference,
+                based_on_reference,
+                category_system, category_code,
+                combo_code_system, combo_code_code,
+                combo_data_absent_reason_system, combo_data_absent_reason_code,
+                combo_value_concept_code,
+                combo_value_quantity_value, combo_value_quantity_unit, combo_value_quantity_system,
+                component_value_quantity_value, component_value_quantity_unit, component_value_quantity_system,
+                component_value_reference_reference,
+                data_absent_reason_system, data_absent_reason_code,
+                derived_from_reference,
+                device_reference,
+                focus_reference,
+                has_member_reference,
+                method_system, method_code,
+                part_of_reference,
+                performer_reference,
+                specimen_reference,
+                status,
+                subject_reference,
                 value_concept_code,
-                performer_reference
+                value_date_datetime,
+                value_date_period_start, value_date_period_end,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_reference_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
             "#,
             id,
             version_id,
             last_updated,
             content,
-            params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
             params.code_system,
             params.code_code,
-            params.subject_reference,
-            params.encounter_reference,
             params.date_datetime,
             params.date_period_start,
             params.date_period_end,
-            value_qty_decimal,
+            params.encounter_reference,
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
             params.value_quantity_unit,
             params.value_quantity_system,
-                params.value_concept_code,
-                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params.value_reference_reference
         )
         .execute(&mut *tx)
         .await?;
@@ -244,7 +179,29 @@ impl ObservationRepository {
         self.read(&id).await
     }
 
-    /// Upsert an observation resource with specific ID (FHIR-compliant PUT)
+
+    /// Read current version of a observation (returns raw JSON)
+    pub async fn read(&self, id: &str) -> Result<Observation> {
+        let observation = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM observation
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(FhirError::NotFound)?;
+
+        Ok(observation)
+    }
+
+
+    /// Upsert a observation resource with specific ID (FHIR-compliant PUT)
     /// Creates with client-specified ID if doesn't exist, updates if exists
     pub async fn upsert(&self, id: &str, mut content: Value) -> Result<Observation> {
         // Validate resource
@@ -275,8 +232,7 @@ impl ObservationRepository {
 
             tracing::info!(observation_id = %id, old_version = old_observation.version_id, new_version = new_version_id, "Updating existing observation");
 
-            // Clean up any orphaned history records that might conflict (from previous incomplete operations)
-            // This handles the case where a previous operation failed mid-transaction
+            // Clean up any orphaned history records
             let deleted_rows = sqlx::query!(
                 r#"
                 DELETE FROM observation_history
@@ -298,48 +254,141 @@ impl ObservationRepository {
             // Extract search params from OLD content for history
             let old_params = extract_observation_search_params(&old_observation.content);
 
-            // Convert f64 to BigDecimal for old params
-            let old_value_qty_decimal = old_params.value_quantity_value.map(|v| {
-                sqlx::types::BigDecimal::try_from(v)
-                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-            });
-
             // Insert OLD version into history before updating
             sqlx::query!(
                 r#"
                 INSERT INTO observation_history (
                     id, version_id, last_updated, content,
-                    status, category_system, category_code,
-                    code_system, code_code,
-                    subject_reference, encounter_reference,
-                    date_datetime, date_period_start, date_period_end,
-                    value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_concept_code,
-                    performer_reference,
+                identifier_system, identifier_value,
+                code_system, code_code,
+                date_datetime,
+                date_period_start, date_period_end,
+                encounter_reference,
+                based_on_reference,
+                category_system, category_code,
+                combo_code_system, combo_code_code,
+                combo_data_absent_reason_system, combo_data_absent_reason_code,
+                combo_value_concept_code,
+                combo_value_quantity_value, combo_value_quantity_unit, combo_value_quantity_system,
+                component_value_quantity_value, component_value_quantity_unit, component_value_quantity_system,
+                component_value_reference_reference,
+                data_absent_reason_system, data_absent_reason_code,
+                derived_from_reference,
+                device_reference,
+                focus_reference,
+                has_member_reference,
+                method_system, method_code,
+                part_of_reference,
+                performer_reference,
+                specimen_reference,
+                status,
+                subject_reference,
+                value_concept_code,
+                value_date_datetime,
+                value_date_period_start, value_date_period_end,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_reference_reference,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
                 "#,
                 old_observation.id,
                 old_observation.version_id,
                 old_observation.last_updated,
                 &old_observation.content,
-                old_params.status,
-                old_params.category_system.is_empty().then_some(None).unwrap_or(Some(&old_params.category_system[..])),
-                old_params.category_code.is_empty().then_some(None).unwrap_or(Some(&old_params.category_code[..])),
-                old_params.code_system,
-                old_params.code_code,
-                old_params.subject_reference,
-                old_params.encounter_reference,
-                old_params.date_datetime,
-                old_params.date_period_start,
-                old_params.date_period_end,
-                old_value_qty_decimal,
-                old_params.value_quantity_unit,
-                old_params.value_quantity_system,
-                old_params.value_concept_code,
-                old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
-                if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
+            old_params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_system[..])),
+            old_params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params.code_system,
+            old_params.code_code,
+            old_params.date_datetime,
+            old_params.date_period_start,
+            old_params.date_period_end,
+            old_params.encounter_reference,
+            old_params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.based_on_reference[..])),
+            old_params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.category_system[..])),
+            old_params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.category_code[..])),
+            old_params.combo_code_system,
+            old_params.combo_code_code,
+            old_params.combo_data_absent_reason_system,
+            old_params.combo_data_absent_reason_code,
+            old_params.combo_value_concept_code,
+            old_params.combo_value_quantity_value,
+            old_params.combo_value_quantity_unit,
+            old_params.combo_value_quantity_system,
+            old_params.component_value_quantity_value,
+            old_params.component_value_quantity_unit,
+            old_params.component_value_quantity_system,
+            old_params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.component_value_reference_reference[..])),
+            old_params.data_absent_reason_system,
+            old_params.data_absent_reason_code,
+            old_params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.derived_from_reference[..])),
+            old_params.device_reference,
+            old_params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.focus_reference[..])),
+            old_params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.has_member_reference[..])),
+            old_params.method_system,
+            old_params.method_code,
+            old_params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.part_of_reference[..])),
+            old_params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.performer_reference[..])),
+            old_params.specimen_reference,
+            old_params.status,
+            old_params.subject_reference,
+            old_params.value_concept_code,
+            old_params.value_date_datetime,
+            old_params.value_date_period_start,
+            old_params.value_date_period_end,
+            old_params.value_quantity_value,
+            old_params.value_quantity_unit,
+            old_params.value_quantity_system,
+            old_params.value_reference_reference,
+                if old_observation.version_id == 1 {
+                    "CREATE"
+                } else {
+                    "UPDATE"
+                },
                 Utc::now(),
             )
             .execute(&mut *tx)
@@ -347,12 +396,6 @@ impl ObservationRepository {
 
             // Extract search parameters for new content
             let params = extract_observation_search_params(&content);
-
-            // Convert f64 to BigDecimal
-            let value_qty_decimal = params.value_quantity_value.map(|v| {
-                sqlx::types::BigDecimal::try_from(v)
-                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-            });
 
             // Update current table with new version
             sqlx::query!(
@@ -362,42 +405,144 @@ impl ObservationRepository {
                     version_id = $2,
                     last_updated = $3,
                     content = $4,
-                    status = $5,
-                    category_system = $6,
-                    category_code = $7,
-                    code_system = $8,
-                    code_code = $9,
-                    subject_reference = $10,
-                    encounter_reference = $11,
-                    date_datetime = $12,
-                    date_period_start = $13,
-                    date_period_end = $14,
-                    value_quantity_value = $15,
-                    value_quantity_unit = $16,
-                    value_quantity_system = $17,
-                    value_concept_code = $18,
-                    performer_reference = $19
+                    identifier_system = $5,
+                    identifier_value = $6,
+                    code_system = $7,
+                    code_code = $8,
+                    date_datetime = $9,
+                    date_period_start = $10,
+                    date_period_end = $11,
+                    encounter_reference = $12,
+                    based_on_reference = $13,
+                    category_system = $14,
+                    category_code = $15,
+                    combo_code_system = $16,
+                    combo_code_code = $17,
+                    combo_data_absent_reason_system = $18,
+                    combo_data_absent_reason_code = $19,
+                    combo_value_concept_code = $20,
+                    combo_value_quantity_value = $21,
+                    combo_value_quantity_unit = $22,
+                    combo_value_quantity_system = $23,
+                    component_value_quantity_value = $24,
+                    component_value_quantity_unit = $25,
+                    component_value_quantity_system = $26,
+                    component_value_reference_reference = $27,
+                    data_absent_reason_system = $28,
+                    data_absent_reason_code = $29,
+                    derived_from_reference = $30,
+                    device_reference = $31,
+                    focus_reference = $32,
+                    has_member_reference = $33,
+                    method_system = $34,
+                    method_code = $35,
+                    part_of_reference = $36,
+                    performer_reference = $37,
+                    specimen_reference = $38,
+                    status = $39,
+                    subject_reference = $40,
+                    value_concept_code = $41,
+                    value_date_datetime = $42,
+                    value_date_period_start = $43,
+                    value_date_period_end = $44,
+                    value_quantity_value = $45,
+                    value_quantity_unit = $46,
+                    value_quantity_system = $47,
+                    value_reference_reference = $48
                 WHERE id = $1
                 "#,
                 id,
                 new_version_id,
                 last_updated,
                 content,
-                params.status,
-                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
-                params.code_system,
-                params.code_code,
-                params.subject_reference,
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
+            params.code_system,
+            params.code_code,
+            params.date_datetime,
+            params.date_period_start,
+            params.date_period_end,
             params.encounter_reference,
-                params.date_datetime,
-                params.date_period_start,
-                params.date_period_end,
-                value_qty_decimal,
-                params.value_quantity_unit,
-                params.value_quantity_system,
-                params.value_concept_code,
-                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
+            params.value_quantity_unit,
+            params.value_quantity_system,
+            params.value_reference_reference
             )
             .execute(&mut *tx)
             .await?;
@@ -413,8 +558,7 @@ impl ObservationRepository {
 
             tracing::info!(observation_id = %id, "Creating observation with client-specified ID");
 
-            // Clean up any orphaned history records for this ID (from previous delete)
-            // This handles the case where a resource was deleted but history records remain
+            // Clean up any orphaned history records for this ID
             let deleted_rows = sqlx::query!(
                 r#"
                 DELETE FROM observation_history
@@ -425,7 +569,9 @@ impl ObservationRepository {
             .execute(&mut *tx)
             .await?;
 
-            tracing::info!(observation_id = %id, orphaned_history_records = deleted_rows.rows_affected(), "Cleaned up orphaned history records before creating new resource");
+            if deleted_rows.rows_affected() > 0 {
+                tracing::info!(observation_id = %id, orphaned_history_records = deleted_rows.rows_affected(), "Cleaned up orphaned history records before creating new resource");
+            }
 
             // Inject id and meta into content before storing
             content = crate::models::observation::inject_id_meta(&content, id, version_id, &last_updated);
@@ -433,59 +579,503 @@ impl ObservationRepository {
             // Extract search parameters
             let params = extract_observation_search_params(&content);
 
-            // Convert f64 to BigDecimal
-            let value_qty_decimal = params.value_quantity_value.map(|v| {
-                sqlx::types::BigDecimal::try_from(v)
-                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-            });
-
             // Insert into current table
             sqlx::query!(
                 r#"
                 INSERT INTO observation (
                     id, version_id, last_updated, content,
-                    status, category_system, category_code,
-                    code_system, code_code,
-                    subject_reference, encounter_reference,
-                    date_datetime, date_period_start, date_period_end,
-                    value_quantity_value, value_quantity_unit, value_quantity_system,
-                    value_concept_code,
-                    performer_reference
+                identifier_system, identifier_value,
+                code_system, code_code,
+                date_datetime,
+                date_period_start, date_period_end,
+                encounter_reference,
+                based_on_reference,
+                category_system, category_code,
+                combo_code_system, combo_code_code,
+                combo_data_absent_reason_system, combo_data_absent_reason_code,
+                combo_value_concept_code,
+                combo_value_quantity_value, combo_value_quantity_unit, combo_value_quantity_system,
+                component_value_quantity_value, component_value_quantity_unit, component_value_quantity_system,
+                component_value_reference_reference,
+                data_absent_reason_system, data_absent_reason_code,
+                derived_from_reference,
+                device_reference,
+                focus_reference,
+                has_member_reference,
+                method_system, method_code,
+                part_of_reference,
+                performer_reference,
+                specimen_reference,
+                status,
+                subject_reference,
+                value_concept_code,
+                value_date_datetime,
+                value_date_period_start, value_date_period_end,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_reference_reference
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
                 "#,
                 id,
                 version_id,
                 last_updated,
                 content,
-                params.status,
-                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
-                params.code_system,
-                params.code_code,
-                params.subject_reference,
-                params.encounter_reference,
-                params.date_datetime,
-                params.date_period_start,
-                params.date_period_end,
-                value_qty_decimal,
-                params.value_quantity_unit,
-                params.value_quantity_system,
-                params.value_concept_code,
-                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
+            params.code_system,
+            params.code_code,
+            params.date_datetime,
+            params.date_period_start,
+            params.date_period_end,
+            params.encounter_reference,
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
+            params.value_quantity_unit,
+            params.value_quantity_system,
+            params.value_reference_reference
             )
             .execute(&mut *tx)
             .await?;
 
             tx.commit().await?;
 
-            // Fetch and return the created observation
+            // Fetch and return created observation
             self.read(id).await
         }
     }
 
-    /// Read current version of an observation (returns raw JSON)
-    pub async fn read(&self, id: &str) -> Result<Observation> {
+
+    /// Update an existing observation resource
+    pub async fn update(&self, id: &str, mut content: Value) -> Result<Observation> {
+        // Validate resource
+        validate_observation(&content)?;
+
+        let mut tx = self.pool.begin().await?;
+
+        // Get existing resource
+        let old_observation = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM observation
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+            id
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(FhirError::NotFound)?;
+
+        let new_version_id = old_observation.version_id + 1;
+        let last_updated = Utc::now();
+
+        tracing::info!(observation_id = %id, old_version = old_observation.version_id, new_version = new_version_id, "Updating observation");
+
+        // Clean up any orphaned history records
+        let deleted_rows = sqlx::query!(
+            r#"
+            DELETE FROM observation_history
+            WHERE id = $1 AND version_id >= $2
+            "#,
+            id,
+            old_observation.version_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted_rows.rows_affected() > 0 {
+            tracing::warn!(observation_id = %id, deleted_versions = deleted_rows.rows_affected(), "Cleaned up orphaned history records before update");
+        }
+
+        // Inject id and meta into content
+        content = crate::models::observation::inject_id_meta(&content, id, new_version_id, &last_updated);
+
+        // Extract search params from OLD content for history
+        let old_params = extract_observation_search_params(&old_observation.content);
+
+        // Insert OLD version into history
+        sqlx::query!(
+            r#"
+            INSERT INTO observation_history (
+                id, version_id, last_updated, content,
+                identifier_system, identifier_value,
+                code_system, code_code,
+                date_datetime,
+                date_period_start, date_period_end,
+                encounter_reference,
+                based_on_reference,
+                category_system, category_code,
+                combo_code_system, combo_code_code,
+                combo_data_absent_reason_system, combo_data_absent_reason_code,
+                combo_value_concept_code,
+                combo_value_quantity_value, combo_value_quantity_unit, combo_value_quantity_system,
+                component_value_quantity_value, component_value_quantity_unit, component_value_quantity_system,
+                component_value_reference_reference,
+                data_absent_reason_system, data_absent_reason_code,
+                derived_from_reference,
+                device_reference,
+                focus_reference,
+                has_member_reference,
+                method_system, method_code,
+                part_of_reference,
+                performer_reference,
+                specimen_reference,
+                status,
+                subject_reference,
+                value_concept_code,
+                value_date_datetime,
+                value_date_period_start, value_date_period_end,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_reference_reference,
+                history_operation, history_timestamp
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
+            "#,
+            old_observation.id,
+            old_observation.version_id,
+            old_observation.last_updated,
+            &old_observation.content,
+            old_params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_system[..])),
+            old_params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params.code_system,
+            old_params.code_code,
+            old_params.date_datetime,
+            old_params.date_period_start,
+            old_params.date_period_end,
+            old_params.encounter_reference,
+            old_params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.based_on_reference[..])),
+            old_params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.category_system[..])),
+            old_params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.category_code[..])),
+            old_params.combo_code_system,
+            old_params.combo_code_code,
+            old_params.combo_data_absent_reason_system,
+            old_params.combo_data_absent_reason_code,
+            old_params.combo_value_concept_code,
+            old_params.combo_value_quantity_value,
+            old_params.combo_value_quantity_unit,
+            old_params.combo_value_quantity_system,
+            old_params.component_value_quantity_value,
+            old_params.component_value_quantity_unit,
+            old_params.component_value_quantity_system,
+            old_params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.component_value_reference_reference[..])),
+            old_params.data_absent_reason_system,
+            old_params.data_absent_reason_code,
+            old_params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.derived_from_reference[..])),
+            old_params.device_reference,
+            old_params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.focus_reference[..])),
+            old_params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.has_member_reference[..])),
+            old_params.method_system,
+            old_params.method_code,
+            old_params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.part_of_reference[..])),
+            old_params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&old_params.performer_reference[..])),
+            old_params.specimen_reference,
+            old_params.status,
+            old_params.subject_reference,
+            old_params.value_concept_code,
+            old_params.value_date_datetime,
+            old_params.value_date_period_start,
+            old_params.value_date_period_end,
+            old_params.value_quantity_value,
+            old_params.value_quantity_unit,
+            old_params.value_quantity_system,
+            old_params.value_reference_reference,
+            if old_observation.version_id == 1 {
+                "CREATE"
+            } else {
+                "UPDATE"
+            },
+            Utc::now(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Extract search parameters for new content
+        let params = extract_observation_search_params(&content);
+
+        // Update current table
+        sqlx::query!(
+            r#"
+            UPDATE observation
+            SET
+                version_id = $2,
+                last_updated = $3,
+                content = $4,
+                    identifier_system = $5,
+                    identifier_value = $6,
+                    code_system = $7,
+                    code_code = $8,
+                    date_datetime = $9,
+                    date_period_start = $10,
+                    date_period_end = $11,
+                    encounter_reference = $12,
+                    based_on_reference = $13,
+                    category_system = $14,
+                    category_code = $15,
+                    combo_code_system = $16,
+                    combo_code_code = $17,
+                    combo_data_absent_reason_system = $18,
+                    combo_data_absent_reason_code = $19,
+                    combo_value_concept_code = $20,
+                    combo_value_quantity_value = $21,
+                    combo_value_quantity_unit = $22,
+                    combo_value_quantity_system = $23,
+                    component_value_quantity_value = $24,
+                    component_value_quantity_unit = $25,
+                    component_value_quantity_system = $26,
+                    component_value_reference_reference = $27,
+                    data_absent_reason_system = $28,
+                    data_absent_reason_code = $29,
+                    derived_from_reference = $30,
+                    device_reference = $31,
+                    focus_reference = $32,
+                    has_member_reference = $33,
+                    method_system = $34,
+                    method_code = $35,
+                    part_of_reference = $36,
+                    performer_reference = $37,
+                    specimen_reference = $38,
+                    status = $39,
+                    subject_reference = $40,
+                    value_concept_code = $41,
+                    value_date_datetime = $42,
+                    value_date_period_start = $43,
+                    value_date_period_end = $44,
+                    value_quantity_value = $45,
+                    value_quantity_unit = $46,
+                    value_quantity_system = $47,
+                    value_reference_reference = $48
+            WHERE id = $1
+            "#,
+            id,
+            new_version_id,
+            last_updated,
+            content,
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
+            params.code_system,
+            params.code_code,
+            params.date_datetime,
+            params.date_period_start,
+            params.date_period_end,
+            params.encounter_reference,
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
+            params.value_quantity_unit,
+            params.value_quantity_system,
+            params.value_reference_reference
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        // Fetch and return updated observation
+        self.read(id).await
+    }
+
+
+    /// Delete a observation resource
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // Get current observation (to store in history)
         let observation = sqlx::query_as!(
             Observation,
             r#"
@@ -494,33 +1084,19 @@ impl ObservationRepository {
                 content as "content: Value"
             FROM observation
             WHERE id = $1
+            FOR UPDATE
             "#,
             id
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(FhirError::NotFound)?;
 
-        Ok(observation)
-    }
-
-    /// Delete an observation (hard delete)
-    pub async fn delete(&self, id: &str) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-
-        // Get current observation (to store in history)
-        let observation = self.read(id).await?;
         let new_version_id = observation.version_id + 1;
         let last_updated = Utc::now();
 
-        // Extract search parameters from content for history
+        // Extract search params from content for history
         let params = extract_observation_search_params(&observation.content);
-
-        // Convert f64 to BigDecimal
-        let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v)
-                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-        });
 
         // Delete from current table
         sqlx::query!(
@@ -538,35 +1114,131 @@ impl ObservationRepository {
             r#"
             INSERT INTO observation_history (
                 id, version_id, last_updated, content,
-                status, category_system, category_code,
+                identifier_system, identifier_value,
                 code_system, code_code,
-                subject_reference, encounter_reference,
-                date_datetime, date_period_start, date_period_end,
-                value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_concept_code,
+                date_datetime,
+                date_period_start, date_period_end,
+                encounter_reference,
+                based_on_reference,
+                category_system, category_code,
+                combo_code_system, combo_code_code,
+                combo_data_absent_reason_system, combo_data_absent_reason_code,
+                combo_value_concept_code,
+                combo_value_quantity_value, combo_value_quantity_unit, combo_value_quantity_system,
+                component_value_quantity_value, component_value_quantity_unit, component_value_quantity_system,
+                component_value_reference_reference,
+                data_absent_reason_system, data_absent_reason_code,
+                derived_from_reference,
+                device_reference,
+                focus_reference,
+                has_member_reference,
+                method_system, method_code,
+                part_of_reference,
                 performer_reference,
+                specimen_reference,
+                status,
+                subject_reference,
+                value_concept_code,
+                value_date_datetime,
+                value_date_period_start, value_date_period_end,
+                value_quantity_value, value_quantity_unit, value_quantity_system,
+                value_reference_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
             "#,
             id,
             new_version_id,
             last_updated,
             &observation.content,
-            params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
             params.code_system,
             params.code_code,
-            params.subject_reference,            params.encounter_reference,
             params.date_datetime,
             params.date_period_start,
             params.date_period_end,
-            value_qty_decimal,
+            params.encounter_reference,
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
             params.value_quantity_unit,
             params.value_quantity_system,
-                params.value_concept_code,
-                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params.value_reference_reference,
             "DELETE",
             Utc::now(),
         )
@@ -578,138 +1250,12 @@ impl ObservationRepository {
         Ok(())
     }
 
-    /// Update an observation resource (increment version)
-    pub async fn update(&self, id: &str, mut content: Value) -> Result<Observation> {
-        // Validate resource
-        validate_observation(&content)?;
 
-        let mut tx = self.pool.begin().await?;
+    /// Get all versions of a observation from history
+    pub async fn history(&self, id: &str, count: Option<i64>) -> Result<Vec<ObservationHistory>> {
+        let limit = count.unwrap_or(50);
 
-        // Get current version with lock (need full data to store in history)
-        let old_observation = self.read(id).await?;
-
-        let new_version_id = old_observation.version_id + 1;
-        let last_updated = Utc::now();
-
-        // Inject id and meta into new content before storing
-        content = crate::models::observation::inject_id_meta(&content, id, new_version_id, &last_updated);
-
-        // Extract search parameters from OLD content for history
-        let old_params = extract_observation_search_params(&old_observation.content);
-
-        // Convert f64 to BigDecimal for old params
-        let old_value_qty_decimal = old_params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v)
-                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-        });
-
-        // Insert OLD version into history before updating
-        sqlx::query!(
-            r#"
-            INSERT INTO observation_history (
-                id, version_id, last_updated, content,
-                status, category_system, category_code,
-                code_system, code_code,
-                subject_reference, encounter_reference,
-                date_datetime, date_period_start, date_period_end,
-                value_quantity_value, value_quantity_unit, value_quantity_system,
-                value_concept_code,
-                performer_reference,
-                history_operation, history_timestamp
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-            "#,
-            old_observation.id,
-            old_observation.version_id,
-            old_observation.last_updated,
-            &old_observation.content,
-            old_params.status,
-            old_params.category_system.is_empty().then_some(None).unwrap_or(Some(&old_params.category_system[..])),
-            old_params.category_code.is_empty().then_some(None).unwrap_or(Some(&old_params.category_code[..])),
-            old_params.code_system,
-            old_params.code_code,
-            old_params.subject_reference,
-            old_params.encounter_reference,
-            old_params.date_datetime,
-            old_params.date_period_start,
-            old_params.date_period_end,
-            old_value_qty_decimal,
-            old_params.value_quantity_unit,
-            old_params.value_quantity_system,
-                old_params.value_concept_code,
-                old_params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&old_params.performer_reference[..])),
-            if old_observation.version_id == 1 { "CREATE" } else { "UPDATE" },
-            Utc::now(),
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        // Extract search parameters for new content
-        let params = extract_observation_search_params(&content);
-
-        // Convert f64 to BigDecimal
-        let value_qty_decimal = params.value_quantity_value.map(|v| {
-            sqlx::types::BigDecimal::try_from(v)
-                .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-        });
-
-        // Update current table with new version
-        sqlx::query!(
-            r#"
-            UPDATE observation
-            SET
-                version_id = $2,
-                last_updated = $3,
-                content = $4,
-                status = $5,
-                category_system = $6,
-                category_code = $7,
-                code_system = $8,
-                code_code = $9,
-                subject_reference = $10,
-                encounter_reference = $11,
-                date_datetime = $12,
-                date_period_start = $13,
-                date_period_end = $14,
-                value_quantity_value = $15,
-                value_quantity_unit = $16,
-                value_quantity_system = $17,
-                value_concept_code = $18,
-                performer_reference = $19
-            WHERE id = $1
-            "#,
-            id,
-            new_version_id,
-            last_updated,
-            content,
-            params.status,
-            params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-            params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
-            params.code_system,
-            params.code_code,
-            params.subject_reference,
-            params.encounter_reference,
-            params.date_datetime,
-            params.date_period_start,
-            params.date_period_end,
-            value_qty_decimal,
-            params.value_quantity_unit,
-            params.value_quantity_system,
-            params.value_concept_code,
-            params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
-
-        // Fetch and return updated observation
-        self.read(id).await
-    }
-
-    /// Get all versions of an observation from history (includes current version if exists)
-    pub async fn history(&self, id: &str) -> Result<Vec<ObservationHistory>> {
-        let mut history = sqlx::query_as!(
+        let history = sqlx::query_as!(
             ObservationHistory,
             r#"
             SELECT
@@ -719,65 +1265,21 @@ impl ObservationRepository {
             FROM observation_history
             WHERE id = $1
             ORDER BY version_id DESC
+            LIMIT $2
             "#,
-            id
+            id,
+            limit
         )
         .fetch_all(&self.pool)
         .await?;
 
-        // Try to get current version and add it to history if not already present
-        if let Ok(current) = self.read(id).await {
-            // Check if current version already exists in history
-            let current_version_exists = history.iter().any(|h| h.version_id == current.version_id);
-
-            if !current_version_exists {
-                // Convert current Observation to ObservationHistory format
-                let current_as_history = ObservationHistory {
-                    id: current.id,
-                    version_id: current.version_id,
-                    last_updated: current.last_updated,
-                    content: current.content,
-                    history_operation: if current.version_id == 1 {
-                        "CREATE".to_string()
-                    } else {
-                        "UPDATE".to_string()
-                    },
-                    history_timestamp: current.last_updated,
-                };
-                history.insert(0, current_as_history);
-            }
-        }
-
-        if history.is_empty() {
-            return Err(FhirError::NotFound);
-        }
-
         Ok(history)
     }
 
-    /// Read a specific version from history (checks current version first)
-    pub async fn read_version(&self, id: &str, version_id: i32) -> Result<ObservationHistory> {
-        // Check if requested version is the current version
-        if let Ok(current) = self.read(id).await {
-            if current.version_id == version_id {
-                // Convert to ObservationHistory format
-                return Ok(ObservationHistory {
-                    id: current.id,
-                    version_id: current.version_id,
-                    last_updated: current.last_updated,
-                    content: current.content,
-                    history_operation: if current.version_id == 1 {
-                        "CREATE".to_string()
-                    } else {
-                        "UPDATE".to_string()
-                    },
-                    history_timestamp: current.last_updated,
-                });
-            }
-        }
 
-        // Not current version, check history table
-        let observation = sqlx::query_as!(
+    /// Read a specific version of a observation from history
+    pub async fn read_version(&self, id: &str, version_id: i32) -> Result<ObservationHistory> {
+        let history = sqlx::query_as!(
             ObservationHistory,
             r#"
             SELECT
@@ -794,348 +1296,10 @@ impl ObservationRepository {
         .await?
         .ok_or(FhirError::NotFound)?;
 
-        Ok(observation)
+        Ok(history)
     }
 
-    /// Search observations with optional total count
-    pub async fn search(
-        &self,
-        params: &HashMap<String, String>,
-        include_total: bool,
-    ) -> Result<(Vec<Observation>, Option<i64>)> {
-        let query = SearchQuery::from_params(params)?;
-
-        // Track JOINs for chained searches
-        let mut joins = Vec::new();
-        let mut join_counter = 0;
-
-        let mut sql = String::from(
-            r#"SELECT observation.id, observation.version_id, observation.last_updated, observation.content
-               FROM observation WHERE 1=1"#,
-        );
-
-        let mut bind_values: Vec<String> = Vec::new();
-        let mut bind_count = 0;
-
-        for condition in &query.conditions {
-            match condition {
-                SearchCondition::ObservationStatus(status) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND observation.status = ${}", bind_count));
-                    bind_values.push(status.clone());
-                }
-                SearchCondition::ObservationCode { system, code } => {
-                    if let Some(sys) = system {
-                        bind_count += 2;
-                        sql.push_str(&format!(
-                            " AND observation.code_system = ${} AND observation.code_code = ${}",
-                            bind_count - 1,
-                            bind_count
-                        ));
-                        bind_values.push(sys.clone());
-                        bind_values.push(code.clone());
-                    } else {
-                        bind_count += 1;
-                        sql.push_str(&format!(" AND observation.code_code = ${}", bind_count));
-                        bind_values.push(code.clone());
-                    }
-                }
-                SearchCondition::ObservationCategory(category) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(
-                        " AND ${} = ANY(observation.category_code)",
-                        bind_count
-                    ));
-                    bind_values.push(category.clone());
-                }
-                SearchCondition::ObservationPatient(patient_id) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
-                    bind_values.push(format!("Patient/{}", patient_id));
-                }
-                SearchCondition::ObservationSubject(subject_ref) => {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
-                    bind_values.push(subject_ref.clone());
-                }
-                SearchCondition::ObservationDate(comparison) => {
-                    bind_count += 1;
-                    let op = match comparison.prefix {
-                        crate::search::DatePrefix::Eq => "=",
-                        crate::search::DatePrefix::Ne => "!=",
-                        crate::search::DatePrefix::Gt => ">",
-                        crate::search::DatePrefix::Lt => "<",
-                        crate::search::DatePrefix::Ge => ">=",
-                        crate::search::DatePrefix::Le => "<=",
-                    };
-                    sql.push_str(&format!(
-                        " AND observation.date_datetime {} ${}::timestamptz",
-                        op, bind_count
-                    ));
-                    // Convert NaiveDate to string format (YYYY-MM-DD) - PostgreSQL will handle the comparison
-                    bind_values.push(comparison.value.format("%Y-%m-%d").to_string());
-                }
-                SearchCondition::ObservationCodeValueQuantity(composite) => {
-                    // Composite search: code AND value-quantity
-                    let op = match composite.value_prefix {
-                        crate::search::QuantityPrefix::Eq => "=",
-                        crate::search::QuantityPrefix::Ne => "!=",
-                        crate::search::QuantityPrefix::Gt => ">",
-                        crate::search::QuantityPrefix::Lt => "<",
-                        crate::search::QuantityPrefix::Ge => ">=",
-                        crate::search::QuantityPrefix::Le => "<=",
-                    };
-                    if let Some(sys) = &composite.code_system {
-                        bind_count += 3; // system, code, value
-                        sql.push_str(&format!(
-                            " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
-                            bind_count - 2, bind_count - 1, op, bind_count
-                        ));
-                        bind_values.push(sys.clone());
-                        bind_values.push(composite.code.clone());
-                        bind_values.push(composite.value.to_string());
-                    } else {
-                        bind_count += 2; // code, value
-                        sql.push_str(&format!(
-                            " AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
-                            bind_count - 1, op, bind_count
-                        ));
-                        bind_values.push(composite.code.clone());
-                        bind_values.push(composite.value.to_string());
-                    }
-                }
-                SearchCondition::ObservationCodeValueConcept(composite) => {
-                    // Composite search: code AND value-codeable-concept
-                    if let Some(sys) = &composite.code_system {
-                        bind_count += 3; // code_system, code, value_code
-                        sql.push_str(&format!(
-                            " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_concept_code = ${}",
-                            bind_count - 2, bind_count - 1, bind_count
-                        ));
-                        bind_values.push(sys.clone());
-                        bind_values.push(composite.code.clone());
-                        bind_values.push(composite.value_code.clone());
-                    } else {
-                        bind_count += 2; // code, value_code
-                        sql.push_str(&format!(
-                            " AND observation.code_code = ${} AND observation.value_concept_code = ${}",
-                            bind_count - 1, bind_count
-                        ));
-                        bind_values.push(composite.code.clone());
-                        bind_values.push(composite.value_code.clone());
-                    }
-                }
-                SearchCondition::ObservationComponentCodeValueQuantity(composite) => {
-                    // Component composite search: searches within component array in JSONB
-                    let op = match composite.value_prefix {
-                        crate::search::QuantityPrefix::Eq => "=",
-                        crate::search::QuantityPrefix::Ne => "!=",
-                        crate::search::QuantityPrefix::Gt => ">",
-                        crate::search::QuantityPrefix::Lt => "<",
-                        crate::search::QuantityPrefix::Ge => ">=",
-                        crate::search::QuantityPrefix::Le => "<=",
-                    };
-
-                    if let Some(sys) = &composite.component_code_system {
-                        bind_count += 3; // system, code, value
-                        sql.push_str(&format!(
-                            " AND EXISTS (
-                                SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
-                                WHERE comp->'code'->'coding'->0->>'system' = ${}
-                                AND comp->'code'->'coding'->0->>'code' = ${}
-                                AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
-                            )",
-                            bind_count - 2, bind_count - 1, op, bind_count
-                        ));
-                        bind_values.push(sys.clone());
-                        bind_values.push(composite.component_code.clone());
-                        bind_values.push(composite.value.to_string());
-                    } else {
-                        bind_count += 2; // code, value
-                        sql.push_str(&format!(
-                            " AND EXISTS (
-                                SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
-                                WHERE comp->'code'->'coding'->0->>'code' = ${}
-                                AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
-                            )",
-                            bind_count - 1, op, bind_count
-                        ));
-                        bind_values.push(composite.component_code.clone());
-                        bind_values.push(composite.value.to_string());
-                    }
-                }
-                SearchCondition::ForwardChain(chain) => {
-                    // Forward chaining for Observation: follow subject reference to Patient
-                    // Supports arbitrary depth: subject:Patient.family=Brown OR subject:Patient.general-practitioner.family=Smith
-
-                    // Determine target table and reference column for the first hop
-                    let (target_table, reference_column) = match chain.reference_param.as_str() {
-                        "subject" if chain.resource_type.as_deref() == Some("Patient") => {
-                            ("patient", "observation.subject_reference")
-                        }
-                        "subject" => {
-                            // Generic subject - could be various types, default to patient
-                            ("patient", "observation.subject_reference")
-                        }
-                        "patient" => ("patient", "observation.subject_reference"),
-                        _ => {
-                            tracing::warn!(
-                                "Unsupported chained reference in observation: {}",
-                                chain.reference_param
-                            );
-                            continue;
-                        }
-                    };
-
-                    // Create the first JOIN to the target resource
-                    let alias = format!("chain_{}", join_counter);
-                    join_counter += 1;
-
-                    let reference_type = capitalize_first(target_table);
-                    let join_sql = format!(
-                        "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
-                        target_table,
-                        alias,
-                        alias,
-                        reference_type,
-                        reference_column,
-                        reference_type
-                    );
-                    joins.push(join_sql);
-
-                    // Now recursively build the rest of the chain starting from the target resource
-                    // Need to determine the reference field for the next level if the chain continues
-                    let next_reference_field = if chain.chain.len() > 1 {
-                        // There's at least one more reference in the chain
-                        // Get the reference column for the first element of the remaining chain
-                        match get_reference_column(target_table, &chain.chain[0].param) {
-                            Ok(col) => format!("{}.{}", alias, col),
-                            Err(_) => String::new(), // Will be handled by recursive call
-                        }
-                    } else {
-                        // Only one element left in chain - it's the final search parameter
-                        String::new()
-                    };
-
-                    match build_chain_joins(
-                        &chain.chain,
-                        target_table,
-                        &alias,
-                        &next_reference_field,
-                        &mut join_counter,
-                        &mut bind_count,
-                        &chain.search_value,
-                    ) {
-                        Ok((chain_joins, chain_where, mut chain_binds)) => {
-                            joins.extend(chain_joins);
-                            if let Some(where_clause) = chain_where {
-                                sql.push_str(&format!(" AND {}", where_clause));
-                            }
-                            bind_values.append(&mut chain_binds);
-                        }
-                        Err(e) => {
-                            tracing::error!("Error building chain joins: {}", e);
-                            continue;
-                        }
-                    }
-                }
-                _ => {
-                    // Other search conditions not yet mapped for observations
-                    tracing::warn!("Unsupported search condition for observations: {:?}", condition);
-                }
-            }
-        }
-
-        // Add JOINs before WHERE clause
-        if !joins.is_empty() {
-            let where_pos = sql.find("WHERE").expect("WHERE clause not found");
-            let before_where = &sql[..where_pos];
-            let after_where = &sql[where_pos..];
-            sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
-        }
-
-        // Build ORDER BY clause
-        if !query.sort.is_empty() {
-            sql.push_str(" ORDER BY ");
-            for (i, sort) in query.sort.iter().enumerate() {
-                if i > 0 {
-                    sql.push_str(", ");
-                }
-                sql.push_str(&sort.field);
-                match sort.direction {
-                    crate::search::SortDirection::Ascending => sql.push_str(" ASC"),
-                    crate::search::SortDirection::Descending => sql.push_str(" DESC"),
-                }
-            }
-        } else {
-            // Default sort by last_updated DESC
-            sql.push_str(" ORDER BY observation.last_updated DESC");
-        }
-
-        // Add LIMIT and OFFSET
-        sql.push_str(&format!(" LIMIT {}", query.limit));
-        sql.push_str(&format!(" OFFSET {}", query.offset));
-
-        // Debug logging
-        tracing::debug!("Generated Observation SQL: {}", sql);
-        tracing::debug!("Bind values: {:?}", bind_values);
-
-        // Build dynamic query
-        let mut query_builder = sqlx::query(&sql);
-        for value in &bind_values {
-            query_builder = query_builder.bind(value);
-        }
-
-        let rows = query_builder.fetch_all(&self.pool).await?;
-
-        let observations = rows
-            .into_iter()
-            .map(|row| Observation {
-                id: row.get("id"),
-                version_id: row.get("version_id"),
-                last_updated: row.get("last_updated"),
-                content: row.get("content"),
-            })
-            .collect();
-
-        // Get total count if requested
-        let total = if include_total {
-            let count_sql = build_count_sql(&query);
-            let mut count_query_builder = sqlx::query(&count_sql);
-            for value in &bind_values {
-                count_query_builder = count_query_builder.bind(value);
-            }
-            let count_row = count_query_builder.fetch_one(&self.pool).await?;
-            Some(count_row.get::<i64, _>(0))
-        } else {
-            None
-        };
-
-        Ok((observations, total))
-    }
-
-    /// Read a patient by ID (for _include support)
-    pub async fn read_patient(&self, id: &str) -> Result<Patient> {
-        let patient = sqlx::query_as!(
-            Patient,
-            r#"
-            SELECT
-                id, version_id, last_updated,
-                content as "content: Value"
-            FROM patient
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(FhirError::NotFound)?;
-
-        Ok(patient)
-    }
-
-    /// Rollback an observation to a specific version (deletes all versions >= rollback_to_version)
-    /// This is a destructive operation for dev/test purposes only
+    /// Rollback a observation to a specific version (deletes all versions >= rollback_to_version)
     pub async fn rollback(&self, id: &str, rollback_to_version: i32) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
@@ -1222,12 +1386,6 @@ impl ObservationRepository {
 
             let params = extract_observation_search_params(&restored.content);
 
-            // Convert f64 to BigDecimal
-            let value_qty_decimal = params.value_quantity_value.map(|v| {
-                sqlx::types::BigDecimal::try_from(v)
-                    .unwrap_or_else(|_| sqlx::types::BigDecimal::from(0))
-            });
-
             sqlx::query!(
                 r#"
                 UPDATE observation
@@ -1235,42 +1393,144 @@ impl ObservationRepository {
                     version_id = $2,
                     last_updated = $3,
                     content = $4,
-                    status = $5,
-                    category_system = $6,
-                    category_code = $7,
-                    code_system = $8,
-                    code_code = $9,
-                    subject_reference = $10,
-                    encounter_reference = $11,
-                    date_datetime = $12,
-                    date_period_start = $13,
-                    date_period_end = $14,
-                    value_quantity_value = $15,
-                    value_quantity_unit = $16,
-                    value_quantity_system = $17,
-                    value_concept_code = $18,
-                    performer_reference = $19
+                    identifier_system = $5,
+                    identifier_value = $6,
+                    code_system = $7,
+                    code_code = $8,
+                    date_datetime = $9,
+                    date_period_start = $10,
+                    date_period_end = $11,
+                    encounter_reference = $12,
+                    based_on_reference = $13,
+                    category_system = $14,
+                    category_code = $15,
+                    combo_code_system = $16,
+                    combo_code_code = $17,
+                    combo_data_absent_reason_system = $18,
+                    combo_data_absent_reason_code = $19,
+                    combo_value_concept_code = $20,
+                    combo_value_quantity_value = $21,
+                    combo_value_quantity_unit = $22,
+                    combo_value_quantity_system = $23,
+                    component_value_quantity_value = $24,
+                    component_value_quantity_unit = $25,
+                    component_value_quantity_system = $26,
+                    component_value_reference_reference = $27,
+                    data_absent_reason_system = $28,
+                    data_absent_reason_code = $29,
+                    derived_from_reference = $30,
+                    device_reference = $31,
+                    focus_reference = $32,
+                    has_member_reference = $33,
+                    method_system = $34,
+                    method_code = $35,
+                    part_of_reference = $36,
+                    performer_reference = $37,
+                    specimen_reference = $38,
+                    status = $39,
+                    subject_reference = $40,
+                    value_concept_code = $41,
+                    value_date_datetime = $42,
+                    value_date_period_start = $43,
+                    value_date_period_end = $44,
+                    value_quantity_value = $45,
+                    value_quantity_unit = $46,
+                    value_quantity_system = $47,
+                    value_reference_reference = $48
                 WHERE id = $1
                 "#,
                 id,
                 new_version,
                 restored.last_updated,
                 &restored.content,
-                params.status,
-                params.category_system.is_empty().then_some(None).unwrap_or(Some(&params.category_system[..])),
-                params.category_code.is_empty().then_some(None).unwrap_or(Some(&params.category_code[..])),
-                params.code_system,
-                params.code_code,
-                params.subject_reference,
+            params
+                .identifier_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_system[..])),
+            params
+                .identifier_value
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.identifier_value[..])),
+            params.code_system,
+            params.code_code,
+            params.date_datetime,
+            params.date_period_start,
+            params.date_period_end,
             params.encounter_reference,
-                params.date_datetime,
-                params.date_period_start,
-                params.date_period_end,
-                value_qty_decimal,
-                params.value_quantity_unit,
-                params.value_quantity_system,
-                params.value_concept_code,
-                params.performer_reference.is_empty().then_some(None).unwrap_or(Some(&params.performer_reference[..])),
+            params
+                .based_on_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.based_on_reference[..])),
+            params
+                .category_system
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_system[..])),
+            params
+                .category_code
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.category_code[..])),
+            params.combo_code_system,
+            params.combo_code_code,
+            params.combo_data_absent_reason_system,
+            params.combo_data_absent_reason_code,
+            params.combo_value_concept_code,
+            params.combo_value_quantity_value,
+            params.combo_value_quantity_unit,
+            params.combo_value_quantity_system,
+            params.component_value_quantity_value,
+            params.component_value_quantity_unit,
+            params.component_value_quantity_system,
+            params
+                .component_value_reference_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.component_value_reference_reference[..])),
+            params.data_absent_reason_system,
+            params.data_absent_reason_code,
+            params
+                .derived_from_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.derived_from_reference[..])),
+            params.device_reference,
+            params
+                .focus_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.focus_reference[..])),
+            params
+                .has_member_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.has_member_reference[..])),
+            params.method_system,
+            params.method_code,
+            params
+                .part_of_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.part_of_reference[..])),
+            params
+                .performer_reference
+                .is_empty()
+                .then_some(None)
+                .unwrap_or(Some(&params.performer_reference[..])),
+            params.specimen_reference,
+            params.status,
+            params.subject_reference,
+            params.value_concept_code,
+            params.value_date_datetime,
+            params.value_date_period_start,
+            params.value_date_period_end,
+            params.value_quantity_value,
+            params.value_quantity_unit,
+            params.value_quantity_system,
+            params.value_reference_reference
             )
             .execute(&mut *tx)
             .await?;
@@ -1292,242 +1552,421 @@ impl ObservationRepository {
         Ok(())
     }
 
+
+    /// Get type-level history - all versions of all observations
+    pub async fn type_history(&self, count: Option<i64>) -> Result<Vec<ObservationHistory>> {
+        // Query all history records with optional limit
+        let mut history = if let Some(limit) = count {
+            sqlx::query_as!(
+                ObservationHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM observation_history
+                ORDER BY history_timestamp DESC
+                LIMIT $1
+                "#,
+                limit
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as!(
+                ObservationHistory,
+                r#"
+                SELECT
+                    id, version_id, last_updated,
+                    content as "content: Value",
+                    history_operation, history_timestamp
+                FROM observation_history
+                ORDER BY history_timestamp DESC
+                "#
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        // Also get all current versions
+        let current_resources = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM observation
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Add current versions to history if not already present and not at limit
+        for current in current_resources {
+            // Check if we're at the limit
+            let at_limit = count.map(|c| history.len() >= c as usize).unwrap_or(false);
+
+            if at_limit {
+                break;
+            }
+
+            let current_version_exists = history
+                .iter()
+                .any(|h| h.id == current.id && h.version_id == current.version_id);
+
+            if !current_version_exists {
+                let current_as_history = ObservationHistory {
+                    id: current.id,
+                    version_id: current.version_id,
+                    last_updated: current.last_updated,
+                    content: current.content,
+                    history_operation: if current.version_id == 1 {
+                        "CREATE".to_string()
+                    } else {
+                        "UPDATE".to_string()
+                    },
+                    history_timestamp: current.last_updated,
+                };
+                history.push(current_as_history);
+            }
+        }
+
+        // Sort by timestamp descending
+        history.sort_by(|a, b| b.history_timestamp.cmp(&a.history_timestamp));
+
+        // Apply final truncation if needed (after merging and sorting)
+        if let Some(limit) = count {
+            history.truncate(limit as usize);
+        }
+
+        Ok(history)
+    }
+
+
     /// Purge all observation history records - FOR TESTING ONLY
     /// This removes ALL history records to ensure test isolation
     /// Note: This does NOT delete current (non-deleted) observation records
     pub async fn purge(&self) -> Result<()> {
         // Delete all history records for test isolation
-        // This ensures no constraint violations on repeated test runs
         sqlx::query!("DELETE FROM observation_history")
             .execute(&self.pool)
             .await?;
 
         Ok(())
     }
-}
 
-fn build_count_sql(query: &SearchQuery) -> String {
-    let mut sql = String::from("SELECT COUNT(*) FROM observation WHERE 1=1");
-    let mut bind_count = 0;
 
-    // Track JOINs for chained searches (same as main search)
-    let mut joins = Vec::new();
-    let mut join_counter = 0;
+    /// Search for observations based on FHIR search parameters
+    pub async fn search(
+        &self,
+        params: &HashMap<String, String>,
+        include_total: bool,
+    ) -> Result<(Vec<Observation>, Option<i64>)> {
+        let query = SearchQuery::from_params(params)?;
 
-    for condition in &query.conditions {
-        match condition {
-            SearchCondition::ObservationStatus(_status) => {
-                bind_count += 1;
-                sql.push_str(&format!(" AND observation.status = ${}", bind_count));
-            }
-            SearchCondition::ObservationCode { system, code: _ } => {
-                if system.is_some() {
-                    bind_count += 2;
-                    sql.push_str(&format!(
-                        " AND observation.code_system = ${} AND observation.code_code = ${}",
-                        bind_count - 1,
-                        bind_count
-                    ));
-                } else {
-                    bind_count += 1;
-                    sql.push_str(&format!(" AND observation.code_code = ${}", bind_count));
-                }
-            }
-            SearchCondition::ObservationCategory(_category) => {
-                bind_count += 1;
-                sql.push_str(&format!(
-                    " AND ${} = ANY(observation.category_code)",
-                    bind_count
-                ));
-            }
-            SearchCondition::ObservationPatient(_patient_id) => {
-                bind_count += 1;
-                sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
-            }
-            SearchCondition::ObservationSubject(_subject_ref) => {
-                bind_count += 1;
-                sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_count));
-            }
-            SearchCondition::ObservationDate(comparison) => {
-                bind_count += 1;
-                let op = match comparison.prefix {
-                    crate::search::DatePrefix::Eq => "=",
-                    crate::search::DatePrefix::Ne => "!=",
-                    crate::search::DatePrefix::Gt => ">",
-                    crate::search::DatePrefix::Lt => "<",
-                    crate::search::DatePrefix::Ge => ">=",
-                    crate::search::DatePrefix::Le => "<=",
-                };
-                sql.push_str(&format!(
-                    " AND observation.date_datetime {} ${}::timestamptz",
-                    op, bind_count
-                ));
-            }
-            SearchCondition::ObservationCodeValueQuantity(composite) => {
-                // Composite search in count query
-                let op = match composite.value_prefix {
-                    crate::search::QuantityPrefix::Eq => "=",
-                    crate::search::QuantityPrefix::Ne => "!=",
-                    crate::search::QuantityPrefix::Gt => ">",
-                    crate::search::QuantityPrefix::Lt => "<",
-                    crate::search::QuantityPrefix::Ge => ">=",
-                    crate::search::QuantityPrefix::Le => "<=",
-                };
-                if composite.code_system.is_some() {
-                    bind_count += 3;
-                    sql.push_str(&format!(
-                        " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
-                        bind_count - 2, bind_count - 1, op, bind_count
-                    ));
-                } else {
-                    bind_count += 2;
-                    sql.push_str(&format!(
-                        " AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric",
-                        bind_count - 1, op, bind_count
-                    ));
-                }
-            }
-            SearchCondition::ObservationCodeValueConcept(composite) => {
-                // Composite search in count query
-                if composite.code_system.is_some() {
-                    bind_count += 3;
-                    sql.push_str(&format!(
-                        " AND observation.code_system = ${} AND observation.code_code = ${} AND observation.value_concept_code = ${}",
-                        bind_count - 2, bind_count - 1, bind_count
-                    ));
-                } else {
-                    bind_count += 2;
-                    sql.push_str(&format!(
-                        " AND observation.code_code = ${} AND observation.value_concept_code = ${}",
-                        bind_count - 1, bind_count
-                    ));
-                }
-            }
-            SearchCondition::ObservationComponentCodeValueQuantity(composite) => {
-                // Component composite search in count query
-                let op = match composite.value_prefix {
-                    crate::search::QuantityPrefix::Eq => "=",
-                    crate::search::QuantityPrefix::Ne => "!=",
-                    crate::search::QuantityPrefix::Gt => ">",
-                    crate::search::QuantityPrefix::Lt => "<",
-                    crate::search::QuantityPrefix::Ge => ">=",
-                    crate::search::QuantityPrefix::Le => "<=",
-                };
+        let mut sql = String::from(
+            r#"SELECT observation.id, observation.version_id, observation.last_updated, observation.content
+               FROM observation WHERE 1=1"#,
+        );
 
-                if composite.component_code_system.is_some() {
-                    bind_count += 3;
-                    sql.push_str(&format!(
-                        " AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
-                            WHERE comp->'code'->'coding'->0->>'system' = ${}
-                            AND comp->'code'->'coding'->0->>'code' = ${}
-                            AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
-                        )",
-                        bind_count - 2, bind_count - 1, op, bind_count
-                    ));
-                } else {
-                    bind_count += 2;
-                    sql.push_str(&format!(
-                        " AND EXISTS (
-                            SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp
-                            WHERE comp->'code'->'coding'->0->>'code' = ${}
-                            AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric
-                        )",
-                        bind_count - 1, op, bind_count
-                    ));
-                }
-            }
-            SearchCondition::ForwardChain(chain) => {
-                // Forward chaining in count query - use same logic as main search
+        let mut bind_values: Vec<String> = Vec::new();
 
-                // Determine target table and reference column for the first hop
-                let (target_table, reference_column) = match chain.reference_param.as_str() {
-                    "subject" if chain.resource_type.as_deref() == Some("Patient") => {
-                        ("patient", "observation.subject_reference")
-                    }
-                    "subject" => {
-                        // Generic subject - could be various types, default to patient
-                        ("patient", "observation.subject_reference")
-                    }
-                    "patient" => ("patient", "observation.subject_reference"),
-                    _ => {
-                        tracing::warn!(
-                            "Unsupported chained reference in observation count: {}",
-                            chain.reference_param
-                        );
-                        continue;
-                    }
-                };
-
-                // Create the first JOIN to the target resource
-                let alias = format!("chain_{}", join_counter);
-                join_counter += 1;
-
-                let reference_type = capitalize_first(target_table);
-                let join_sql = format!(
-                    "INNER JOIN {} AS {} ON {}.id::text IN (SELECT substring(ref from '{}/'||'(.*)') FROM unnest(ARRAY[{}]) AS refs(ref) WHERE ref LIKE '{}/%')",
-                    target_table,
-                    alias,
-                    alias,
-                    reference_type,
-                    reference_column,
-                    reference_type
-                );
-                joins.push(join_sql);
-
-                // Now recursively build the rest of the chain starting from the target resource
-                // Need to determine the reference field for the next level if the chain continues
-                let next_reference_field = if chain.chain.len() > 1 {
-                    // There's at least one more reference in the chain
-                    // Get the reference column for the first element of the remaining chain
-                    match get_reference_column(target_table, &chain.chain[0].param) {
-                        Ok(col) => format!("{}.{}", alias, col),
-                        Err(_) => String::new(), // Will be handled by recursive call
-                    }
-                } else {
-                    // Only one element left in chain - it's the final search parameter
-                    String::new()
-                };
-
-                match build_chain_joins(
-                    &chain.chain,
-                    target_table,
-                    &alias,
-                    &next_reference_field,
-                    &mut join_counter,
-                    &mut bind_count,
-                    &chain.search_value,
-                ) {
-                    Ok((chain_joins, chain_where, _chain_binds)) => {
-                        joins.extend(chain_joins);
-                        if let Some(where_clause) = chain_where {
-                            sql.push_str(&format!(" AND {}", where_clause));
+        // Build WHERE clause from search parameters
+        for param in &query.params {
+            match param.name.as_str() {
+                "identifier" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(observation.identifier_system, observation.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${})",
+                                bind_idx, bind_idx + 1
+                            ));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
                         }
-                        // Note: bind_values are not used in count_sql since we use the same bind_values from main search
-                    }
-                    Err(e) => {
-                        tracing::error!("Error building chain joins in count: {}", e);
-                        continue;
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.identifier_value) AS iv WHERE iv = ${})", bind_idx));
+                        bind_values.push(param.value.clone());
                     }
                 }
-            }
-            _ => {
-                // Other search conditions not yet mapped for observations
-                tracing::debug!("Unsupported search condition in observation count: {:?}", condition);
+                "code" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.code_system = ${} AND observation.code_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.code_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "date" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let op = match param.prefix.as_deref() {
+                        Some("eq") | None => "=",
+                        Some("ne") => "!=",
+                        Some("gt") => ">",
+                        Some("lt") => "<",
+                        Some("ge") => ">=",
+                        Some("le") => "<=",
+                        _ => "=",
+                    };
+                    sql.push_str(&format!(" AND observation.date {} ${}", op, bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "encounter" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.encounter_reference = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "based-on" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.based_on_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "category" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.category_system = ${} AND observation.category_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.category_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "combo-code" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.combo_code_system = ${} AND observation.combo_code_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.combo_code_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "combo-data-absent-reason" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.combo_data_absent_reason_system = ${} AND observation.combo_data_absent_reason_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.combo_data_absent_reason_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "combo-value-concept" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.combo_value_concept_system = ${} AND observation.combo_value_concept_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.combo_value_concept_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "component-value-reference" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.component_value_reference_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "data-absent-reason" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.data_absent_reason_system = ${} AND observation.data_absent_reason_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.data_absent_reason_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "derived-from" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.derived_from_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "device" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.device_reference = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "focus" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.focus_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "has-member" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.has_member_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "method" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.method_system = ${} AND observation.method_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.method_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "part-of" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.part_of_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "performer" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.performer_reference) AS ref WHERE ref = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "specimen" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.specimen_reference = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "status" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.status = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "subject" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "value-concept" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<&str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&format!(" AND observation.value_concept_system = ${} AND observation.value_concept_code = ${}", bind_idx, bind_idx + 1));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&format!(" AND observation.value_concept_code = ${}", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+                "value-date" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let op = match param.prefix.as_deref() {
+                        Some("eq") | None => "=",
+                        Some("ne") => "!=",
+                        Some("gt") => ">",
+                        Some("lt") => "<",
+                        Some("ge") => ">=",
+                        Some("le") => "<=",
+                        _ => "=",
+                    };
+                    sql.push_str(&format!(" AND observation.value_date {} ${}", op, bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "value-reference" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND observation.value_reference_reference = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                _ => {
+                    // Unknown parameter - ignore per FHIR spec
+                    tracing::warn!("Unknown search parameter for Observation: {}", param.name);
+                }
             }
         }
+
+        // Add sorting
+        if !query.sort.is_empty() {
+            sql.push_str(" ORDER BY ");
+            for (i, sort) in query.sort.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(", ");
+                }
+                sql.push_str(&sort.field);
+                match sort.direction {
+                    SortDirection::Ascending => sql.push_str(" ASC"),
+                    SortDirection::Descending => sql.push_str(" DESC"),
+                }
+            }
+        }
+
+        // Add pagination
+        sql.push_str(&format!(" LIMIT {} OFFSET {}", query.limit, query.offset));
+
+        // Execute query
+        let mut query_builder = sqlx::query_as::<_, Observation>(&sql);
+        for value in &bind_values {
+            query_builder = query_builder.bind(value);
+        }
+
+        let resources = query_builder
+            .fetch_all(&self.pool)
+            .await?;
+
+        // Get total count if requested
+        let total = if include_total {
+            let count_sql = sql.replace(
+                &format!("SELECT observation.id, observation.version_id, observation.last_updated, observation.content\n               FROM observation"),
+                "SELECT COUNT(*) FROM observation"
+            ).split(" ORDER BY").next().unwrap().to_string();
+
+            let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql);
+            for value in &bind_values {
+                count_query = count_query.bind(value);
+            }
+            Some(count_query.fetch_one(&self.pool).await?)
+        } else {
+            None
+        };
+
+        Ok((resources, total))
     }
 
-    // Add JOINs before WHERE clause (same as main search)
-    if !joins.is_empty() {
-        // Insert joins after FROM clause
-        let where_pos = sql
-            .find("WHERE")
-            .expect("WHERE clause not found in observation count SQL");
-        let before_where = &sql[..where_pos];
-        let after_where = &sql[where_pos..];
-        sql = format!("{} {} {}", before_where, joins.join(" "), after_where);
+    /// Read a patient by ID (for chaining support)
+    pub async fn read_patient(&self, id: &str) -> Result<Patient> {
+        let patient = sqlx::query_as!(
+            Patient,
+            r#"SELECT id, version_id, last_updated, content as "content: Value" FROM patient WHERE id = $1"#,
+            id
+        ).fetch_optional(&self.pool).await?.ok_or(FhirError::NotFound)?;
+        Ok(patient)
     }
 
-    sql
 }
