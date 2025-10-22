@@ -1,23 +1,20 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     Json,
 };
+use percent_encoding::percent_decode_str;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::api::content_negotiation::{
-    extract_practitioner_name, preferred_format_with_query, PractitionerEditTemplate,
-    PractitionerListTemplate, PractitionerRow, ResponseFormat,
-};
+use crate::api::content_negotiation::preferred_format_with_query;
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::extractors::FhirJson;
 use crate::repository::PractitionerRepository;
 use crate::validation::validate_fhir_id;
-use askama::Template;
 
 pub type SharedPractitionerRepo = Arc<PractitionerRepository>;
 
@@ -37,27 +34,11 @@ pub async fn search_practitioners(
     let mut entries = Vec::new();
 
     // Add practitioner entries with id and meta fields
-    for p in &practitioners {
+    for r in &practitioners {
         entries.push(format!(
             r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&p.content)?
+            serde_json::to_string(&r.content)?
         ));
-    }
-
-    // Handle _revinclude parameter for Patient references
-    if let Some(revinclude_param) = params.get("_revinclude") {
-        if revinclude_param == "Patient:general-practitioner" {
-            // For each practitioner, find patients that reference it
-            for practitioner in &practitioners {
-                let patients = repo.find_patients_by_practitioner(&practitioner.id).await?;
-                for patient in patients {
-                    entries.push(format!(
-                        r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&patient.content)?
-                    ));
-                }
-            }
-        }
     }
 
     // Build pagination links
@@ -124,34 +105,11 @@ pub async fn search_practitioners(
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
+    // For now, only support JSON and XML (HTML rendering requires templates)
     match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Html => {
-            // Convert practitioners to HTML table rows
-            let practitioner_rows: Vec<PractitionerRow> = practitioners
-                .iter()
-                .map(|p| PractitionerRow {
-                    id: p.id.clone(),
-                    version_id: p.version_id.to_string(),
-                    name: extract_practitioner_name(&p.content),
-                    active: p
-                        .content
-                        .get("active")
-                        .and_then(|a| a.as_bool())
-                        .unwrap_or(true),
-                    last_updated: p.last_updated.to_rfc3339(),
-                })
-                .collect();
-
-            let template = PractitionerListTemplate {
-                practitioners: practitioner_rows,
-                total: total.map(|t| t as usize).unwrap_or(practitioners.len()),
-                current_url: "/fhir/Practitioner?".to_string(),
-            };
-
-            Ok(Html(template.render().unwrap()).into_response())
-        }
-        ResponseFormat::Json => Ok(Json(bundle).into_response()),
-        ResponseFormat::Xml => {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
+        crate::api::content_negotiation::ResponseFormat::Xml => {
             let xml_string = json_to_xml(&bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -163,11 +121,56 @@ pub async fn search_practitioners(
     }
 }
 
+
 /// Create a new practitioner
 pub async fn create_practitioner(
     State(repo): State<SharedPractitionerRepo>,
+    headers: HeaderMap,
     FhirJson(content): FhirJson<Value>,
 ) -> Result<(StatusCode, HeaderMap, Json<Value>)> {
+    // Check for If-None-Exist header (conditional create)
+    if let Some(if_none_exist) = headers.get("if-none-exist") {
+        let query_string = if_none_exist.to_str()
+            .map_err(|_| crate::error::FhirError::BadRequest("Invalid If-None-Exist header".to_string()))?;
+
+        // Parse query string into HashMap
+        let mut search_params = HashMap::new();
+        for pair in query_string.split('&') {
+            if let Some((key, value)) = pair.split_once('=') {
+                // URL decode the value - handle all percent-encoded characters
+                let with_spaces = value.replace('+', " ");
+                let decoded = percent_decode_str(&with_spaces)
+                    .decode_utf8_lossy()
+                    .into_owned();
+
+                // No need to split identifier - let the search parser handle it
+                search_params.insert(key.to_string(), decoded);
+            }
+        }
+
+        // Search for existing resource
+        let (existing, _) = repo.search(&search_params, false).await?;
+
+        if !existing.is_empty() {
+            // Check for multiple matches - return 412 Precondition Failed per FHIR spec
+            if existing.len() > 1 {
+                return Err(crate::error::FhirError::PreconditionFailed(
+                    format!("Multiple matches found ({} resources)", existing.len())
+                ));
+            }
+
+            // Found exactly one existing resource - return 200 with existing resource
+            let existing_practitioner = &existing[0];
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(
+                axum::http::header::LOCATION,
+                format!("/fhir/Practitioner/{}", existing_practitioner.id).parse().unwrap()
+            );
+            return Ok((StatusCode::OK, response_headers, Json(existing_practitioner.content.clone())));
+        }
+        // No match found - continue with create
+    }
+
     let practitioner = repo.create(content).await?;
 
     // Build Location header per FHIR spec
@@ -181,6 +184,7 @@ pub async fn create_practitioner(
     Ok((StatusCode::CREATED, response_headers, Json(practitioner.content)))
 }
 
+
 /// Read a practitioner by ID
 pub async fn read_practitioner(
     State(repo): State<SharedPractitionerRepo>,
@@ -191,68 +195,32 @@ pub async fn read_practitioner(
     // Validate FHIR ID format
     validate_fhir_id(&id)?;
 
-    // Try to read the practitioner - if it doesn't exist, return empty template for new resource
-    match repo.read(&id).await {
-        Ok(practitioner) => {
-            // Build ETag header with version
-            let etag = format!("W/\"{}\"", practitioner.version_id);
+    let practitioner = repo.read(&id).await?;
 
-            match preferred_format_with_query(&uri, &headers) {
-                ResponseFormat::Html => {
-                    let template = PractitionerEditTemplate {
-                        id: id.clone(),
-                        resource_json: serde_json::to_string(&practitioner.content)?,
-                    };
-                    Ok(Html(template.render().unwrap()).into_response())
-                }
-                ResponseFormat::Json => {
-                    let mut response_headers = HeaderMap::new();
-                    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
-                    Ok((response_headers, Json(practitioner.content)).into_response())
-                }
-                ResponseFormat::Xml => {
-                    let xml_string = json_to_xml(&practitioner.content)
-                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
-                    Ok((
-                        [
-                            (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
-                            (axum::http::header::ETAG, &etag),
-                        ],
-                        xml_string
-                    ).into_response())
-                }
-            }
+    // Build ETag header with version
+    let etag = format!("W/\"{}\"", practitioner.version_id);
+
+    match preferred_format_with_query(&uri, &headers) {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => {
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+            Ok((response_headers, Json(practitioner.content)).into_response())
         }
-        Err(crate::error::FhirError::NotFound) => {
-            // For HTML requests, return empty template for creating new resource
-            // For JSON/XML (FHIR API), return 404 as per FHIR spec
-            match preferred_format_with_query(&uri, &headers) {
-                ResponseFormat::Html => {
-                    let empty_practitioner = serde_json::json!({
-                        "resourceType": "Practitioner",
-                        "id": id.clone(),
-                        "active": true,
-                        "name": [],
-                        "telecom": [],
-                        "address": [],
-                        "identifier": [],
-                        "qualification": []
-                    });
-                    let template = PractitionerEditTemplate {
-                        id: id.clone(),
-                        resource_json: serde_json::to_string(&empty_practitioner)?,
-                    };
-                    Ok(Html(template.render().unwrap()).into_response())
-                }
-                ResponseFormat::Json | ResponseFormat::Xml => {
-                    // For FHIR API, return 404 Not Found
-                    Err(crate::error::FhirError::NotFound)
-                }
-            }
+        crate::api::content_negotiation::ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&practitioner.content)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [
+                    (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
+                    (axum::http::header::ETAG, &etag),
+                ],
+                xml_string
+            ).into_response())
         }
-        Err(e) => Err(e),
     }
 }
+
 
 /// Update a practitioner (JSON) - Uses upsert semantics per FHIR spec
 pub async fn update_practitioner(
@@ -310,6 +278,7 @@ pub async fn update_practitioner(
     Ok((status, response_headers, Json(practitioner.content)))
 }
 
+
 /// Delete a practitioner
 pub async fn delete_practitioner(
     State(repo): State<SharedPractitionerRepo>,
@@ -321,6 +290,7 @@ pub async fn delete_practitioner(
     repo.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
 
 /// Get practitioner history
 pub async fn get_practitioner_history(
@@ -365,8 +335,9 @@ pub async fn get_practitioner_history(
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
     match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Json | ResponseFormat::Html => Ok(Json(bundle).into_response()),
-        ResponseFormat::Xml => {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
+        crate::api::content_negotiation::ResponseFormat::Xml => {
             let xml_string = json_to_xml(&bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -376,6 +347,7 @@ pub async fn get_practitioner_history(
         }
     }
 }
+
 
 /// Get specific version of a practitioner
 pub async fn read_practitioner_version(
@@ -394,3 +366,56 @@ pub async fn read_practitioner_version(
 
     Ok((response_headers, Json(practitioner.content)))
 }
+
+
+/// Update a practitioner via form submission
+pub async fn update_practitioner_form(
+    State(_repo): State<SharedPractitionerRepo>,
+    Path(_id): Path<String>,
+    _headers: HeaderMap,
+    _body: axum::body::Bytes,
+) -> Result<StatusCode> {
+    // TODO: Implement HTML form handling when UI is ready
+    Err(crate::error::FhirError::BadRequest(
+        "HTML form submission not yet implemented".to_string()
+    ))
+}
+
+/// Delete multiple practitioners (for testing)
+pub async fn delete_practitioners(
+    State(repo): State<SharedPractitionerRepo>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<StatusCode> {
+    // Check if _id parameter is present for batch delete
+    if let Some(id_param) = params.get("_id") {
+        // Split comma-separated IDs
+        let ids: Vec<&str> = id_param.split(',').collect();
+
+        // Delete each practitioner
+        for id_str in ids {
+            repo.delete(id_str.trim()).await?;
+        }
+    } else {
+        // Delete all practitioners matching the search criteria
+        let (practitioners, _) = repo.search(&params, false).await?;
+
+        for practitioner in practitioners {
+            repo.delete(&practitioner.id).await?;
+        }
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Rollback a practitioner to a specific version
+pub async fn rollback_practitioner(
+    State(repo): State<SharedPractitionerRepo>,
+    Path((id, version)): Path<(String, i32)>,
+) -> Result<StatusCode> {
+    // Validate FHIR ID format
+    validate_fhir_id(&id)?;
+
+    repo.rollback(&id, version).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+

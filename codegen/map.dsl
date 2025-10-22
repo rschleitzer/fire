@@ -7,6 +7,7 @@
 <!ENTITY migration      SYSTEM "migration.scm">
 <!ENTITY structs        SYSTEM "structs.scm">
 <!ENTITY repositories   SYSTEM "repositories.scm">
+<!ENTITY handlers       SYSTEM "handlers.scm">
 <!ENTITY rules          SYSTEM "rules.scm">
 
 ]>
@@ -17,4 +18,5 @@
 &migration;
 &structs;
 &repositories;
+&handlers;
 &rules;

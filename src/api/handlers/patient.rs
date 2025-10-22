@@ -1,34 +1,126 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Redirect, Response},
+    response::{IntoResponse, Response},
     Json,
 };
-use serde::Deserialize;
+use percent_encoding::percent_decode_str;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::api::content_negotiation::{*, preferred_format_with_query};
+use crate::api::content_negotiation::preferred_format_with_query;
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::extractors::FhirJson;
 use crate::repository::PatientRepository;
 use crate::validation::validate_fhir_id;
-use askama::Template;
-use percent_encoding::percent_decode_str;
-
-#[derive(Debug, Deserialize)]
-pub struct PatientFormData {
-    pub family: String,
-    pub given: String,
-    pub gender: String,
-    #[serde(rename = "birthDate")]
-    pub birth_date: String,
-    pub active: String,
-}
 
 pub type SharedPatientRepo = Arc<PatientRepository>;
+
+/// Search patients
+pub async fn search_patients(
+    State(repo): State<SharedPatientRepo>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Result<Response> {
+    // Always include total in search results per FHIR R5 spec
+    let include_total = params.get("_total").map(|t| t != "none").unwrap_or(true);
+
+    let (patients, total) = repo.search(&params, include_total).await?;
+
+    // Build Bundle using efficient string concatenation
+    let mut entries = Vec::new();
+
+    // Add patient entries with id and meta fields
+    for r in &patients {
+        entries.push(format!(
+            r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
+            serde_json::to_string(&r.content)?
+        ));
+    }
+
+    // Build pagination links
+    let base_url = format!("http://localhost:3000{}", uri.path());
+    let query_params = uri.query().unwrap_or("");
+
+    // Parse _count and _offset from params
+    let count = params
+        .get("_count")
+        .and_then(|c| c.parse::<i64>().ok())
+        .unwrap_or(50);
+    let offset = params
+        .get("_offset")
+        .and_then(|o| o.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    // Build self link
+    let self_link = if query_params.is_empty() {
+        base_url.clone()
+    } else {
+        format!("{}?{}", base_url, query_params)
+    };
+
+    // Build next link if there are more results
+    let next_link = if let Some(total_count) = total {
+        if offset + count < total_count {
+            // Build next URL with updated offset
+            let next_offset = offset + count;
+            let mut next_params: Vec<String> = params
+                .iter()
+                .filter(|(k, _)| k.as_str() != "_offset")
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            next_params.push(format!("_offset={}", next_offset));
+            Some(format!("{}?{}", base_url, next_params.join("&")))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build links array
+    let mut links = vec![format!(r#"{{"relation":"self","url":"{}"}}"#, self_link)];
+    if let Some(next_url) = next_link {
+        links.push(format!(r#"{{"relation":"next","url":"{}"}}"#, next_url));
+    }
+    let links_str = links.join(",");
+
+    // Build final Bundle JSON string
+    let entries_str = entries.join(",");
+    let bundle_str = if let Some(total_count) = total {
+        format!(
+            r#"{{"resourceType":"Bundle","type":"searchset","total":{},"link":[{}],"entry":[{}]}}"#,
+            total_count, links_str, entries_str
+        )
+    } else {
+        format!(
+            r#"{{"resourceType":"Bundle","type":"searchset","link":[{}],"entry":[{}]}}"#,
+            links_str, entries_str
+        )
+    };
+
+    // Parse string back to Value for Json response
+    let bundle: Value = serde_json::from_str(&bundle_str)?;
+
+    // For now, only support JSON and XML (HTML rendering requires templates)
+    match preferred_format_with_query(&uri, &headers) {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
+        crate::api::content_negotiation::ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string,
+            )
+                .into_response())
+        }
+    }
+}
+
 
 /// Create a new patient
 pub async fn create_patient(
@@ -51,15 +143,7 @@ pub async fn create_patient(
                     .decode_utf8_lossy()
                     .into_owned();
 
-                // Special handling for identifier parameter: system|value format
-                if key == "identifier" && decoded.contains('|') {
-                    if let Some((system, val)) = decoded.split_once('|') {
-                        search_params.insert("identifier_system".to_string(), system.to_string());
-                        search_params.insert("identifier_value".to_string(), val.to_string());
-                        continue;
-                    }
-                }
-
+                // No need to split identifier - let the search parser handle it
                 search_params.insert(key.to_string(), decoded);
             }
         }
@@ -100,6 +184,7 @@ pub async fn create_patient(
     Ok((StatusCode::CREATED, response_headers, Json(patient.content)))
 }
 
+
 /// Read a patient by ID
 pub async fn read_patient(
     State(repo): State<SharedPatientRepo>,
@@ -110,69 +195,34 @@ pub async fn read_patient(
     // Validate FHIR ID format
     validate_fhir_id(&id)?;
 
-    // Try to read the patient - if it doesn't exist, return empty template for new resource
-    match repo.read(&id).await {
-        Ok(patient) => {
-            // Build ETag header with version
-            let etag = format!("W/\"{}\"", patient.version_id);
+    let patient = repo.read(&id).await?;
 
-            match preferred_format_with_query(&uri, &headers) {
-                ResponseFormat::Html => {
-                    let template = PatientEditTemplate {
-                        id: id.clone(),
-                        resource_json: serde_json::to_string(&patient.content)?,
-                    };
-                    Ok(Html(template.render().unwrap()).into_response())
-                }
-                ResponseFormat::Json => {
-                    let mut response_headers = HeaderMap::new();
-                    response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
-                    Ok((response_headers, Json(patient.content)).into_response())
-                }
-                ResponseFormat::Xml => {
-                    let xml_string = json_to_xml(&patient.content)
-                        .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
-                    Ok((
-                        [
-                            (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
-                            (axum::http::header::ETAG, &etag),
-                        ],
-                        xml_string
-                    ).into_response())
-                }
-            }
+    // Build ETag header with version
+    let etag = format!("W/\"{}\"", patient.version_id);
+
+    match preferred_format_with_query(&uri, &headers) {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => {
+            let mut response_headers = HeaderMap::new();
+            response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
+            Ok((response_headers, Json(patient.content)).into_response())
         }
-        Err(crate::error::FhirError::NotFound) => {
-            // For HTML requests, return empty template for creating new resource
-            // For JSON/XML (FHIR API), return 404 as per FHIR spec
-            match preferred_format_with_query(&uri, &headers) {
-                ResponseFormat::Html => {
-                    let empty_patient = serde_json::json!({
-                        "resourceType": "Patient",
-                        "id": id.clone(),
-                        "active": true,
-                        "name": [],
-                        "telecom": [],
-                        "address": [],
-                        "identifier": []
-                    });
-                    let template = PatientEditTemplate {
-                        id: id.clone(),
-                        resource_json: serde_json::to_string(&empty_patient)?,
-                    };
-                    Ok(Html(template.render().unwrap()).into_response())
-                }
-                ResponseFormat::Json | ResponseFormat::Xml => {
-                    // For FHIR API, return 404 Not Found
-                    Err(crate::error::FhirError::NotFound)
-                }
-            }
+        crate::api::content_negotiation::ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&patient.content)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [
+                    (axum::http::header::CONTENT_TYPE, "application/fhir+xml"),
+                    (axum::http::header::ETAG, &etag),
+                ],
+                xml_string
+            ).into_response())
         }
-        Err(e) => Err(e),
     }
 }
 
-/// Update a patient (JSON) - Uses upsert semantics per FHIR spec (create if not exists)
+
+/// Update a patient (JSON) - Uses upsert semantics per FHIR spec
 pub async fn update_patient(
     State(repo): State<SharedPatientRepo>,
     Path(id): Path<String>,
@@ -228,52 +278,6 @@ pub async fn update_patient(
     Ok((status, response_headers, Json(patient.content)))
 }
 
-/// Update a patient (HTML form) - Uses upsert semantics per FHIR spec
-/// Note: For FHIR API (JSON), POST to instance endpoint returns 400 Bad Request
-pub async fn update_patient_form(
-    State(repo): State<SharedPatientRepo>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Result<impl IntoResponse> {
-    // Check content type to determine if this is a FHIR API request or HTML form
-    let content_type = headers
-        .get(axum::http::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    // For FHIR API requests (application/fhir+json or application/json), POST to instance is not allowed
-    if content_type.contains("application/fhir+json") || content_type.contains("application/json") {
-        return Err(crate::error::FhirError::BadRequest(
-            "POST to instance endpoint not allowed. Use PUT for updates.".to_string()
-        ));
-    }
-
-    // Validate FHIR ID format
-    validate_fhir_id(&id)?;
-
-    // Parse form data
-    let body_str = String::from_utf8_lossy(&body);
-    let form_data: PatientFormData = serde_urlencoded::from_str(&body_str)
-        .map_err(|e| crate::error::FhirError::BadRequest(format!("Invalid form data: {}", e)))?;
-
-    // Convert form data to FHIR JSON
-    let content = serde_json::json!({
-        "resourceType": "Patient",
-        "name": [{
-            "family": form_data.family,
-            "given": [form_data.given]
-        }],
-        "gender": form_data.gender,
-        "birthDate": form_data.birth_date,
-        "active": form_data.active == "true"
-    });
-
-    repo.upsert(&id, content).await?;
-
-    // Redirect back to the patient detail page
-    Ok(Redirect::to(&format!("/fhir/Patient/{}", id)))
-}
 
 /// Delete a patient
 pub async fn delete_patient(
@@ -287,196 +291,6 @@ pub async fn delete_patient(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Search patients
-pub async fn search_patients(
-    State(repo): State<SharedPatientRepo>,
-    Query(params): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-    uri: axum::http::Uri,
-) -> Result<Response> {
-    // Always include total in search results per FHIR R5 spec
-    // (can be disabled with _total=none in the future if needed)
-    let include_total = params
-        .get("_total")
-        .map(|t| t != "none")
-        .unwrap_or(true);
-
-    let (patients, total) = repo.search(&params, include_total).await?;
-
-    // Build Bundle using efficient string concatenation
-    let mut entries = Vec::new();
-
-    // Add patient entries with id and meta fields
-    for p in &patients {
-        entries.push(format!(
-            r#"{{"resource":{},"search":{{"mode":"match"}}}}"#,
-            serde_json::to_string(&p.content)?
-        ));
-    }
-
-    // Handle _include parameter for Practitioner references
-    if let Some(include_param) = params.get("_include") {
-        if include_param == "Patient:general-practitioner" {
-            // Collect all unique practitioner IDs from all patients
-            let mut practitioner_ids = std::collections::HashSet::new();
-            for patient in &patients {
-                // Extract practitioner references from patient.content.generalPractitioner
-                if let Some(gp_array) = patient.content.get("generalPractitioner").and_then(|v| v.as_array()) {
-                    for gp in gp_array {
-                        if let Some(reference) = gp.get("reference").and_then(|r| r.as_str()) {
-                            // Reference format: "Practitioner/123"
-                            if let Some(id) = reference.strip_prefix("Practitioner/") {
-                                practitioner_ids.insert(id.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fetch practitioners by IDs
-            if !practitioner_ids.is_empty() {
-                let ids: Vec<String> = practitioner_ids.into_iter().collect();
-                let practitioners = repo.find_practitioners_by_ids(&ids).await?;
-                for prac in practitioners {
-                    entries.push(format!(
-                        r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&prac.content)?
-                    ));
-                }
-            }
-        }
-    }
-
-    // Handle _revinclude parameter for Observation references
-    if let Some(revinclude_param) = params.get("_revinclude") {
-        if revinclude_param == "Observation:patient" || revinclude_param == "Observation:subject" {
-            // For each patient, find observations that reference it
-            for patient in &patients {
-                let observations = repo.find_observations_by_patient(&patient.id).await?;
-                for obs in observations {
-                    entries.push(format!(
-                        r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
-                        serde_json::to_string(&obs.content)?
-                    ));
-                }
-            }
-        }
-    }
-
-    // Build pagination links
-    let base_url = format!("http://localhost:3000{}", uri.path());
-    let query_params = uri.query().unwrap_or("");
-
-    // Parse _count and _offset from params
-    let count = params
-        .get("_count")
-        .and_then(|c| c.parse::<i64>().ok())
-        .unwrap_or(50);
-    let offset = params
-        .get("_offset")
-        .and_then(|o| o.parse::<i64>().ok())
-        .unwrap_or(0);
-
-    // Build self link
-    let self_link = if query_params.is_empty() {
-        base_url.clone()
-    } else {
-        format!("{}?{}", base_url, query_params)
-    };
-
-    // Build next link if there are more results
-    let next_link = if let Some(total_count) = total {
-        if offset + count < total_count {
-            // Build next URL with updated offset
-            let next_offset = offset + count;
-            let mut next_params: Vec<String> = params
-                .iter()
-                .filter(|(k, _)| k.as_str() != "_offset")
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect();
-            next_params.push(format!("_offset={}", next_offset));
-            Some(format!("{}?{}", base_url, next_params.join("&")))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Build links array
-    let mut links = vec![
-        format!(r#"{{"relation":"self","url":"{}"}}"#, self_link)
-    ];
-    if let Some(next_url) = next_link {
-        links.push(format!(r#"{{"relation":"next","url":"{}"}}"#, next_url));
-    }
-    let links_str = links.join(",");
-
-    // Build final Bundle JSON string
-    let entries_str = entries.join(",");
-    let bundle_str = if let Some(total_count) = total {
-        format!(
-            r#"{{"resourceType":"Bundle","type":"searchset","total":{},"link":[{}],"entry":[{}]}}"#,
-            total_count, links_str, entries_str
-        )
-    } else {
-        format!(
-            r#"{{"resourceType":"Bundle","type":"searchset","link":[{}],"entry":[{}]}}"#,
-            links_str, entries_str
-        )
-    };
-
-    // Parse string back to Value for Json response
-    let bundle: Value = serde_json::from_str(&bundle_str)?;
-
-    match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Html => {
-            // Convert patients to HTML table rows
-            let patient_rows: Vec<PatientRow> = patients
-                .iter()
-                .map(|p| {
-                    PatientRow {
-                        id: p.id.clone(),
-                        version_id: p.version_id.to_string(),
-                        name: extract_patient_name(&p.content),
-                        gender: p.content
-                            .get("gender")
-                            .and_then(|g| g.as_str())
-                            .unwrap_or("Unknown")
-                            .to_string(),
-                        birth_date: p.content
-                            .get("birthDate")
-                            .and_then(|b| b.as_str())
-                            .unwrap_or("Unknown")
-                            .to_string(),
-                        active: p.content
-                            .get("active")
-                            .and_then(|a| a.as_bool())
-                            .unwrap_or(true),
-                        last_updated: p.last_updated.to_rfc3339(),
-                    }
-                })
-                .collect();
-
-            let template = PatientListTemplate {
-                patients: patient_rows,
-                total: total.map(|t| t as usize).unwrap_or(patients.len()),
-                current_url: "/fhir/Patient?".to_string(),
-            };
-
-            Ok(Html(template.render().unwrap()).into_response())
-        }
-        ResponseFormat::Json => Ok(Json(bundle).into_response()),
-        ResponseFormat::Xml => {
-            let xml_string = json_to_xml(&bundle)
-                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
-            Ok((
-                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
-                xml_string
-            ).into_response())
-        }
-    }
-}
 
 /// Get patient history
 pub async fn get_patient_history(
@@ -521,31 +335,9 @@ pub async fn get_patient_history(
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
     match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Html => {
-            // Convert history to HTML table rows
-            let history_rows: Vec<HistoryRow> = history
-                .iter()
-                .map(|h| {
-                    let fhir_json = &h.content;
-                    HistoryRow {
-                        version_id: h.version_id.to_string(),
-                        operation: h.history_operation.clone(),
-                        last_updated: h.last_updated.to_rfc3339(),
-                        summary: extract_patient_name(fhir_json),
-                    }
-                })
-                .collect();
-
-            let template = PatientHistoryTemplate {
-                id: id.clone(),
-                history: history_rows,
-                total,
-            };
-
-            Ok(Html(template.render().unwrap()).into_response())
-        }
-        ResponseFormat::Json => Ok(Json(bundle).into_response()),
-        ResponseFormat::Xml => {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
+        crate::api::content_negotiation::ResponseFormat::Xml => {
             let xml_string = json_to_xml(&bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -556,60 +348,6 @@ pub async fn get_patient_history(
     }
 }
 
-/// Get type-level history for all patients
-pub async fn get_patient_type_history(
-    State(repo): State<SharedPatientRepo>,
-    Query(params): Query<HashMap<String, String>>,
-    headers: HeaderMap,
-    uri: axum::http::Uri,
-) -> Result<Response> {
-    // Parse _count parameter
-    let count = params
-        .get("_count")
-        .and_then(|c| c.parse::<i64>().ok());
-
-    let history = repo.type_history(count).await?;
-
-    // Build Bundle using efficient string concatenation
-    let total = history.len();
-    let entries: Vec<String> = history
-        .iter()
-        .map(|h| {
-            format!(
-                r#"{{"resource":{},"request":{{"method":"{}","url":"Patient/{}"}},"response":{{"status":"200","lastModified":"{}"}}}}"#,
-                serde_json::to_string(&h.content).unwrap_or_default(),
-                h.history_operation,
-                h.id,
-                h.last_updated.to_rfc3339()
-            )
-        })
-        .collect();
-
-    let entries_str = entries.join(",");
-    let bundle_str = format!(
-        r#"{{"resourceType":"Bundle","type":"history","total":{},"entry":[{}]}}"#,
-        total, entries_str
-    );
-
-    // Parse string back to Value for Json response
-    let bundle: Value = serde_json::from_str(&bundle_str)?;
-
-    match preferred_format_with_query(&uri, &headers) {
-        ResponseFormat::Json => Ok(Json(bundle).into_response()),
-        ResponseFormat::Xml => {
-            let xml_string = json_to_xml(&bundle)
-                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
-            Ok((
-                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
-                xml_string
-            ).into_response())
-        }
-        ResponseFormat::Html => {
-            // For type-level history, just return JSON (no HTML template for this)
-            Ok(Json(bundle).into_response())
-        }
-    }
-}
 
 /// Get specific version of a patient
 pub async fn read_patient_version(
@@ -629,7 +367,21 @@ pub async fn read_patient_version(
     Ok((response_headers, Json(patient.content)))
 }
 
-/// Delete patients (batch delete)
+
+/// Update a patient via form submission
+pub async fn update_patient_form(
+    State(_repo): State<SharedPatientRepo>,
+    Path(_id): Path<String>,
+    _headers: HeaderMap,
+    _body: axum::body::Bytes,
+) -> Result<StatusCode> {
+    // TODO: Implement HTML form handling when UI is ready
+    Err(crate::error::FhirError::BadRequest(
+        "HTML form submission not yet implemented".to_string()
+    ))
+}
+
+/// Delete multiple patients (for testing)
 pub async fn delete_patients(
     State(repo): State<SharedPatientRepo>,
     Query(params): Query<HashMap<String, String>>,
@@ -655,7 +407,7 @@ pub async fn delete_patients(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Rollback a patient to a specific version (destructive operation for dev/test)
+/// Rollback a patient to a specific version
 pub async fn rollback_patient(
     State(repo): State<SharedPatientRepo>,
     Path((id, version)): Path<(String, i32)>,
@@ -665,5 +417,57 @@ pub async fn rollback_patient(
 
     repo.rollback(&id, version).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Get type-level history for all patients
+pub async fn get_patient_type_history(
+    State(repo): State<SharedPatientRepo>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    uri: axum::http::Uri,
+) -> Result<Response> {
+    // Parse _count parameter
+    let count = params
+        .get("_count")
+        .and_then(|c| c.parse::<i64>().ok());
+
+    let history = repo.type_history(count).await?;
+
+    // Build Bundle using efficient string concatenation
+    let total = history.len();
+    let entries: Vec<String> = history
+        .iter()
+        .map(|h| {
+            format!(
+                r#"{{\"resource\":{},\"request\":{{\"method\":\"{}\",\"url\":\"Patient/{}\"}},\"response\":{{\"status\":\"200\",\"lastModified\":\"{}\"}}}}"#,
+                serde_json::to_string(&h.content).unwrap_or_default(),
+                h.history_operation,
+                h.id,
+                h.last_updated.to_rfc3339()
+            )
+        })
+        .collect();
+
+    let entries_str = entries.join(",");
+    let bundle_str = format!(
+        r#"{{\"resourceType\":\"Bundle\",\"type\":\"history\",\"total\":{},\"entry\":[{}]}}"#,
+        total, entries_str
+    );
+
+    // Parse string back to Value for Json response
+    let bundle: Value = serde_json::from_str(&bundle_str)?;
+
+    match preferred_format_with_query(&uri, &headers) {
+        crate::api::content_negotiation::ResponseFormat::Json |
+        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
+        crate::api::content_negotiation::ResponseFormat::Xml => {
+            let xml_string = json_to_xml(&bundle)
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, "application/fhir+xml")],
+                xml_string
+            ).into_response())
+        }
+    }
 }
 

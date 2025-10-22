@@ -8,7 +8,8 @@
     (if (active? (current-node))
         (sosofo-append
             (struct)
-            (repository))
+            (repository)
+            (handler))
         (empty-sosofo)))
 
 (element elements (empty-sosofo))
