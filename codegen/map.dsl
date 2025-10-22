@@ -6,6 +6,7 @@
 <!ENTITY general        SYSTEM "general.scm">
 <!ENTITY migration      SYSTEM "migration.scm">
 <!ENTITY structs        SYSTEM "structs.scm">
+<!ENTITY repositories   SYSTEM "repositories.scm">
 <!ENTITY rules          SYSTEM "rules.scm">
 
 ]>
@@ -15,4 +16,5 @@
 &general;
 &migration;
 &structs;
+&repositories;
 &rules;

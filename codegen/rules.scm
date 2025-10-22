@@ -1,6 +1,7 @@
 (element resources
     (sosofo-append
         (migration)
+        (repositories)
         (process-children))
 )
 
