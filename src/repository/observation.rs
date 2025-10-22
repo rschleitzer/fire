@@ -1736,13 +1736,16 @@ impl ObservationRepository {
                         let parts: Vec<&str> = param.value.split('|').collect();
                         if parts.len() == 2 {
                             let bind_idx = bind_values.len() + 1;
-                            sql.push_str(&format!(" AND observation.category_system = ${} AND observation.category_code = ${}", bind_idx, bind_idx + 1));
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(observation.category_system, observation.category_code) AS cc(sys, code) WHERE cc.sys = ${} AND cc.code = ${})",
+                                bind_idx, bind_idx + 1
+                            ));
                             bind_values.push(parts[0].to_string());
                             bind_values.push(parts[1].to_string());
                         }
                     } else {
                         let bind_idx = bind_values.len() + 1;
-                        sql.push_str(&format!(" AND observation.category_code = ${}", bind_idx));
+                        sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.category_code) AS c WHERE c = ${})", bind_idx));
                         bind_values.push(param.value.clone());
                     }
                 }

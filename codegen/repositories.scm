@@ -1351,7 +1351,29 @@ impl "struct-name" {
 "))
     ; CodeableConcept
     ((or (search-is-codeableconcept? search) (search-has-codeableconcept-variant? search))
-     ($"                \""search-name"\" => {
+     (if is-collection
+       ; Array columns - use unnest for array comparison
+       ($"                \""search-name"\" => {
+                    if param.value.contains('|') {
+                        let parts: Vec<""&""str> = param.value.split('|').collect();
+                        if parts.len() == 2 {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(
+                                \" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_system, "resource-lower"."col-name"_code) AS cc(sys, code) WHERE cc.sys = ${} AND cc.code = ${})\",
+                                bind_idx, bind_idx + 1
+                            ));
+                            bind_values.push(parts[0].to_string());
+                            bind_values.push(parts[1].to_string());
+                        }
+                    } else {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_code) AS c WHERE c = ${})\", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+                }
+")
+       ; Non-array columns - use direct comparison
+       ($"                \""search-name"\" => {
                     if param.value.contains('|') {
                         let parts: Vec<""&""str> = param.value.split('|').collect();
                         if parts.len() == 2 {
@@ -1366,7 +1388,7 @@ impl "struct-name" {
                         bind_values.push(param.value.clone());
                     }
                 }
-"))
+")))
     (else "")))
 
 ; Generate date parameter match
