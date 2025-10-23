@@ -107,7 +107,7 @@ Resources are activated via `active="true"` in `fhir.xml`:
 - ✅ Type-safe: All generated code compiles without warnings
 - ✅ FHIR-compliant: Follows R5 spec for all operations
 - ✅ Maintainable: Clean, readable generated code
-- ✅ Tested: 183/229 pyrtest tests passing (46 tests for unimplemented features)
+- ⏳ Tested: 194/229 pyrtest tests passing (35 tests failing - see analysis below)
 
 ## Recent Fixes (This Session)
 
@@ -186,7 +186,42 @@ sql.push_str(&format!(" AND resource.column_code = ${}", bind_idx));
 
 **Results**: Tests improved from 183 → 184 passing. Category search now working correctly.
 
-## Remaining Test Failures (46 tests)
+## Current Test Analysis (Session 2025-10-23)
+
+**Status**: 194/229 tests passing (35 failures)
+
+### Failures Breakdown
+
+**Generator Bugs to Fix** (estimated ~8-10 failures):
+
+1. **Missing HumanName string search parameters** - `given`, `name` on Patient/Practitioner not generated
+   - **Root cause**: `generate-string-param-match` in `codegen/repositories.scm:636` only generates code when `extraction-key="name"`
+   - **Problem**: FHIR has multiple search parameters that all point to HumanName:
+     - `name` - should search ALL fields (family, given, prefix, suffix, text)
+     - `family` - should search ONLY `family_name`
+     - `given` - should search ONLY `given_name`
+   - **Current behavior**: Only `family` is manually implemented (patient.rs:550), and it incorrectly searches ALL fields
+   - **Fix needed**: Generator must inspect the XML `<paths>` to determine which specific HumanName component(s) to search
+   - **Affects**: ~5 failing tests for Patient/Practitioner name searches
+
+2. **Missing Observation.date column** - SQL error "column observation.date does not exist"
+   - One failing test in search chaining
+   - Need to check if `date` search param in fhir.xml has proper path mapping
+
+3. **Invalid date format error handling** - Returns 500 instead of 400
+   - Needs DB error code 22007 → 400 Bad Request mapping in `src/error.rs`
+   - Not a generator issue
+
+**Unimplemented Features** (estimated ~25-27 failures):
+- Search Chaining (13 tests) - Requires JOIN logic
+- Include/_revinclude (4 tests) - Requires JOIN logic
+- Composite Search (11 tests) - Not in generator yet
+- Repeated parameter AND semantics (2 tests) - Search parser issue
+- Search modifiers `:missing`, `:not` (2-4 tests) - May be partially working
+
+## Remaining Test Failures Analysis (Previous Session - Outdated)
+
+NOTE: The analysis below is from a previous session and may not reflect current state.
 
 The remaining 46 failing tests are NOT code generator bugs. They fall into these categories:
 
@@ -228,7 +263,23 @@ The remaining 46 failing tests are NOT code generator bugs. They fall into these
 - **Pagination/Sorting** (3 tests): Edge cases with sorting and pagination
   - May be query generation or data consistency issues
 
-## Summary
+## Summary (2025-10-23 Session)
+
+**Current Status**: 194/229 tests passing (84.7% pass rate)
+
+**Key Findings**:
+- ✅ Server runs cleanly - database setup fixed (postgres role, fhir_dev database created)
+- ✅ Most generator functionality working correctly (CRUD, basic searches, history)
+- ⚠️ 3 generator bugs identified (HumanName searches, Observation.date, error handling)
+- ⏳ ~25-27 failures are unimplemented features (chaining, composite, includes)
+
+**Next Actions**:
+1. Fix HumanName string search generation in `codegen/repositories.scm`
+2. Investigate Observation.date column issue
+3. Add DB error code mapping for invalid dates (22007 → 400)
+4. Re-run tests to measure improvement
+
+**Previous Summary** (now outdated):
 - ✅ **All actual generator bugs are FIXED** (SQL type casting)
 - ✅ **Server runs cleanly with NO SQL errors**
 - ⏳ **Remaining failures require feature implementation, not generator fixes**
