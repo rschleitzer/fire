@@ -1435,6 +1435,46 @@ impl PatientRepository {
                                     sql.push_str("(patient.general_practitioner_reference IS NOT NULL AND array_length(patient.general_practitioner_reference, 1) > 0)");
                                 }
                             }
+                            Some(modifier_str) if modifier_str.contains('.') => {
+                                // Forward chaining: ResourceType.parameter
+                                if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
+                                    let target_table = resource_type.to_lowercase();
+
+                                    // Handle different chained parameter types
+                                    if chained_param == "family" {
+                                        let bind_idx = bind_values.len() + 1;
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.general_practitioner_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, target_table, bind_idx
+                                        ));
+                                        bind_values.push(format!("%{}%", param.value));
+                                    }
+                                    else if chained_param == "identifier" {
+                                        if param.value.contains('|') {
+                                            let parts: Vec<&str> = param.value.split('|').collect();
+                                            if parts.len() == 2 {
+                                                let bind_idx = bind_values.len() + 1;
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.general_practitioner_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${}))",
+                                                    target_table, target_table, target_table, target_table, bind_idx, bind_idx + 1
+                                                ));
+                                                bind_values.push(parts[0].to_string());
+                                                bind_values.push(parts[1].to_string());
+                                            }
+                                        } else {
+                                            let bind_idx = bind_values.len() + 1;
+                                            sql.push_str(&format!(
+                                                "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.general_practitioner_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${}))",
+                                                target_table, target_table, target_table, bind_idx
+                                            ));
+                                            bind_values.push(param.value.clone());
+                                        }
+                                    }
+                                    else {
+                                        tracing::warn!("Chained parameter '{}' not yet implemented", chained_param);
+                                    }
+                                }
+                            }
                             _ => {
                                 tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
                             }
@@ -1511,6 +1551,46 @@ impl PatientRepository {
                                     sql.push_str("(patient.link_reference IS NOT NULL AND array_length(patient.link_reference, 1) > 0)");
                                 }
                             }
+                            Some(modifier_str) if modifier_str.contains('.') => {
+                                // Forward chaining: ResourceType.parameter
+                                if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
+                                    let target_table = resource_type.to_lowercase();
+
+                                    // Handle different chained parameter types
+                                    if chained_param == "family" {
+                                        let bind_idx = bind_values.len() + 1;
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.link_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, target_table, bind_idx
+                                        ));
+                                        bind_values.push(format!("%{}%", param.value));
+                                    }
+                                    else if chained_param == "identifier" {
+                                        if param.value.contains('|') {
+                                            let parts: Vec<&str> = param.value.split('|').collect();
+                                            if parts.len() == 2 {
+                                                let bind_idx = bind_values.len() + 1;
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.link_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${}))",
+                                                    target_table, target_table, target_table, target_table, bind_idx, bind_idx + 1
+                                                ));
+                                                bind_values.push(parts[0].to_string());
+                                                bind_values.push(parts[1].to_string());
+                                            }
+                                        } else {
+                                            let bind_idx = bind_values.len() + 1;
+                                            sql.push_str(&format!(
+                                                "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.link_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${}))",
+                                                target_table, target_table, target_table, bind_idx
+                                            ));
+                                            bind_values.push(param.value.clone());
+                                        }
+                                    }
+                                    else {
+                                        tracing::warn!("Chained parameter '{}' not yet implemented", chained_param);
+                                    }
+                                }
+                            }
                             _ => {
                                 tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
                             }
@@ -1577,6 +1657,46 @@ impl PatientRepository {
                                     sql.push_str("(patient.organization_reference IS NOT NULL)");
                                 }
                             }
+                            Some(modifier_str) if modifier_str.contains('.') => {
+                                // Forward chaining: ResourceType.parameter
+                                if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
+                                    let target_table = resource_type.to_lowercase();
+
+                                    // Handle different chained parameter types
+                                    if chained_param == "family" {
+                                        let bind_idx = bind_values.len() + 1;
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.organization_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, target_table, bind_idx
+                                        ));
+                                        bind_values.push(format!("%{}%", param.value));
+                                    }
+                                    else if chained_param == "identifier" {
+                                        if param.value.contains('|') {
+                                            let parts: Vec<&str> = param.value.split('|').collect();
+                                            if parts.len() == 2 {
+                                                let bind_idx = bind_values.len() + 1;
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.organization_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${}))",
+                                                    target_table, target_table, target_table, target_table, bind_idx, bind_idx + 1
+                                                ));
+                                                bind_values.push(parts[0].to_string());
+                                                bind_values.push(parts[1].to_string());
+                                            }
+                                        } else {
+                                            let bind_idx = bind_values.len() + 1;
+                                            sql.push_str(&format!(
+                                                "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.organization_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${}))",
+                                                target_table, target_table, target_table, bind_idx
+                                            ));
+                                            bind_values.push(param.value.clone());
+                                        }
+                                    }
+                                    else {
+                                        tracing::warn!("Chained parameter '{}' not yet implemented", chained_param);
+                                    }
+                                }
+                            }
                             _ => {
                                 tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
                             }
@@ -1631,6 +1751,128 @@ impl PatientRepository {
                         let bind_idx = bind_values.len() + 1;
                         sql.push_str(&format!("EXISTS (SELECT 1 FROM unnest(patient.telecom_value) AS tv WHERE tv = ${})", bind_idx));
                         bind_values.push(param.value.clone());
+                    }
+                    "_has" => {
+                        // Reverse chaining: _has:ResourceType:ref_field:param=value
+                        // modifier contains: ResourceType:ref_field:param
+                        if let Some(modifier_str) = &param.modifier {
+                            let parts: Vec<&str> = modifier_str.split(':').collect();
+                            if parts.len() == 3 {
+                                let target_resource_type = parts[0];
+                                let target_table = target_resource_type.to_lowercase();
+                                // Convert hyphens to underscores for SQL column names
+                                let ref_field = parts[1].replace('-', "_");
+                                let filter_param = parts[2];  // e.g., "code"
+
+                                // Generate reverse chain EXISTS query
+                                // This finds resources of the current type that are referenced by target_resource_type
+                                // Example: Find Patients that have Observations where subject points to the Patient AND code=X
+                                let bind_idx = bind_values.len() + 1;
+
+                                // Determine if the reference field is a collection (array) based on common FHIR patterns
+                                // Collections use = ANY(), scalars use simple =
+                                let is_collection = matches!(ref_field.as_str(),
+                                    "general_practitioner" | "performer" | "participant" |
+                                    "basedOn" | "partOf" | "reasonReference" | "insurance" |
+                                    "supportingInfo" | "diagnosis" | "procedure" | "account"
+                                );
+
+                                // Build filter condition based on parameter type
+                                // For now, handle common cases: token (code, category)
+                                if filter_param == "code" || filter_param == "category" {
+                                    // Token search on target resource (scalar columns, not arrays)
+                                    let col_name = if filter_param == "code" { "code_code" } else { "category_code" };
+
+                                    if is_collection {
+                                        // Use = ANY() for array reference columns
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE CONCAT('Patient/', patient.id) = ANY({}.{}_reference) AND {}.{} = ${})",
+                                            target_table, target_table, ref_field, target_table, col_name, bind_idx
+                                        ));
+                                    } else {
+                                        // Use simple = for scalar reference columns
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.{}_reference = CONCAT('Patient/', patient.id) AND {}.{} = ${})",
+                                            target_table, target_table, ref_field, target_table, col_name, bind_idx
+                                        ));
+                                    }
+                                    bind_values.push(param.value.clone());
+                                } else if filter_param == "family" {
+                                    // String search on target resource
+                                    if is_collection {
+                                        // Use = ANY() for array reference columns
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE CONCAT('Patient/', patient.id) = ANY({}.{}_reference) AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, ref_field, target_table, bind_idx
+                                        ));
+                                    } else {
+                                        // Use simple = for scalar reference columns
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.{}_reference = CONCAT('Patient/', patient.id) AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, ref_field, target_table, bind_idx
+                                        ));
+                                    }
+                                    bind_values.push(format!("%{}%", param.value));
+                                } else {
+                                    tracing::warn!("Reverse chaining filter parameter '{}' not yet implemented", filter_param);
+                                }
+                            }
+                        }
+                    }
+                    param_name if param_name.contains('.') => {
+                        // Check for chaining: base_param.chained_field
+                        if let Some((base_param, chained_field)) = param_name.split_once('.') {
+                            // Try to determine target resource type from base param
+                            // For now, support common patterns
+                            let (target_table, ref_col) = match base_param {
+                                "general-practitioner" => ("practitioner", "general_practitioner"),
+                                "subject" => {
+                                    // Subject could reference different types, default to patient
+                                    // TODO: handle multiple target types
+                                    ("patient", "subject")
+                                }
+                                _ => {
+                                    tracing::warn!("Unsupported chaining on parameter: {}", base_param);
+                                    continue;
+                                }
+                            };
+
+                            // Handle chained field types
+                            if chained_field == "family" {
+                                let bind_idx = bind_values.len() + 1;
+                                // Handle both collection and non-collection references
+                                // For collections, unnest the array first
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM {} JOIN unnest(patient.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                    target_table, ref_col, target_table, target_table, bind_idx
+                                ));
+                                bind_values.push(format!("%{}%", param.value));
+                            }
+                            else if chained_field == "identifier" {
+                                if param.value.contains('|') {
+                                    let parts: Vec<&str> = param.value.split('|').collect();
+                                    if parts.len() == 2 {
+                                        let bind_idx = bind_values.len() + 1;
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} JOIN unnest(patient.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.identifier_system, {}.identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${}))",
+                                            target_table, ref_col, target_table, target_table, target_table, bind_idx, bind_idx + 1
+                                        ));
+                                        bind_values.push(parts[0].to_string());
+                                        bind_values.push(parts[1].to_string());
+                                    }
+                                } else {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "EXISTS (SELECT 1 FROM {} JOIN unnest(patient.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.identifier_value) AS iv WHERE iv = ${}))",
+                                        target_table, ref_col, target_table, target_table, bind_idx
+                                    ));
+                                    bind_values.push(param.value.clone());
+                                }
+                            }
+                            else {
+                                tracing::warn!("Chained field '{}' not yet supported", chained_field);
+                            }
+                        }
                     }
                     _ => {
                         // Unknown parameter - ignore per FHIR spec
