@@ -1171,6 +1171,80 @@ impl PractitionerRepository {
                     match modifier {
                         "contains" => {
                             sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})",
+                                bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        "exact" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v = ${})",
+                                bind_idx
+                            ));
+                            bind_values.push(param.value.clone());
+                        }
+                        "missing" => {
+                            sql.push_str(" AND (practitioner.family_name IS NULL OR array_length(practitioner.family_name, 1) IS NULL)");
+                        }
+                        "not" => {
+                            sql.push_str(&format!(
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${}))",
+                                bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        _ => {}
+                    }
+                }
+                "gender" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND practitioner.gender = ${}", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "given" => {
+                    let modifier = param.modifier.as_deref().unwrap_or("contains");
+                    let bind_idx = bind_values.len() + 1;
+
+                    match modifier {
+                        "contains" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS v WHERE v ILIKE ${})",
+                                bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        "exact" => {
+                            sql.push_str(&format!(
+                                " AND EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS v WHERE v = ${})",
+                                bind_idx
+                            ));
+                            bind_values.push(param.value.clone());
+                        }
+                        "missing" => {
+                            sql.push_str(" AND (practitioner.given_name IS NULL OR array_length(practitioner.given_name, 1) IS NULL)");
+                        }
+                        "not" => {
+                            sql.push_str(&format!(
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS v WHERE v ILIKE ${}))",
+                                bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        _ => {}
+                    }
+                }
+                "phone" => {
+                    let bind_idx = bind_values.len() + 1;
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(practitioner.telecom_value) AS tv WHERE tv = ${})", bind_idx));
+                    bind_values.push(param.value.clone());
+                }
+                "phonetic" => {
+                    let modifier = param.modifier.as_deref().unwrap_or("contains");
+                    let bind_idx = bind_values.len() + 1;
+
+                    match modifier {
+                        "contains" => {
+                            sql.push_str(&format!(
                                 " AND (EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS fn WHERE fn ILIKE ${}) \
                                  OR EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS gn WHERE gn ILIKE ${}) \
                                  OR EXISTS (SELECT 1 FROM unnest(practitioner.prefix) AS p WHERE p ILIKE ${}) \
@@ -1204,9 +1278,9 @@ impl PractitionerRepository {
                         _ => {}
                     }
                 }
-                "gender" => {
+                "telecom" => {
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND practitioner.gender = ${}", bind_idx));
+                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(practitioner.telecom_value) AS tv WHERE tv = ${})", bind_idx));
                     bind_values.push(param.value.clone());
                 }
                 "active" => {
@@ -1230,6 +1304,46 @@ impl PractitionerRepository {
                         let bind_idx = bind_values.len() + 1;
                         sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(practitioner.identifier_value) AS iv WHERE iv = ${})", bind_idx));
                         bind_values.push(param.value.clone());
+                    }
+                }
+                "name" => {
+                    let modifier = param.modifier.as_deref().unwrap_or("contains");
+                    let bind_idx = bind_values.len() + 1;
+
+                    match modifier {
+                        "contains" => {
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS fn WHERE fn ILIKE ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS gn WHERE gn ILIKE ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.prefix) AS p WHERE p ILIKE ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.suffix) AS s WHERE s ILIKE ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.name_text) AS nt WHERE nt ILIKE ${}))",
+                                bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        "exact" => {
+                            sql.push_str(&format!(
+                                " AND (EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS fn WHERE fn = ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.given_name) AS gn WHERE gn = ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.prefix) AS p WHERE p = ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.suffix) AS s WHERE s = ${}) \
+                                 OR EXISTS (SELECT 1 FROM unnest(practitioner.name_text) AS nt WHERE nt = ${}))",
+                                bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                            ));
+                            bind_values.push(param.value.clone());
+                        }
+                        "missing" => {
+                            sql.push_str(" AND (practitioner.family_name IS NULL OR array_length(practitioner.family_name, 1) IS NULL)");
+                        }
+                        "not" => {
+                            sql.push_str(&format!(
+                                " AND NOT (EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS fn WHERE fn ILIKE ${}))",
+                                bind_idx
+                            ));
+                            bind_values.push(format!("%{}%", param.value));
+                        }
+                        _ => {}
                     }
                 }
                 "qualification-period" => {

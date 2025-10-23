@@ -88,3 +88,53 @@
                     (map (lambda (t) (% "resource" t))
                          (node-list->list target-nodes))))))
         '())))
+
+; Get the specific HumanName field from a search parameter's path
+; Returns one of: "all", "family", "given", "prefix", "suffix", "text"
+; or #f if not a HumanName search
+; Examples:
+;   - name: patient.name -> "all"
+;   - family: patient.name/humanname.family -> "family"
+;   - given: patient.name/humanname.given -> "given"
+(define (search-humanname-field search)
+  (let* ((paths-node (select-children "paths" search))
+         (first-paths (if (node-list-empty? paths-node)
+                          #f
+                          (node-list-first paths-node)))
+         (path-nodes (if first-paths
+                          (select-children "path" first-paths)
+                          (empty-node-list)))
+         (first-path (if (node-list-empty? path-nodes)
+                         #f
+                         (node-list-first path-nodes))))
+    (if first-path
+        (let* ((parts-node (select-children "parts" first-path))
+               (first-parts (if (node-list-empty? parts-node)
+                                #f
+                                (node-list-first parts-node)))
+               (part-nodes (if first-parts
+                                (select-children "part" first-parts)
+                                (empty-node-list)))
+               (part-list (node-list->list part-nodes))
+               (part-count (length part-list)))
+          (cond
+            ; 1 part pointing to HumanName -> search all fields
+            ((and (= part-count 1)
+                  (let ((ref (% "ref" (car part-list))))
+                    (or (string-ci=? ref "patient.name")
+                        (string-ci=? ref "practitioner.name")
+                        (string-ci=? ref "relatedperson.name")
+                        (string-ci=? ref "person.name"))))
+             "all")
+            ; 2 parts with second pointing to specific HumanName field
+            ((= part-count 2)
+             (let ((ref2 (% "ref" (cadr part-list))))
+               (cond
+                 ((string-ci=? ref2 "humanname.family") "family")
+                 ((string-ci=? ref2 "humanname.given") "given")
+                 ((string-ci=? ref2 "humanname.prefix") "prefix")
+                 ((string-ci=? ref2 "humanname.suffix") "suffix")
+                 ((string-ci=? ref2 "humanname.text") "text")
+                 (else #f))))
+            (else #f)))
+        #f)))

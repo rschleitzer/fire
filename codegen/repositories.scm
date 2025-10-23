@@ -1251,7 +1251,8 @@ impl "struct-name" {
          (search-list (if (not (node-list-empty? searches-node))
                           (node-list->list (select-elements (children searches-node) "search"))
                           '()))
-         (unique-searches (deduplicate-searches search-list)))
+         (unique-searches (deduplicate-searches search-list))
+         (all-searches search-list))  ; Keep all searches for generating match arms
     ($ ($"
     /// Search for "resource-lower"s based on FHIR search parameters
     pub async fn search(
@@ -1272,7 +1273,7 @@ impl "struct-name" {
         for param in &""query.params {
             match param.name.as_str() {
 ")
-       (generate-search-param-matches resource-name resource-lower unique-searches)
+       (generate-search-param-matches resource-name resource-lower all-searches)
        ($"                _ => {
                     // Unknown parameter - ignore per FHIR spec
                     tracing::warn!(\"Unknown search parameter for "resource-name": {}\", param.name);
@@ -1373,7 +1374,7 @@ impl "struct-name" {
              (string=? (substring search-name 0 1) "_"))
         ""
         (case search-type
-          (("string") (generate-string-param-match search-name extraction-key resource-lower))
+          (("string") (generate-string-param-match search-name extraction-key resource-lower search))
           (("token") (generate-token-param-match search-name col-name search resource-lower is-collection))
           (("date") (generate-date-param-match search-name col-name resource-lower))
           (("reference") (generate-reference-param-match search-name col-name resource-lower is-collection search))
@@ -1381,11 +1382,23 @@ impl "struct-name" {
           (("special") "")
           (else "")))))
 
-; Generate string parameter match (HumanName searches across multiple columns)
-(define (generate-string-param-match search-name extraction-key resource-lower)
+; Generate string parameter match (HumanName searches - field-specific or all fields)
+(define (generate-string-param-match search-name extraction-key resource-lower search)
   (if (string=? extraction-key "name")
-      ; HumanName - searches family_name, given_name, prefix, suffix, name_text
-      ($"                \""search-name"\" => {
+      ; HumanName search - determine which field(s) to search
+      (let ((field-type (search-humanname-field search)))
+        (if field-type
+            (generate-humanname-search search-name field-type resource-lower)
+            ""))
+      ; Other string searches - skip for now
+      ""))
+
+; Generate HumanName field-specific search
+(define (generate-humanname-search search-name field-type resource-lower)
+  (cond
+    ; Search ALL HumanName fields
+    ((string=? field-type "all")
+     ($"                \""search-name"\" => {
                     let modifier = param.modifier.as_deref().unwrap_or(\"contains\");
                     let bind_idx = bind_values.len() + 1;
 
@@ -1425,9 +1438,43 @@ impl "struct-name" {
                         _ => {}
                     }
                 }
-")
-      ; Other string searches - skip for now
-      ""))
+"))
+    ; Search specific HumanName field (family, given, prefix, suffix, text)
+    (else
+     (let ((col-name ($ field-type "_name")))  ; e.g., "family" -> "family_name"
+       ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref().unwrap_or(\"contains\");
+                    let bind_idx = bind_values.len() + 1;
+
+                    match modifier {
+                        \"contains\" => {
+                            sql.push_str(&""format!(
+                                \" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v ILIKE ${})\",
+                                bind_idx
+                            ));
+                            bind_values.push(format!(\"%{}%\", param.value));
+                        }
+                        \"exact\" => {
+                            sql.push_str(&""format!(
+                                \" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v = ${})\",
+                                bind_idx
+                            ));
+                            bind_values.push(param.value.clone());
+                        }
+                        \"missing\" => {
+                            sql.push_str(\" AND ("resource-lower"."col-name" IS NULL OR array_length("resource-lower"."col-name", 1) IS NULL)\");
+                        }
+                        \"not\" => {
+                            sql.push_str(&""format!(
+                                \" AND NOT (EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v ILIKE ${}))\",
+                                bind_idx
+                            ));
+                            bind_values.push(format!(\"%{}%\", param.value));
+                        }
+                        _ => {}
+                    }
+                }
+")))))
 
 ; Generate token parameter match
 (define (generate-token-param-match search-name col-name search resource-lower is-collection)
