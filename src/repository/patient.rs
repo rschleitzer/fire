@@ -1447,10 +1447,10 @@ impl PatientRepository {
 
                                             if final_param == "family" {
                                                 let bind_idx = bind_values.len() + 1;
-                                                // Build nested EXISTS for two-level chain
-                                                // Extracts resource ID from array references like Patient/123
+                                                // Build nested EXISTS for two-level chain (scalar reference version)
+                                                // Extract ID from scalar reference like Patient/123
                                                 sql.push_str(&format!(
-                                                    "EXISTS (SELECT 1 FROM unnest(patient.general_practitioner_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.general_practitioner_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${}))))",
                                                     target_table, target_table, target_table, intermediate_col, bind_idx
                                                 ));
                                                 bind_values.push(format!("%{}%", param.value));
@@ -1582,10 +1582,10 @@ impl PatientRepository {
 
                                             if final_param == "family" {
                                                 let bind_idx = bind_values.len() + 1;
-                                                // Build nested EXISTS for two-level chain
-                                                // Extracts resource ID from array references like Patient/123
+                                                // Build nested EXISTS for two-level chain (scalar reference version)
+                                                // Extract ID from scalar reference like Patient/123
                                                 sql.push_str(&format!(
-                                                    "EXISTS (SELECT 1 FROM unnest(patient.link_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.link_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${}))))",
                                                     target_table, target_table, target_table, intermediate_col, bind_idx
                                                 ));
                                                 bind_values.push(format!("%{}%", param.value));
@@ -1707,10 +1707,10 @@ impl PatientRepository {
 
                                             if final_param == "family" {
                                                 let bind_idx = bind_values.len() + 1;
-                                                // Build nested EXISTS for two-level chain
-                                                // Extracts resource ID from array references like Patient/123
+                                                // Build nested EXISTS for two-level chain (scalar reference version)
+                                                // Extract ID from scalar reference like Patient/123
                                                 sql.push_str(&format!(
-                                                    "EXISTS (SELECT 1 FROM unnest(patient.organization_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(patient.organization_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${}))))",
                                                     target_table, target_table, target_table, intermediate_col, bind_idx
                                                 ));
                                                 bind_values.push(format!("%{}%", param.value));
