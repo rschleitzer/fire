@@ -1820,8 +1820,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.patient_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.patient_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -1928,8 +1947,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.encounter_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.encounter_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -1994,8 +2032,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.based_on_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.based_on_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2123,8 +2180,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.component_value_reference_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.component_value_reference_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2204,8 +2280,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.derived_from_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.derived_from_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2270,8 +2365,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.device_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.device_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2336,8 +2450,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.focus_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.focus_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2402,8 +2535,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.has_member_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.has_member_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2483,8 +2635,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.part_of_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.part_of_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2549,8 +2720,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.performer_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.performer_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2615,8 +2805,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.specimen_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.specimen_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2707,8 +2916,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.subject_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.subject_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
@@ -2815,8 +3043,27 @@ impl ObservationRepository {
                                 if let Some((resource_type, chained_param)) = modifier_str.split_once('.') {
                                     let target_table = resource_type.to_lowercase();
 
-                                    // Handle different chained parameter types
-                                    if chained_param == "family" {
+                                    // Check for multi-level chaining (e.g., Patient.general-practitioner.family)
+                                    if chained_param.contains('.') {
+                                        if let Some((intermediate_field, final_param)) = chained_param.split_once('.') {
+                                            let intermediate_col = intermediate_field.replace('-', "_");
+
+                                            if final_param == "family" {
+                                                let bind_idx = bind_values.len() + 1;
+                                                // Build nested EXISTS for two-level chain
+                                                // Extracts resource ID from array references like Patient/123
+                                                sql.push_str(&format!(
+                                                    "EXISTS (SELECT 1 FROM unnest(observation.value_reference_reference) AS ref WHERE EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.{}_reference) AS inter_ref WHERE EXISTS (SELECT 1 FROM practitioner WHERE practitioner.id = SUBSTRING(inter_ref FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest(practitioner.family_name) AS v WHERE v ILIKE ${})))))",
+                                                    target_table, target_table, target_table, intermediate_col, bind_idx
+                                                ));
+                                                bind_values.push(format!("%{}%", param.value));
+                                            } else {
+                                                tracing::warn!("Multi-level chained parameter '{}' not yet implemented", final_param);
+                                            }
+                                        }
+                                    }
+                                    // Handle single-level chaining
+                                    else if chained_param == "family" {
                                         let bind_idx = bind_values.len() + 1;
                                         sql.push_str(&format!(
                                             "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(observation.value_reference_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
