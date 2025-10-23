@@ -1197,9 +1197,34 @@ impl PractitionerRepository {
                     }
                 }
                 "gender" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND practitioner.gender = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&format!(" AND practitioner.gender = ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some("missing") => {
+                            // :missing modifier
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND practitioner.gender IS NULL");
+                            } else {
+                                sql.push_str(" AND practitioner.gender IS NOT NULL");
+                            }
+                        }
+                        Some("not") => {
+                            // :not modifier
+                            sql.push_str(&format!(" AND practitioner.gender != ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!("Unknown modifier for token search: {:?}", modifier);
+                        }
+                    }
                 }
                 "given" => {
                     let modifier = param.modifier.as_deref().unwrap_or("contains");
@@ -1284,9 +1309,34 @@ impl PractitionerRepository {
                     bind_values.push(param.value.clone());
                 }
                 "active" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND practitioner.active = ${}::boolean", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&format!(" AND practitioner.active = ${}::boolean", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some("missing") => {
+                            // :missing modifier
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND practitioner.active IS NULL");
+                            } else {
+                                sql.push_str(" AND practitioner.active IS NOT NULL");
+                            }
+                        }
+                        Some("not") => {
+                            // :not modifier
+                            sql.push_str(&format!(" AND practitioner.active != ${}::boolean", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!("Unknown modifier for token search: {:?}", modifier);
+                        }
+                    }
                 }
                 "identifier" => {
                     if param.value.contains('|') {

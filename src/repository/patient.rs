@@ -1272,9 +1272,34 @@ impl PatientRepository {
         for param in &query.params {
             match param.name.as_str() {
                 "active" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND patient.active = ${}::boolean", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&format!(" AND patient.active = ${}::boolean", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some("missing") => {
+                            // :missing modifier
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND patient.active IS NULL");
+                            } else {
+                                sql.push_str(" AND patient.active IS NOT NULL");
+                            }
+                        }
+                        Some("not") => {
+                            // :not modifier
+                            sql.push_str(&format!(" AND patient.active != ${}::boolean", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!("Unknown modifier for token search: {:?}", modifier);
+                        }
+                    }
                 }
                 "birthdate" => {
                     let bind_idx = bind_values.len() + 1;
@@ -1328,18 +1353,62 @@ impl PatientRepository {
                     }
                 }
                 "gender" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND patient.gender = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&format!(" AND patient.gender = ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some("missing") => {
+                            // :missing modifier
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND patient.gender IS NULL");
+                            } else {
+                                sql.push_str(" AND patient.gender IS NOT NULL");
+                            }
+                        }
+                        Some("not") => {
+                            // :not modifier
+                            sql.push_str(&format!(" AND patient.gender != ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!("Unknown modifier for token search: {:?}", modifier);
+                        }
+                    }
                 }
                 "general-practitioner" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Organization/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Organization/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.general_practitioner_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (patient.general_practitioner_reference IS NULL OR array_length(patient.general_practitioner_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND patient.general_practitioner_reference IS NOT NULL AND array_length(patient.general_practitioner_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.general_practitioner_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "given" => {
                     let modifier = param.modifier.as_deref().unwrap_or("contains");
@@ -1392,13 +1461,32 @@ impl PatientRepository {
                     }
                 }
                 "link" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("RelatedPerson/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("RelatedPerson/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.link_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (patient.link_reference IS NULL OR array_length(patient.link_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND patient.link_reference IS NOT NULL AND array_length(patient.link_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(patient.link_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "name" => {
                     let modifier = param.modifier.as_deref().unwrap_or("contains");
@@ -1441,13 +1529,32 @@ impl PatientRepository {
                     }
                 }
                 "organization" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Organization/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Organization/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND patient.organization_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND patient.organization_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND patient.organization_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND patient.organization_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "phone" => {
                     let bind_idx = bind_values.len() + 1;

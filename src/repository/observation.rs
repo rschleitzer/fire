@@ -1768,13 +1768,32 @@ impl ObservationRepository {
                     }
                 }
                 "patient" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Patient/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Patient/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.patient_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.patient_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "code" => {
                     if param.value.contains('|') {
@@ -1806,22 +1825,60 @@ impl ObservationRepository {
                     bind_values.push(param.value.clone());
                 }
                 "encounter" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Encounter/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Encounter/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.encounter_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.encounter_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.encounter_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.encounter_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "based-on" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("DeviceRequest/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("DeviceRequest/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.based_on_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.based_on_reference IS NULL OR array_length(observation.based_on_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.based_on_reference IS NOT NULL AND array_length(observation.based_on_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.based_on_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "category" => {
                     if param.value.contains('|') {
@@ -1887,13 +1944,32 @@ impl ObservationRepository {
                     }
                 }
                 "component-value-reference" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("MolecularSequence/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("MolecularSequence/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.component_value_reference_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.component_value_reference_reference IS NULL OR array_length(observation.component_value_reference_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.component_value_reference_reference IS NOT NULL AND array_length(observation.component_value_reference_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.component_value_reference_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "data-absent-reason" => {
                     if param.value.contains('|') {
@@ -1911,40 +1987,116 @@ impl ObservationRepository {
                     }
                 }
                 "derived-from" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("ImagingStudy/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("ImagingStudy/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.derived_from_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.derived_from_reference IS NULL OR array_length(observation.derived_from_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.derived_from_reference IS NOT NULL AND array_length(observation.derived_from_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.derived_from_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "device" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Device/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Device/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.device_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.device_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.device_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.device_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "focus" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Account/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Account/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.focus_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.focus_reference IS NULL OR array_length(observation.focus_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.focus_reference IS NOT NULL AND array_length(observation.focus_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.focus_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "has-member" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Observation/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Observation/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.has_member_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.has_member_reference IS NULL OR array_length(observation.has_member_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.has_member_reference IS NOT NULL AND array_length(observation.has_member_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.has_member_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "method" => {
                     if param.value.contains('|') {
@@ -1962,45 +2114,146 @@ impl ObservationRepository {
                     }
                 }
                 "part-of" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("ImagingStudy/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("ImagingStudy/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.part_of_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.part_of_reference IS NULL OR array_length(observation.part_of_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.part_of_reference IS NOT NULL AND array_length(observation.part_of_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.part_of_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "performer" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Organization/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Organization/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.performer_reference) AS ref WHERE ref = ${})", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND (observation.performer_reference IS NULL OR array_length(observation.performer_reference, 1) IS NULL)");
+                            } else {
+                                sql.push_str(" AND observation.performer_reference IS NOT NULL AND array_length(observation.performer_reference, 1) > 0");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.performer_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "specimen" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Group/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Group/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.specimen_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.specimen_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.specimen_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.specimen_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "status" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&format!(" AND observation.status = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&format!(" AND observation.status = ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some("missing") => {
+                            // :missing modifier
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.status IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.status IS NOT NULL");
+                            }
+                        }
+                        Some("not") => {
+                            // :not modifier
+                            sql.push_str(&format!(" AND observation.status != ${}", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!("Unknown modifier for token search: {:?}", modifier);
+                        }
+                    }
                 }
                 "subject" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("Device/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("Device/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.subject_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.subject_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 "value-concept" => {
                     if param.value.contains('|') {
@@ -2032,13 +2285,32 @@ impl ObservationRepository {
                     bind_values.push(param.value.clone());
                 }
                 "value-reference" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!("MolecularSequence/{}", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!("MolecularSequence/{}", ref_value);
+                            }
+                            sql.push_str(&format!(" AND observation.value_reference_reference = ${}", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some("missing") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == "true";
+                            if is_missing {
+                                sql.push_str(" AND observation.value_reference_reference IS NULL");
+                            } else {
+                                sql.push_str(" AND observation.value_reference_reference IS NOT NULL");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!("Unknown modifier for reference search: {:?}", modifier);
+                        }
                     }
-                    sql.push_str(&format!(" AND observation.value_reference_reference = ${}", bind_idx));
-                    bind_values.push(ref_value);
                 }
                 _ => {
                     // Unknown parameter - ignore per FHIR spec

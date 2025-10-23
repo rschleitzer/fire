@@ -1479,15 +1479,40 @@ impl "struct-name" {
 ; Generate token parameter match
 (define (generate-token-param-match search-name col-name search resource-lower is-collection)
   (cond
-    ; Simple code (boolean, gender, etc.)
+    ; Simple code (boolean, gender, etc.) - with modifier support
     ((search-is-simple-code? search)
      (let* ((property (search-property search))
             (property-type (if property (% "type" property) "code"))
             (cast-suffix (if (string=? property-type "boolean") "::boolean" "")))
        ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&""format!(\" AND "resource-lower"."col-name" = ${}"cast-suffix"\", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&""format!(\" AND "resource-lower"."col-name" = ${}"cast-suffix"\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some(\"missing\") => {
+                            // :missing modifier
+                            let is_missing = param.value == \"true\";
+                            if is_missing {
+                                sql.push_str(\" AND "resource-lower"."col-name" IS NULL\");
+                            } else {
+                                sql.push_str(\" AND "resource-lower"."col-name" IS NOT NULL\");
+                            }
+                        }
+                        Some(\"not\") => {
+                            // :not modifier
+                            sql.push_str(&""format!(\" AND "resource-lower"."col-name" != ${}"cast-suffix"\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        _ => {
+                            // Unknown modifier - ignore
+                            tracing::warn!(\"Unknown modifier for token search: {:?}\", modifier);
+                        }
+                    }
                 }
 ")))
     ; Identifier (system|value)
@@ -1596,36 +1621,112 @@ impl "struct-name" {
     (if is-collection
         (if has-targets
             ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!(\""first-target"/{}\", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!(\""first-target"/{}\", ref_value);
+                            }
+                            sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some(\"missing\") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == \"true\";
+                            if is_missing {
+                                sql.push_str(\" AND ("resource-lower"."col-name"_reference IS NULL OR array_length("resource-lower"."col-name"_reference, 1) IS NULL)\");
+                            } else {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NOT NULL AND array_length("resource-lower"."col-name"_reference, 1) > 0\");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                        }
                     }
-                    sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
-                    bind_values.push(ref_value);
                 }
 ")
             ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some(\"missing\") => {
+                            // :missing modifier for array
+                            let is_missing = param.value == \"true\";
+                            if is_missing {
+                                sql.push_str(\" AND ("resource-lower"."col-name"_reference IS NULL OR array_length("resource-lower"."col-name"_reference, 1) IS NULL)\");
+                            } else {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NOT NULL AND array_length("resource-lower"."col-name"_reference, 1) > 0\");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                        }
+                    }
                 }
 "))
         (if has-targets
             ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    let mut ref_value = param.value.clone();
-                    if !ref_value.contains('/') {
-                        ref_value = format!(\""first-target"/{}\", ref_value);
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            let mut ref_value = param.value.clone();
+                            if !ref_value.contains('/') {
+                                ref_value = format!(\""first-target"/{}\", ref_value);
+                            }
+                            sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
+                            bind_values.push(ref_value);
+                        }
+                        Some(\"missing\") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == \"true\";
+                            if is_missing {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NULL\");
+                            } else {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NOT NULL\");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                        }
                     }
-                    sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
-                    bind_values.push(ref_value);
                 }
 ")
             ($"                \""search-name"\" => {
+                    let modifier = param.modifier.as_deref();
                     let bind_idx = bind_values.len() + 1;
-                    sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
-                    bind_values.push(param.value.clone());
+
+                    match modifier {
+                        None => {
+                            // No modifier - exact match
+                            sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                        Some(\"missing\") => {
+                            // :missing modifier for non-array
+                            let is_missing = param.value == \"true\";
+                            if is_missing {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NULL\");
+                            } else {
+                                sql.push_str(\" AND "resource-lower"."col-name"_reference IS NOT NULL\");
+                            }
+                        }
+                        _ => {
+                            tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                        }
+                    }
                 }
 ")))))
 
