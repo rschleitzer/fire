@@ -2312,27 +2312,34 @@ impl ObservationRepository {
                     "code-value-concept" => {
                         // Parse composite: system|code$value_code or code$value_code
                         if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse value part for optional system|code
+                            let value_code_only = if value_code.contains('|') {
+                                value_code.split('|').nth(1).unwrap_or(value_code)
+                            } else {
+                                value_code
+                            };
+
                             // Parse code part for optional system|code
                             if code_part.contains('|') {
                                 let parts: Vec<&str> = code_part.split('|').collect();
                                 if parts.len() == 2 {
                                     let bind_idx = bind_values.len() + 1;
                                     sql.push_str(&format!(
-                                        "(observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code))",
+                                        "(observation.code_system = ${} AND observation.code_code = ${} AND observation.value_concept_code = ${})",
                                         bind_idx, bind_idx + 1, bind_idx + 2
                                     ));
                                     bind_values.push(parts[0].to_string());
                                     bind_values.push(parts[1].to_string());
-                                    bind_values.push(value_code.to_string());
+                                    bind_values.push(value_code_only.to_string());
                                 }
                             } else {
                                 let bind_idx = bind_values.len() + 1;
                                 sql.push_str(&format!(
-                                    "(observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code))",
+                                    "(observation.code_code = ${} AND observation.value_concept_code = ${})",
                                     bind_idx, bind_idx + 1
                                 ));
                                 bind_values.push(code_part.to_string());
-                                bind_values.push(value_code.to_string());
+                                bind_values.push(value_code_only.to_string());
                             }
                         }
                     }
@@ -2409,6 +2416,13 @@ impl ObservationRepository {
                     "combo-code-value-concept" => {
                         // Parse composite: system|code$value_code or code$value_code
                         if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse value part for optional system|code
+                            let value_code_only = if value_code.contains('|') {
+                                value_code.split('|').nth(1).unwrap_or(value_code)
+                            } else {
+                                value_code
+                            };
+
                             // Parse code part for optional system|code
                             if code_part.contains('|') {
                                 let parts: Vec<&str> = code_part.split('|').collect();
@@ -2420,7 +2434,7 @@ impl ObservationRepository {
                                     ));
                                     bind_values.push(parts[0].to_string());
                                     bind_values.push(parts[1].to_string());
-                                    bind_values.push(value_code.to_string());
+                                    bind_values.push(value_code_only.to_string());
                                 }
                             } else {
                                 let bind_idx = bind_values.len() + 1;
@@ -2429,7 +2443,7 @@ impl ObservationRepository {
                                     bind_idx, bind_idx + 1
                                 ));
                                 bind_values.push(code_part.to_string());
-                                bind_values.push(value_code.to_string());
+                                bind_values.push(value_code_only.to_string());
                             }
                         }
                     }
@@ -2480,6 +2494,13 @@ impl ObservationRepository {
                     "component-code-value-concept" => {
                         // Parse composite: system|code$value_code or code$value_code
                         if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse value part for optional system|code
+                            let value_code_only = if value_code.contains('|') {
+                                value_code.split('|').nth(1).unwrap_or(value_code)
+                            } else {
+                                value_code
+                            };
+
                             // Parse code part for optional system|code
                             if code_part.contains('|') {
                                 let parts: Vec<&str> = code_part.split('|').collect();
@@ -2491,7 +2512,7 @@ impl ObservationRepository {
                                     ));
                                     bind_values.push(parts[0].to_string());
                                     bind_values.push(parts[1].to_string());
-                                    bind_values.push(value_code.to_string());
+                                    bind_values.push(value_code_only.to_string());
                                 }
                             } else {
                                 let bind_idx = bind_values.len() + 1;
@@ -2500,7 +2521,7 @@ impl ObservationRepository {
                                     bind_idx, bind_idx + 1
                                 ));
                                 bind_values.push(code_part.to_string());
-                                bind_values.push(value_code.to_string());
+                                bind_values.push(value_code_only.to_string());
                             }
                         }
                     }
