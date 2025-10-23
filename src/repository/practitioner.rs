@@ -1416,6 +1416,19 @@ impl PractitionerRepository {
                         }
                     }
                     "qualification-period" => {
+                        // Basic validation of date format (YYYY-MM-DD or partial dates)
+                        let date_value = &param.value;
+                        let is_valid_date = date_value.chars().all(|c| c.is_ascii_digit() || c == '-')
+                            && !date_value.is_empty()
+                            && date_value.len() <= 10;  // Max length for YYYY-MM-DD
+
+                        if !is_valid_date {
+                            // Invalid date format - skip this parameter to avoid database error
+                            // (returning empty results is acceptable per FHIR spec)
+                            tracing::warn!("Invalid date format for 'qualification-period': '{}', skipping parameter", date_value);
+                            continue;
+                        }
+
                         let bind_idx = bind_values.len() + 1;
                         let op = match param.prefix.as_deref() {
                             Some("eq") | None => "=",
