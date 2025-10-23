@@ -186,23 +186,70 @@ sql.push_str(&format!(" AND resource.column_code = ${}", bind_idx));
 
 **Results**: Tests improved from 183 → 184 passing. Category search now working correctly.
 
-## Current Test Analysis (Session 2025-10-23)
+### 5. HumanName String Search Generation
+**Problem**: Generator was not creating search match arms for `given`, `name`, and `phonetic` searches because of incorrect deduplication logic.
+
+**Root Cause**: Repository generator used `deduplicate-searches` which removed searches with the same extraction key (e.g., `family`, `given`, `name` all extract from `patient.name`). This was correct for extractors but wrong for repository search matching.
+
+**Fix**: Three-part solution in `codegen/repositories.scm` and `codegen/general.scm`:
+
+1. **Added `search-humanname-field` helper** (`codegen/general.scm:92-140`):
+```scheme
+; Returns "all", "family", "given", "prefix", "suffix", or "text"
+; Based on XML path structure:
+;   1 part (patient.name) → "all"
+;   2 parts (patient.name/humanname.given) → "given"
+(define (search-humanname-field search)
+  (let* ((part-count (length part-list)))
+    (cond
+      ((= part-count 1) "all")
+      ((= part-count 2)
+       (let ((ref2 (% "ref" (cadr part-list))))
+         (cond
+           ((string-ci=? ref2 "humanname.family") "family")
+           ((string-ci=? ref2 "humanname.given") "given")
+           ...))))))
+```
+
+2. **Modified `generate-string-param-match`** to accept `search` parameter and route to field-specific generator:
+```scheme
+(define (generate-string-param-match search-name extraction-key resource-lower search)
+  (if (string=? extraction-key "name")
+      (let ((field-type (search-humanname-field search)))
+        (if field-type
+            (generate-humanname-search search-name field-type resource-lower)
+            ""))
+      ""))
+```
+
+3. **Fixed deduplication** - Use `all-searches` for match arms, `unique-searches` for CRUD operations:
+```scheme
+(let* ((search-list ...)
+       (unique-searches (deduplicate-searches search-list))
+       (all-searches search-list))  ; Keep all for match arms
+  ...
+  (generate-search-param-matches resource-name resource-lower all-searches))
+```
+
+**Generated Code Examples**:
+- `family` search → queries only `family_name` column
+- `given` search → queries only `given_name` column
+- `name` search → queries ALL fields (family_name, given_name, prefix, suffix, name_text) with OR logic
+
+**Results**: Tests remain at 194/229 passing. HumanName searches now work:
+- ✅ `test_search_by_family_name` - PASSED
+- ✅ `test_search_by_given_name` - PASSED
+- ✅ `test_search_repeated_given_and_behavior` - PASSED
+
+## Current Test Analysis (Session 2025-10-23 - Updated)
 
 **Status**: 194/229 tests passing (35 failures)
 
 ### Failures Breakdown
 
-**Generator Bugs to Fix** (estimated ~8-10 failures):
+**Generator Bugs to Fix** (estimated ~2-3 failures):
 
-1. **Missing HumanName string search parameters** - `given`, `name` on Patient/Practitioner not generated
-   - **Root cause**: `generate-string-param-match` in `codegen/repositories.scm:636` only generates code when `extraction-key="name"`
-   - **Problem**: FHIR has multiple search parameters that all point to HumanName:
-     - `name` - should search ALL fields (family, given, prefix, suffix, text)
-     - `family` - should search ONLY `family_name`
-     - `given` - should search ONLY `given_name`
-   - **Current behavior**: Only `family` is manually implemented (patient.rs:550), and it incorrectly searches ALL fields
-   - **Fix needed**: Generator must inspect the XML `<paths>` to determine which specific HumanName component(s) to search
-   - **Affects**: ~5 failing tests for Patient/Practitioner name searches
+1. ✅ **FIXED: Missing HumanName string search parameters** - `given`, `name` searches now generated correctly
 
 2. **Missing Observation.date column** - SQL error "column observation.date does not exist"
    - One failing test in search chaining
@@ -274,10 +321,10 @@ The remaining 46 failing tests are NOT code generator bugs. They fall into these
 - ⏳ ~25-27 failures are unimplemented features (chaining, composite, includes)
 
 **Next Actions**:
-1. Fix HumanName string search generation in `codegen/repositories.scm`
-2. Investigate Observation.date column issue
-3. Add DB error code mapping for invalid dates (22007 → 400)
-4. Re-run tests to measure improvement
+1. ✅ DONE: Fix HumanName string search generation in `codegen/repositories.scm`
+2. Investigate `:missing` and `:not` modifiers (may already work, need testing)
+3. Investigate repeated parameter AND semantics (`?family=Smith&family=Jones`)
+4. Add DB error code mapping for invalid dates (22007 → 400) - not a generator issue
 
 **Previous Summary** (now outdated):
 - ✅ **All actual generator bugs are FIXED** (SQL type casting)
