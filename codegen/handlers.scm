@@ -45,7 +45,7 @@ pub type Shared"resource-name"Repo = Arc<"resource-name"Repository>;
 
 ; Generate search handler
 (define (generate-search-handler resource-name resource-lower resource-plural)
-  ($"/// Search "resource-plural"
+  ($ ($"/// Search "resource-plural"
 pub async fn search_"resource-plural"(
     State(repo): State<""Shared"resource-name"Repo>,
     Query(params): Query<""HashMap<""String, String>>,
@@ -67,6 +67,18 @@ pub async fn search_"resource-plural"(
             serde_json::to_string(&""r.content)?
         ));
     }
+
+    // Process _include parameter
+    if let Some(include_param) = params.get(\"_include\") {
+")
+     (generate-include-processing resource-name resource-lower)
+     ($"    }
+
+    // Process _revinclude parameter
+    if let Some(revinclude_param) = params.get(\"_revinclude\") {
+")
+     (generate-revinclude-processing resource-name resource-lower)
+     ($"    }
 
     // Build pagination links
     let base_url = format!(\"http://localhost:3000{}\", uri.path());
@@ -148,7 +160,7 @@ pub async fn search_"resource-plural"(
     }
 }
 
-"))
+")))
 
 ; Generate create handler
 (define (generate-create-handler resource-name resource-lower)
@@ -523,3 +535,105 @@ pub async fn get_"resource-lower"_type_history(
 ")
     "")
 )))
+
+; Generate _include processing logic
+(define (generate-include-processing resource-name resource-lower)
+  (case resource-name
+    (("Patient") ($"
+        // Parse include parameter: Patient:general-practitioner
+        if let Some((resource_type, field)) = include_param.split_once(':') {
+            if resource_type == \"Patient\" &""&"" field == \"general-practitioner\" {
+                // Extract practitioner IDs from matched patients
+                let mut practitioner_ids = std::collections::HashSet::new();
+                for patient in &""patients {
+                    if let Some(gp_array) = patient.content.get(\"generalPractitioner\").and_then(|v| v.as_array()) {
+                        for gp in gp_array {
+                            if let Some(reference) = gp.get(\"reference\").and_then(|r| r.as_str()) {
+                                if let Some(id) = reference.strip_prefix(\"Practitioner/\") {
+                                    practitioner_ids.insert(id.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fetch practitioners by IDs
+                if !practitioner_ids.is_empty() {
+                    let ids: Vec<""String> = practitioner_ids.into_iter().collect();
+                    let practitioners = repo.find_practitioners_by_ids(&""ids).await?;
+                    for prac in practitioners {
+                        entries.push(format!(
+                            r#\"{{\"resource\":{},\"search\":{{\"mode\":\"include\"}}}}\"#,
+                            serde_json::to_string(&""prac.content)?
+                        ));
+                    }
+                }
+            }
+        }
+"))
+    (("Observation") ($"
+        // Parse include parameter: Observation:subject
+        if let Some((resource_type, field)) = include_param.split_once(':') {
+            if resource_type == \"Observation\" &""&"" field == \"subject\" {
+                // Extract patient IDs from matched observations
+                let mut patient_ids = std::collections::HashSet::new();
+                for observation in &""observations {
+                    if let Some(subject) = observation.content.get(\"subject\") {
+                        if let Some(reference) = subject.get(\"reference\").and_then(|r| r.as_str()) {
+                            if let Some(id) = reference.strip_prefix(\"Patient/\") {
+                                patient_ids.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+                // Fetch patients by IDs
+                for patient_id in patient_ids {
+                    if let Ok(patient) = repo.read_patient(&""patient_id).await {
+                        entries.push(format!(
+                            r#\"{{\"resource\":{},\"search\":{{\"mode\":\"include\"}}}}\"#,
+                            serde_json::to_string(&""patient.content)?
+                        ));
+                    }
+                }
+            }
+        }
+"))
+    (else "")))
+
+; Generate _revinclude processing logic
+(define (generate-revinclude-processing resource-name resource-lower)
+  (case resource-name
+    (("Patient") ($"
+        // Parse revinclude parameter: Observation:subject
+        if let Some((resource_type, field)) = revinclude_param.split_once(':') {
+            if resource_type == \"Observation\" &""&"" field == \"subject\" {
+                // For each matched patient, find observations that reference them
+                for patient in &""patients {
+                    let observations = repo.find_observations_by_patient(&""patient.id).await?;
+                    for obs in observations {
+                        entries.push(format!(
+                            r#\"{{\"resource\":{},\"search\":{{\"mode\":\"include\"}}}}\"#,
+                            serde_json::to_string(&""obs.content)?
+                        ));
+                    }
+                }
+            }
+        }
+"))
+    (("Practitioner") ($"
+        // Parse revinclude parameter: Patient:general-practitioner
+        if let Some((resource_type, field)) = revinclude_param.split_once(':') {
+            if resource_type == \"Patient\" &""&"" field == \"general-practitioner\" {
+                // For each matched practitioner, find patients that reference them
+                for practitioner in &""practitioners {
+                    let patients = repo.find_patients_by_practitioner(&""practitioner.id).await?;
+                    for patient in patients {
+                        entries.push(format!(
+                            r#\"{{\"resource\":{},\"search\":{{\"mode\":\"include\"}}}}\"#,
+                            serde_json::to_string(&""patient.content)?
+                        ));
+                    }
+                }
+            }
+        }
+"))
+    (else "")))

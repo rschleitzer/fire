@@ -41,6 +41,30 @@ pub async fn search_practitioners(
         ));
     }
 
+    // Process _include parameter
+    if let Some(include_param) = params.get("_include") {
+    }
+
+    // Process _revinclude parameter
+    if let Some(revinclude_param) = params.get("_revinclude") {
+
+        // Parse revinclude parameter: Patient:general-practitioner
+        if let Some((resource_type, field)) = revinclude_param.split_once(':') {
+            if resource_type == "Patient" && field == "general-practitioner" {
+                // For each matched practitioner, find patients that reference them
+                for practitioner in &practitioners {
+                    let patients = repo.find_patients_by_practitioner(&practitioner.id).await?;
+                    for patient in patients {
+                        entries.push(format!(
+                            r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                            serde_json::to_string(&patient.content)?
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // Build pagination links
     let base_url = format!("http://localhost:3000{}", uri.path());
     let query_params = uri.query().unwrap_or("");

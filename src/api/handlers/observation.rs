@@ -41,6 +41,40 @@ pub async fn search_observations(
         ));
     }
 
+    // Process _include parameter
+    if let Some(include_param) = params.get("_include") {
+
+        // Parse include parameter: Observation:subject
+        if let Some((resource_type, field)) = include_param.split_once(':') {
+            if resource_type == "Observation" && field == "subject" {
+                // Extract patient IDs from matched observations
+                let mut patient_ids = std::collections::HashSet::new();
+                for observation in &observations {
+                    if let Some(subject) = observation.content.get("subject") {
+                        if let Some(reference) = subject.get("reference").and_then(|r| r.as_str()) {
+                            if let Some(id) = reference.strip_prefix("Patient/") {
+                                patient_ids.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+                // Fetch patients by IDs
+                for patient_id in patient_ids {
+                    if let Ok(patient) = repo.read_patient(&patient_id).await {
+                        entries.push(format!(
+                            r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                            serde_json::to_string(&patient.content)?
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Process _revinclude parameter
+    if let Some(revinclude_param) = params.get("_revinclude") {
+    }
+
     // Build pagination links
     let base_url = format!("http://localhost:3000{}", uri.path());
     let query_params = uri.query().unwrap_or("");

@@ -41,6 +41,60 @@ pub async fn search_patients(
         ));
     }
 
+    // Process _include parameter
+    if let Some(include_param) = params.get("_include") {
+
+        // Parse include parameter: Patient:general-practitioner
+        if let Some((resource_type, field)) = include_param.split_once(':') {
+            if resource_type == "Patient" && field == "general-practitioner" {
+                // Extract practitioner IDs from matched patients
+                let mut practitioner_ids = std::collections::HashSet::new();
+                for patient in &patients {
+                    if let Some(gp_array) = patient.content.get("generalPractitioner").and_then(|v| v.as_array()) {
+                        for gp in gp_array {
+                            if let Some(reference) = gp.get("reference").and_then(|r| r.as_str()) {
+                                if let Some(id) = reference.strip_prefix("Practitioner/") {
+                                    practitioner_ids.insert(id.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fetch practitioners by IDs
+                if !practitioner_ids.is_empty() {
+                    let ids: Vec<String> = practitioner_ids.into_iter().collect();
+                    let practitioners = repo.find_practitioners_by_ids(&ids).await?;
+                    for prac in practitioners {
+                        entries.push(format!(
+                            r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                            serde_json::to_string(&prac.content)?
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Process _revinclude parameter
+    if let Some(revinclude_param) = params.get("_revinclude") {
+
+        // Parse revinclude parameter: Observation:subject
+        if let Some((resource_type, field)) = revinclude_param.split_once(':') {
+            if resource_type == "Observation" && field == "subject" {
+                // For each matched patient, find observations that reference them
+                for patient in &patients {
+                    let observations = repo.find_observations_by_patient(&patient.id).await?;
+                    for obs in observations {
+                        entries.push(format!(
+                            r#"{{"resource":{},"search":{{"mode":"include"}}}}"#,
+                            serde_json::to_string(&obs.content)?
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     // Build pagination links
     let base_url = format!("http://localhost:3000{}", uri.path());
     let query_params = uri.query().unwrap_or("");
