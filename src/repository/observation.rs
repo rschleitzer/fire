@@ -1918,7 +1918,7 @@ impl ObservationRepository {
                             Some("le") => "<=",
                             _ => "=",
                         };
-                        sql.push_str(&format!("(observation.date {} ${}::date)", op, bind_idx));
+                        sql.push_str(&format!("(observation.date_datetime {} ${}::timestamptz)", op, bind_idx));
                         bind_values.push(param.value.clone());
                     }
                     "encounter" => {
@@ -3014,7 +3014,7 @@ impl ObservationRepository {
                             Some("le") => "<=",
                             _ => "=",
                         };
-                        sql.push_str(&format!("(observation.value_date {} ${}::date)", op, bind_idx));
+                        sql.push_str(&format!("(observation.value_date_datetime {} ${}::timestamptz)", op, bind_idx));
                         bind_values.push(param.value.clone());
                     }
                     "value-reference" => {
@@ -3454,6 +3454,14 @@ impl ObservationRepository {
                                 // For collections, unnest the array first
                                 sql.push_str(&format!(
                                     "EXISTS (SELECT 1 FROM {} JOIN unnest(observation.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                    target_table, ref_col, target_table, target_table, bind_idx
+                                ));
+                                bind_values.push(format!("%{}%", param.value));
+                            }
+                            else if chained_field == "given" {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM {} JOIN unnest(observation.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.given_name) AS v WHERE v ILIKE ${}))",
                                     target_table, ref_col, target_table, target_table, bind_idx
                                 ));
                                 bind_values.push(format!("%{}%", param.value));

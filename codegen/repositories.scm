@@ -1397,6 +1397,14 @@ impl "struct-name" {
                                 ));
                                 bind_values.push(format!(\"%{}%\", param.value));
                             }
+                            else if chained_field == \"given\" {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&""format!(
+                                    \"EXISTS (SELECT 1 FROM {} JOIN unnest("resource-lower".{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.given_name) AS v WHERE v ILIKE ${}))\",
+                                    target_table, ref_col, target_table, target_table, bind_idx
+                                ));
+                                bind_values.push(format!(\"%{}%\", param.value));
+                            }
                             else if chained_field == \"identifier\" {
                                 if param.value.contains('|') {
                                     let parts: Vec<&""str> = param.value.split('|').collect();
@@ -1917,7 +1925,7 @@ impl "struct-name" {
         (case search-type
           (("string") (generate-string-param-match-or search-name extraction-key resource-lower search))
           (("token") (generate-token-param-match-or search-name col-name search resource-lower is-collection))
-          (("date") (generate-date-param-match-or search-name col-name resource-lower))
+          (("date") (generate-date-param-match-or search-name col-name resource-lower search))
           (("reference") (generate-reference-param-match-or search-name col-name resource-lower is-collection search))
           (("composite") (generate-composite-param-match-or search-name resource-lower search))
           (("special") "")
@@ -2114,13 +2122,14 @@ impl "struct-name" {
     (else "")))
 
 ; Date parameter match for OR logic (no AND prefix)
-(define (generate-date-param-match-or search-name col-name resource-lower)
-  (let* ((is-datetime-col (or (string-ci=? col-name "last_updated")
-                               (string-ci=? col-name "_lastupdated")
-                               (string-suffix? "_datetime" col-name)
-                               (string-suffix? "_instant" col-name)
-                               (string-suffix? "_period_start" col-name)
-                               (string-suffix? "_period_end" col-name)))
+(define (generate-date-param-match-or search-name col-name resource-lower search)
+  (let* ((actual-col-name (search-param-to-column-name search))
+         (is-datetime-col (or (string-ci=? actual-col-name "last_updated")
+                               (string-ci=? actual-col-name "_lastupdated")
+                               (string-suffix? "_datetime" actual-col-name)
+                               (string-suffix? "_instant" actual-col-name)
+                               (string-suffix? "_period_start" actual-col-name)
+                               (string-suffix? "_period_end" actual-col-name)))
          (cast-suffix (if is-datetime-col "::timestamptz" "::date")))
     ($"                    \""search-name"\" => {
                         // Basic validation of date format (YYYY-MM-DD or partial dates)
@@ -2146,7 +2155,7 @@ impl "struct-name" {
                             Some(\"le\") => \"<=\",
                             _ => \"=\",
                         };
-                        sql.push_str(&""format!(\"("resource-lower"."col-name" {} ${}"cast-suffix")\", op, bind_idx));
+                        sql.push_str(&""format!(\"("resource-lower"."actual-col-name" {} ${}"cast-suffix")\", op, bind_idx));
                         bind_values.push(param.value.clone());
                     }
 ")))
