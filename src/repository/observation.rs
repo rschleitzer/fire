@@ -2309,6 +2309,245 @@ impl ObservationRepository {
                             }
                         }
                     }
+                    "code-value-concept" => {
+                        // Parse composite: system|code$value_code or code$value_code
+                        if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "(observation.code_system = ${} AND observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code))",
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_code.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "(observation.code_code = ${} AND ${} = ANY(observation.value_codeable_concept_code))",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_code.to_string());
+                            }
+                        }
+                    }
+                    "code-value-quantity" => {
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_part)) = param.value.split_once('$') {
+                            // Parse value with optional prefix
+                            let (prefix_str, value_str) = if value_part.starts_with("gt") {
+                                (">", &value_part[2..])
+                            } else if value_part.starts_with("ge") {
+                                (">=", &value_part[2..])
+                            } else if value_part.starts_with("lt") {
+                                ("<", &value_part[2..])
+                            } else if value_part.starts_with("le") {
+                                ("<=", &value_part[2..])
+                            } else if value_part.starts_with("ne") {
+                                ("!=", &value_part[2..])
+                            } else if value_part.starts_with("eq") {
+                                ("=", &value_part[2..])
+                            } else {
+                                ("=", value_part)
+                            };
+
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "(observation.code_system = ${} AND observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric)",
+                                        bind_idx, bind_idx + 1, prefix_str, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "(observation.code_code = ${} AND observation.value_quantity_value {} ${}::numeric)",
+                                    bind_idx, prefix_str, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_str.to_string());
+                            }
+                        }
+                    }
+                    "code-value-string" => {
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_str)) = param.value.split_once('$') {
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "(observation.code_system = ${} AND observation.code_code = ${} AND observation.value ILIKE ${})",
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(format!("%{}%", value_str));
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "(observation.code_code = ${} AND observation.value ILIKE ${})",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(format!("%{}%", value_str));
+                            }
+                        }
+                    }
+                    "combo-code-value-concept" => {
+                        // Parse composite: system|code$value_code or code$value_code
+                        if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})",
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_code.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_code.to_string());
+                            }
+                        }
+                    }
+                    "combo-code-value-quantity" => {
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_part)) = param.value.split_once('$') {
+                            // Parse value with optional prefix
+                            let (prefix_str, value_str) = if value_part.starts_with("gt") {
+                                (">", &value_part[2..])
+                            } else if value_part.starts_with("ge") {
+                                (">=", &value_part[2..])
+                            } else if value_part.starts_with("lt") {
+                                ("<", &value_part[2..])
+                            } else if value_part.starts_with("le") {
+                                ("<=", &value_part[2..])
+                            } else if value_part.starts_with("ne") {
+                                ("!=", &value_part[2..])
+                            } else if value_part.starts_with("eq") {
+                                ("=", &value_part[2..])
+                            } else {
+                                ("=", value_part)
+                            };
+
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)",
+                                        bind_idx, bind_idx + 1, prefix_str, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)",
+                                    bind_idx, prefix_str, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_str.to_string());
+                            }
+                        }
+                    }
+                    "component-code-value-concept" => {
+                        // Parse composite: system|code$value_code or code$value_code
+                        if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})",
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_code.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_code.to_string());
+                            }
+                        }
+                    }
+                    "component-code-value-quantity" => {
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_part)) = param.value.split_once('$') {
+                            // Parse value with optional prefix
+                            let (prefix_str, value_str) = if value_part.starts_with("gt") {
+                                (">", &value_part[2..])
+                            } else if value_part.starts_with("ge") {
+                                (">=", &value_part[2..])
+                            } else if value_part.starts_with("lt") {
+                                ("<", &value_part[2..])
+                            } else if value_part.starts_with("le") {
+                                ("<=", &value_part[2..])
+                            } else if value_part.starts_with("ne") {
+                                ("!=", &value_part[2..])
+                            } else if value_part.starts_with("eq") {
+                                ("=", &value_part[2..])
+                            } else {
+                                ("=", value_part)
+                            };
+
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)",
+                                        bind_idx, bind_idx + 1, prefix_str, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    "EXISTS (SELECT 1 FROM jsonb_array_elements(observation.content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)",
+                                    bind_idx, prefix_str, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_str.to_string());
+                            }
+                        }
+                    }
                     _ => {
                         // Unknown parameter - ignore per FHIR spec
                         tracing::warn!("Unknown search parameter for Observation: {}", param.name);

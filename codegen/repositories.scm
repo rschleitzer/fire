@@ -1797,7 +1797,7 @@ impl "struct-name" {
           (("token") (generate-token-param-match-or search-name col-name search resource-lower is-collection))
           (("date") (generate-date-param-match-or search-name col-name resource-lower))
           (("reference") (generate-reference-param-match-or search-name col-name resource-lower is-collection search))
-          (("composite") "") ; Skip composite for now
+          (("composite") (generate-composite-param-match-or search-name resource-lower search))
           (("special") "")
           (else "")))))
 
@@ -2124,6 +2124,283 @@ impl "struct-name" {
                         }
                     }
 ")))))
+
+; Composite parameter match for OR logic (no AND prefix)
+(define (generate-composite-param-match-or search-name resource-lower search)
+  ; Parse composite search components from XML
+  (let* ((paths-node (select-children "paths" search))
+         (first-paths (if (node-list-empty? paths-node) #f (node-list-first paths-node)))
+         (path-nodes (if first-paths (select-children "path" first-paths) (empty-node-list)))
+         (first-path (if (node-list-empty? path-nodes) #f (node-list-first path-nodes)))
+         (components-node (if first-path (select-children "components" first-path) (empty-node-list)))
+         (first-components (if (node-list-empty? components-node) #f (node-list-first components-node)))
+         (component-nodes (if first-components (select-children "component" first-components) (empty-node-list)))
+         (component-list (if (node-list-empty? component-nodes) '() (node-list->list component-nodes)))
+         ; Check if this is a component search (searches within observation.component array)
+         (parts-node (if first-path (select-children "parts" first-path) (empty-node-list)))
+         (first-parts (if (node-list-empty? parts-node) #f (node-list-first parts-node)))
+         (part-nodes (if first-parts (select-children "part" first-parts) (empty-node-list)))
+         (first-part (if (node-list-empty? part-nodes) #f (node-list-first part-nodes)))
+         (is-component-search (and first-part
+                                   (let ((ref (% "ref" first-part)))
+                                     (string-suffix? ".component" ref)))))
+
+    (if (< (length component-list) 2)
+        ""  ; Composite must have at least 2 components
+        (let* ((comp1 (car component-list))
+               (comp2 (cadr component-list))
+               (comp1-ref (% "ref" comp1))
+               (comp2-ref (% "ref" comp2))
+               ; Determine component types
+               (comp2-casts (select-children "casts" comp2))
+               (first-casts (if (node-list-empty? comp2-casts) #f (node-list-first comp2-casts)))
+               (cast-nodes (if first-casts (select-children "cast" first-casts) (empty-node-list)))
+               (first-cast (if (node-list-empty? cast-nodes) #f (node-list-first cast-nodes)))
+               (value-type (if first-cast (% "to" first-cast) ""))
+               ; Extract column names from refs (e.g., "observation.code" -> "code")
+               (code-col (let ((parts (string-split comp1-ref ".")))
+                          (if (null? parts) "" (car (reverse parts)))))
+               (value-col (let ((parts (string-split comp2-ref ".")))
+                           (if (null? parts) "" (car (reverse parts))))))
+
+          (cond
+            ; Component searches - query JSONB within observation.content->'component' array
+            (is-component-search
+             (cond
+               ((string=? value-type "Quantity")
+                (generate-component-code-value-quantity-match search-name resource-lower))
+               ((string=? value-type "CodeableConcept")
+                (generate-component-code-value-concept-match search-name resource-lower))
+               (else "")))
+
+            ; Regular composite searches using indexed columns
+            ((string=? value-type "Quantity")
+             (generate-code-value-quantity-match search-name code-col resource-lower))
+            ((string=? value-type "CodeableConcept")
+             (generate-code-value-concept-match search-name code-col resource-lower))
+            ((string=? value-type "string")
+             (generate-code-value-string-match search-name code-col value-col resource-lower))
+            ((string=? value-type "date")
+             (generate-code-value-date-match search-name code-col value-col resource-lower))
+            (else ""))))))
+
+; Generate code-value-quantity composite search (uses indexed columns)
+(define (generate-code-value-quantity-match search-name code-col resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_part)) = param.value.split_once('$') {
+                            // Parse value with optional prefix
+                            let (prefix_str, value_str) = if value_part.starts_with(\"gt\") {
+                                (\">\", &value_part[2..])
+                            } else if value_part.starts_with(\"ge\") {
+                                (\">=\", &value_part[2..])
+                            } else if value_part.starts_with(\"lt\") {
+                                (\"<\", &value_part[2..])
+                            } else if value_part.starts_with(\"le\") {
+                                (\"<=\", &value_part[2..])
+                            } else if value_part.starts_with(\"ne\") {
+                                (\"!=\", &value_part[2..])
+                            } else if value_part.starts_with(\"eq\") {
+                                (\"=\", &value_part[2..])
+                            } else {
+                                (\"=\", value_part)
+                            };
+
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"("resource-lower"."code-col"_system = ${} AND "resource-lower"."code-col"_code = ${} AND "resource-lower".value_quantity_value {} ${}::numeric)\",<![CDATA[
+                                        bind_idx, bind_idx + 1, prefix_str, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"("resource-lower"."code-col"_code = ${} AND "resource-lower".value_quantity_value {} ${}::numeric)\",<![CDATA[
+                                    bind_idx, prefix_str, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_str.to_string());
+                            }
+                        }
+                    ]]>}
+"))
+
+; Generate code-value-concept composite search (uses indexed columns)
+(define (generate-code-value-concept-match search-name code-col resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$value_code or code$value_code
+                        if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"("resource-lower"."code-col"_system = ${} AND "resource-lower"."code-col"_code = ${} AND ${} = ANY("resource-lower".value_codeable_concept_code))\",<![CDATA[
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_code.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"("resource-lower"."code-col"_code = ${} AND ${} = ANY("resource-lower".value_codeable_concept_code))\",<![CDATA[
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_code.to_string());
+                            }
+                        }
+                    ]]>}
+"))
+
+; Generate code-value-string composite search
+(define (generate-code-value-string-match search-name code-col value-col resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_str)) = param.value.split_once('$') {
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"("resource-lower"."code-col"_system = ${} AND "resource-lower"."code-col"_code = ${} AND "resource-lower"."value-col" ILIKE ${})\",<![CDATA[
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(format!(\"%{}%\", value_str));
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"("resource-lower"."code-col"_code = ${} AND "resource-lower"."value-col" ILIKE ${})\",<![CDATA[
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(format!(\"%{}%\", value_str));
+                            }
+                        }
+                    ]]>}
+"))
+
+; Generate code-value-date composite search
+(define (generate-code-value-date-match search-name code-col value-col resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$date or code$date
+                        if let Some((code_part, date_str)) = param.value.split_once('$') {
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"("resource-lower"."code-col"_system = ${} AND "resource-lower"."code-col"_code = ${} AND "resource-lower"."value-col" = ${})\",<![CDATA[
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(date_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"("resource-lower"."code-col"_code = ${} AND "resource-lower"."value-col" = ${})\",<![CDATA[
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(date_str.to_string());
+                            }
+                        }
+                    ]]>}
+"))
+
+; Generate component-code-value-quantity composite search (JSONB query)
+(define (generate-component-code-value-quantity-match search-name resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$value or code$value
+                        if let Some((code_part, value_part)) = param.value.split_once('$') {
+                            // Parse value with optional prefix
+                            let (prefix_str, value_str) = if value_part.starts_with(\"gt\") {
+                                (\">\", &value_part[2..])
+                            } else if value_part.starts_with(\"ge\") {
+                                (\">=\", &value_part[2..])
+                            } else if value_part.starts_with(\"lt\") {
+                                (\"<\", &value_part[2..])
+                            } else if value_part.starts_with(\"le\") {
+                                (\"<=\", &value_part[2..])
+                            } else if value_part.starts_with(\"ne\") {
+                                (\"!=\", &value_part[2..])
+                            } else if value_part.starts_with(\"eq\") {
+                                (\"=\", &value_part[2..])
+                            } else {
+                                (\"=\", value_part)
+                            };
+
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"EXISTS (SELECT 1 FROM jsonb_array_elements("resource-lower".content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)\",<![CDATA[
+                                        bind_idx, bind_idx + 1, prefix_str, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_str.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"EXISTS (SELECT 1 FROM jsonb_array_elements("resource-lower".content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND (comp->'valueQuantity'->>'value')::numeric {} ${}::numeric)\",<![CDATA[
+                                    bind_idx, prefix_str, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_str.to_string());
+                            }
+                        }
+                    ]]>}
+"))
+
+; Generate component-code-value-concept composite search (JSONB query)
+(define (generate-component-code-value-concept-match search-name resource-lower)
+  ($"                    \""search-name"\" => {<![CDATA[
+                        // Parse composite: system|code$value_code or code$value_code
+                        if let Some((code_part, value_code)) = param.value.split_once('$') {
+                            // Parse code part for optional system|code
+                            if code_part.contains('|') {
+                                let parts: Vec<&str> = code_part.split('|').collect();
+                                if parts.len() == 2 {
+                                    let bind_idx = bind_values.len() + 1;
+                                    sql.push_str(&format!(
+                                        ]]>\"EXISTS (SELECT 1 FROM jsonb_array_elements("resource-lower".content->'component') AS comp WHERE comp->'code'->'coding'->0->>'system' = ${} AND comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})\",<![CDATA[
+                                        bind_idx, bind_idx + 1, bind_idx + 2
+                                    ));
+                                    bind_values.push(parts[0].to_string());
+                                    bind_values.push(parts[1].to_string());
+                                    bind_values.push(value_code.to_string());
+                                }
+                            } else {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&format!(
+                                    ]]>\"EXISTS (SELECT 1 FROM jsonb_array_elements("resource-lower".content->'component') AS comp WHERE comp->'code'->'coding'->0->>'code' = ${} AND comp->'valueCodeableConcept'->'coding'->0->>'code' = ${})\",<![CDATA[
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(code_part.to_string());
+                                bind_values.push(value_code.to_string());
+                            }
+                        }
+                    ]]>}
+"))
 
 ; Generate helper methods (resource-specific)
 (define (generate-helper-methods resource-name resource-lower)

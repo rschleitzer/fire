@@ -421,6 +421,28 @@
     (and (>= str-len suffix-len)
          (string=? suffix (substring str (- str-len suffix-len) str-len)))))
 
+; Split a string by a delimiter character
+(define (string-split str delimiter-char)
+  (let ((delimiter (if (char? delimiter-char)
+                       delimiter-char
+                       (string-ref delimiter-char 0))))
+    (let loop ((chars (string->list str))
+               (current '())
+               (result '()))
+      (cond
+        ((null? chars)
+         (if (null? current)
+             (reverse result)
+             (reverse (cons (list->string (reverse current)) result))))
+        ((char=? (car chars) delimiter)
+         (loop (cdr chars)
+               '()
+               (cons (list->string (reverse current)) result)))
+        (else
+         (loop (cdr chars)
+               (cons (car chars) current)
+               result))))))
+
 ; Join a list of strings with a separator
 (define (join-strings strings separator)
   (if (null? strings)

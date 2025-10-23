@@ -238,9 +238,28 @@ The extractor generator in `structs.scm` (lines 96-534) handles all FHIR search 
 
 **SGML Escaping in DSSSL:**
 ```scheme
-; Escape < and & with "" (double quotes)
+; Two approaches for handling < and & characters:
+
+; Approach 1: Escape with "" (double quotes) - works for simple cases
 ($ "Option<""String>")        ; Option<String>
 ($ "fn get(&""self)")         ; fn get(&self)
+
+; Approach 2: CDATA sections - RECOMMENDED for complex Rust code
+; Use CDATA when generating code with many & and < characters
+; CDATA allows literal text without any escaping
+($"<![CDATA[
+    let parts: Vec<&str> = code_part.split('|').collect();
+    sql.push_str(&format!(
+        \"SELECT * FROM table WHERE x < 5 AND y > 3\",
+        bind_idx
+    ));
+]]>")
+
+; Note: CDATA is especially useful for:
+; - Rust generics: Vec<&str>, Option<String>
+; - Format macros: &format!()
+; - SQL with comparison operators: <, >, <=, >=
+; - Any code with frequent & and < characters
 ```
 
 **Type Mapping:**
