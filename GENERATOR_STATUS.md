@@ -322,11 +322,55 @@ match modifier {
    - Needs DB error code 22007 → 400 Bad Request mapping in `src/error.rs`
    - Not a generator issue - runtime error handling
 
-**Unimplemented Features** (~31 failures):
-- Search Chaining (13 tests) - Requires JOIN logic
-- Include/_revinclude (4 tests) - Requires JOIN logic
-- Composite Search (12 tests) - Not in generator yet
-- Repeated parameter AND semantics (2 tests) - Search parser issue
+**Unimplemented Features** (32 failures total):
+
+1. **Composite Search Parameters** (12 tests) - `tests/test_composite_search.py`
+   - Tests: `code-value-quantity`, `code-value-concept`, `component-code-value-quantity`, `component-code-value-concept`
+   - Status: Generator currently skips composite searches (`repositories.scm:1381`)
+   - XML defines 8 composite searches for Observation: `code-value-concept`, `code-value-date`, `code-value-quantity`, `code-value-string`, `combo-code-value-concept`, `combo-code-value-quantity`, `component-code-value-concept`, `component-code-value-quantity`
+   - Format: `?code-value-quantity=system|code$prefix value` (e.g., `http://loinc.org|8480-6$gt150`)
+   - Requirements:
+     - Parse composite parameter format (components separated by `$`)
+     - Extract component values from XML `<components>` definition
+     - Generate SQL to match ALL components simultaneously
+     - Support prefixes (`gt`, `lt`, `eq`) for quantity components
+   - Complexity: **High** - requires composite parameter parsing and multi-component SQL generation
+
+2. **Search Chaining** (13 tests) - `tests/test_search_chaining.py`
+   - Forward chaining: `Patient?general-practitioner.family=Smith` (follow reference, filter on target)
+   - Reverse chaining: `Patient?_has:Observation:patient:code=vital-signs` (find resources referenced by others)
+   - Multi-level: `Observation?patient.general-practitioner.family=Smith`
+   - Status: Not implemented in generator
+   - Requirements:
+     - Parse chained parameter syntax (dot notation for forward, `_has:` for reverse)
+     - Generate SQL JOINs across resource tables
+     - Handle multi-level chains
+   - Complexity: **Very High** - requires dynamic JOIN generation and complex query building
+
+3. **Include/_revinclude** (4 tests) - `tests/test_search_includes.py`
+   - Include: `?_include=Observation:patient` (load referenced resources in bundle)
+   - Revinclude: `?_revinclude=Patient:general-practitioner` (load resources that reference this)
+   - Status: Helper methods exist (`find_observations_by_patient`, etc.) but not integrated into search
+   - Requirements:
+     - Execute additional queries after main search
+     - Assemble results into bundle with included resources
+   - Complexity: **Medium** - logic exists, needs integration
+
+4. **Repeated Parameter OR Semantics** (2 tests) - `tests/test_patient_search.py`
+   - Comma-separated values: `?family=Smith,Johnson` (OR logic)
+   - Multiple param instances: `?family=Smith&family=Johnson` (current behavior unclear)
+   - Status: Search parser doesn't split on commas
+   - Requirements:
+     - Modify search parser to handle comma-separated values
+     - Generate SQL with OR conditions
+   - Complexity: **Low** - search parser enhancement, not a generator issue
+
+5. **Invalid Date Format Error** (1 test) - `tests/test_error_handling.py`
+   - Test: `?birthdate=not-a-date` should return 400, currently returns 500
+   - Status: PostgreSQL error code 22007 not mapped to 400 Bad Request
+   - Requirements:
+     - Add error code mapping in `src/error.rs`
+   - Complexity: **Low** - not a generator issue, runtime error handling
 
 ## Remaining Test Failures Analysis (Previous Session - Outdated)
 
@@ -392,11 +436,31 @@ The remaining 46 failing tests are NOT code generator bugs. They fall into these
 4. ✅ Token search modifiers (`:missing`, `:not`)
 5. ✅ Reference search modifiers (`:missing`)
 
-**Next Actions**:
-1. Investigate repeated parameter AND semantics (`?family=Smith&family=Jones`) - may be search parser issue
-2. Add DB error code mapping for invalid dates (22007 → 400) in `src/error.rs` - not a generator issue
-3. Consider implementing composite search generation (12 tests)
-4. Consider implementing search chaining (13 tests) - significant feature addition
+**Detailed Analysis of Remaining 33 Failures**:
+- ✅ All generator bugs are FIXED
+- ⏳ 32 tests are unimplemented FHIR features (composite, chaining, includes, comma-separated values)
+- ⚠️ 1 test is a non-generator issue (error handling)
+
+**Recommended Priority for Unimplemented Features**:
+
+1. **High Priority - Quick Wins**:
+   - Fix comma-separated values in search parser (2 tests, Low complexity)
+   - Fix date format error handling in `src/error.rs` (1 test, Low complexity)
+   - Integrate include/_revinclude helpers (4 tests, Medium complexity)
+
+2. **Medium Priority - Generator Enhancements**:
+   - Implement composite search generation (12 tests, High complexity)
+     - Would require significant DSSSL work in `repositories.scm`
+     - Parse `<components>` from XML
+     - Generate multi-component SQL matching
+
+3. **Low Priority - Complex Features**:
+   - Implement search chaining (13 tests, Very High complexity)
+     - Requires dynamic JOIN generation
+     - Multi-level chain support
+     - May be better implemented manually than generated
+
+**Conclusion**: The generator is **production-ready** for basic FHIR operations. Remaining failures are advanced FHIR search features that can be implemented incrementally based on use case priorities.
 
 **Previous Summary** (now outdated):
 - ✅ **All actual generator bugs are FIXED** (SQL type casting)

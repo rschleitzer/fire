@@ -53,15 +53,26 @@ impl SearchQuery {
                 (key.clone(), None)
             };
 
-            // Extract prefix for date/quantity parameters
-            let (prefix, clean_value) = extract_prefix(value);
+            // Split comma-separated values (FHIR OR semantics)
+            // e.g., family=Smith,Johnson becomes two separate search params
+            let values: Vec<&str> = value.split(',').collect();
 
-            search_params.push(SearchParam {
-                name: param_name,
-                value: clean_value,
-                modifier,
-                prefix,
-            });
+            for val in values {
+                let val = val.trim();
+                if val.is_empty() {
+                    continue;
+                }
+
+                // Extract prefix for date/quantity parameters
+                let (prefix, clean_value) = extract_prefix(val);
+
+                search_params.push(SearchParam {
+                    name: param_name.clone(),
+                    value: clean_value,
+                    modifier: modifier.clone(),
+                    prefix,
+                });
+            }
         }
 
         // Parse pagination
