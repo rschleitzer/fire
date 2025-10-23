@@ -1186,6 +1186,99 @@ impl PractitionerRepository {
 
                 // Generate condition based on parameter name
                 match param.name.as_str() {
+                    // Resource type validation: param:ResourceType.field (NOT multi-level chains)
+                    // Only match if modifier contains '.' AND the part after '.' doesn't contain another '.'
+                    _ if param.modifier.as_ref().map_or(false, |m| {
+                        if let Some((_, after_dot)) = m.split_once('.') {
+                            !after_dot.contains('.')  // Must be single-level only
+                        } else {
+                            false
+                        }
+                    }) => {
+                        // Check for chaining with resource type: param:ResourceType.field
+                        // e.g., general-practitioner:Organization.name
+                        if let Some(modifier_str) = &param.modifier {
+                            if let Some((resource_type, chained_field)) = modifier_str.split_once('.') {
+                                // Validate resource type matches the reference
+                                // For general-practitioner, the valid type is Practitioner
+                                let expected_type = match param.name.as_str() {
+                                    "general-practitioner" => "Practitioner",
+                                    "subject" => "Patient",  // Could be others, but default to Patient
+                                    _ => {
+                                        tracing::warn!("Unsupported reference parameter for type validation: {}", param.name);
+                                        continue;
+                                    }
+                                };
+
+                                // If the resource type doesn't match, this query should return no results
+                                if resource_type != expected_type {
+                                    // Add a condition that will never match (1=0)
+                                    sql.push_str("(1=0)");
+                                    continue;
+                                }
+
+                                // Resource type matches, proceed with chaining
+                                let (target_table, ref_col, is_array) = match param.name.as_str() {
+                                    "general-practitioner" => ("practitioner", "general_practitioner", true),
+                                    "subject" => ("patient", "subject", false),
+                                    _ => {
+                                        tracing::warn!("Unsupported chaining on parameter: {}", param.name);
+                                        continue;
+                                    }
+                                };
+
+                                // Handle chained field types
+                                if chained_field == "family" {
+                                    let bind_idx = bind_values.len() + 1;
+                                    if is_array {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} JOIN unnest(practitioner.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, ref_col, target_table, target_table, bind_idx
+                                        ));
+                                    } else {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(practitioner.{}_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.family_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, ref_col, target_table, bind_idx
+                                        ));
+                                    }
+                                    bind_values.push(format!("%{}%", param.value));
+                                }
+                                else if chained_field == "given" {
+                                    let bind_idx = bind_values.len() + 1;
+                                    if is_array {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} JOIN unnest(practitioner.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE EXISTS (SELECT 1 FROM unnest({}.given_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, ref_col, target_table, target_table, bind_idx
+                                        ));
+                                    } else {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(practitioner.{}_reference FROM '[^/]+$') AND EXISTS (SELECT 1 FROM unnest({}.given_name) AS v WHERE v ILIKE ${}))",
+                                            target_table, target_table, ref_col, target_table, bind_idx
+                                        ));
+                                    }
+                                    bind_values.push(format!("%{}%", param.value));
+                                }
+                                else if chained_field == "name" {
+                                    let bind_idx = bind_values.len() + 1;
+                                    if is_array {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} JOIN unnest(practitioner.{}_reference) AS ref_val ON {}.id = SUBSTRING(ref_val FROM '[^/]+$') WHERE {} ILIKE ${})",
+                                            target_table, ref_col, target_table, target_table, bind_idx
+                                        ));
+                                    } else {
+                                        sql.push_str(&format!(
+                                            "EXISTS (SELECT 1 FROM {} WHERE {}.id = SUBSTRING(practitioner.{}_reference FROM '[^/]+$') AND {} ILIKE ${})",
+                                            target_table, target_table, ref_col, target_table, bind_idx
+                                        ));
+                                    }
+                                    bind_values.push(format!("%{}%", param.value));
+                                }
+                                else {
+                                    tracing::warn!("Chained field '{}' not yet supported for typed chaining", chained_field);
+                                }
+                            }
+                        }
+                    }
                     "email" => {
                         let bind_idx = bind_values.len() + 1;
                         sql.push_str(&format!("EXISTS (SELECT 1 FROM unnest(practitioner.telecom_value) AS tv WHERE tv = ${})", bind_idx));
