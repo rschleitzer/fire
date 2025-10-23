@@ -957,7 +957,8 @@ impl "struct-name" {
 (define (generate-read-version-method resource-name resource-lower)
   ($"    /// Read a specific version of a "resource-lower" from history
     pub async fn read_version(&""self, id: &""str, version_id: i32) -> Result<"resource-name"History> {
-        let history = sqlx::query_as!(
+        // Try history table first
+        if let Some(history) = sqlx::query_as!(
             "resource-name"History,
             r#\"
             SELECT
@@ -971,10 +972,37 @@ impl "struct-name" {
             version_id
         )
         .fetch_optional(&""self.pool)
-        .await?
-        .ok_or(FhirError::NotFound)?;
+        .await? {
+            return Ok(history);
+        }
 
-        Ok(history)
+        // If not in history, check if it's the current version
+        if let Some(current) = sqlx::query_as!(
+            "resource-name",
+            r#\"
+            SELECT
+                id, version_id, last_updated,
+                content as \"content: Value\"
+            FROM "resource-lower"
+            WHERE id = $1 AND version_id = $2
+            \"#,
+            id,
+            version_id
+        )
+        .fetch_optional(&""self.pool)
+        .await? {
+            // Convert current version to history format
+            return Ok("resource-name"History {
+                id: current.id,
+                version_id: current.version_id,
+                last_updated: current.last_updated,
+                content: current.content,
+                history_operation: \"UPDATE\".to_string(),
+                history_timestamp: current.last_updated,
+            });
+        }
+
+        Err(FhirError::NotFound)
     }
 "))
 

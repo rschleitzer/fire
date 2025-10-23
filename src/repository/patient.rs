@@ -912,7 +912,8 @@ impl PatientRepository {
 
     /// Read a specific version of a patient from history
     pub async fn read_version(&self, id: &str, version_id: i32) -> Result<PatientHistory> {
-        let history = sqlx::query_as!(
+        // Try history table first
+        if let Some(history) = sqlx::query_as!(
             PatientHistory,
             r#"
             SELECT
@@ -926,10 +927,37 @@ impl PatientRepository {
             version_id
         )
         .fetch_optional(&self.pool)
-        .await?
-        .ok_or(FhirError::NotFound)?;
+        .await? {
+            return Ok(history);
+        }
 
-        Ok(history)
+        // If not in history, check if it's the current version
+        if let Some(current) = sqlx::query_as!(
+            Patient,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM patient
+            WHERE id = $1 AND version_id = $2
+            "#,
+            id,
+            version_id
+        )
+        .fetch_optional(&self.pool)
+        .await? {
+            // Convert current version to history format
+            return Ok(PatientHistory {
+                id: current.id,
+                version_id: current.version_id,
+                last_updated: current.last_updated,
+                content: current.content,
+                history_operation: "UPDATE".to_string(),
+                history_timestamp: current.last_updated,
+            });
+        }
+
+        Err(FhirError::NotFound)
     }
 
     /// Rollback a patient to a specific version (deletes all versions >= rollback_to_version)

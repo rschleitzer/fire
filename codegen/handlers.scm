@@ -489,7 +489,7 @@ pub async fn get_"resource-lower"_type_history(
         .iter()
         .map(|h| {
             format!(
-                r#\"{{\\\"resource\\\":{},\\\"request\\\":{{\\\"method\\\":\\\"{}\\\",\\\"url\\\":\\\""resource-name"/{}\\\"}},\\\"response\\\":{{\\\"status\\\":\\\"200\\\",\\\"lastModified\\\":\\\"{}\\\"}}}}\"#,
+                r#\"{{\"resource\":{},\"request\":{{\"method\":\"{}\",\"url\":\""resource-name"/{}\"}},\"response\":{{\"status\":\"200\",\"lastModified\":\"{}\"}}}}\"#,
                 serde_json::to_string(&""h.content).unwrap_or_default(),
                 h.history_operation,
                 h.id,
@@ -500,7 +500,7 @@ pub async fn get_"resource-lower"_type_history(
 
     let entries_str = entries.join(\",\");
     let bundle_str = format!(
-        r#\"{{\\\"resourceType\\\":\\\"Bundle\\\",\\\"type\\\":\\\"history\\\",\\\"total\\\":{},\\\"entry\\\":[{}]}}\"#,
+        r#\"{{\"resourceType\":\"Bundle\",\"type\":\"history\",\"total\":{},\"entry\":[{}]}}\"#,
         total, entries_str
     );
 
