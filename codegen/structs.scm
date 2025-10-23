@@ -403,10 +403,33 @@ pub struct "resource-name"SearchParams {
 
 ; Generate reference extractor
 (define (generate-reference-extractor search-name col-name search)
-  (let ((fhir-field (or (search-fhir-field-name search) (camel-case search-name)))
-        (is-collection (search-is-collection? search)))
+  (let* ((fhir-field (or (search-fhir-field-name search) (camel-case search-name)))
+         (is-collection (search-is-collection? search))
+         (targets (search-target-resources search))
+         (has-targets (not (null? targets))))
     (if is-collection
-        ($"
+        ; Collection case
+        (if has-targets
+            ; With target checking
+            (let ((target-checks (join-strings
+                                   (map (lambda (t)
+                                          ($"reference.starts_with(\""t"/\")"))
+                                        targets)
+                                   " || ")))
+              ($"
+    // Extract "search-name" references
+    if let Some(refs) = content.get(\""fhir-field"\").and_then(|g| g.as_array()) {
+        for ref_item in refs {
+            if let Some(reference) = ref_item.get(\"reference\").and_then(|r| r.as_str()) {
+                if "target-checks" {
+                    params."col-name"_reference.push(reference.to_string());
+                }
+            }
+        }
+    }
+"))
+            ; Without target checking (any reference)
+            ($"
     // Extract "search-name" references
     if let Some(refs) = content.get(\""fhir-field"\").and_then(|g| g.as_array()) {
         for ref_item in refs {
@@ -415,8 +438,29 @@ pub struct "resource-name"SearchParams {
             }
         }
     }
-")
-        ($"
+"))
+        ; Non-collection case
+        (if has-targets
+            ; With target checking
+            (let ((target-checks (join-strings
+                                   (map (lambda (t)
+                                          ($"reference.starts_with(\""t"/\")"))
+                                        targets)
+                                   " || ")))
+              ($"
+    // Extract "search-name" reference
+    if let Some(reference) = content
+        .get(\""fhir-field"\")
+        .and_then(|s| s.get(\"reference\"))
+        .and_then(|r| r.as_str())
+    {
+        if "target-checks" {
+            params."col-name"_reference = Some(reference.to_string());
+        }
+    }
+"))
+            ; Without target checking (any reference)
+            ($"
     // Extract "search-name" reference
     if let Some(reference) = content
         .get(\""fhir-field"\")
@@ -425,7 +469,7 @@ pub struct "resource-name"SearchParams {
     {
         params."col-name"_reference = Some(reference.to_string());
     }
-"))))
+")))))
 
 ; Generate fields for the SearchParams struct
 (define (generate-search-params-fields searches)

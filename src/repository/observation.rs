@@ -46,6 +46,7 @@ impl ObservationRepository {
             INSERT INTO observation (
                 id, version_id, last_updated, content,
                 identifier_system, identifier_value,
+                patient_reference,
                 code_system, code_code,
                 date_datetime,
                 date_period_start, date_period_end,
@@ -75,7 +76,7 @@ impl ObservationRepository {
                 value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_reference_reference
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
             "#,
             id,
             version_id,
@@ -91,6 +92,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -260,6 +262,7 @@ impl ObservationRepository {
                 INSERT INTO observation_history (
                     id, version_id, last_updated, content,
                 identifier_system, identifier_value,
+                patient_reference,
                 code_system, code_code,
                 date_datetime,
                 date_period_start, date_period_end,
@@ -290,7 +293,7 @@ impl ObservationRepository {
                 value_reference_reference,
                     history_operation, history_timestamp
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51)
                 "#,
                 old_observation.id,
                 old_observation.version_id,
@@ -306,6 +309,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params.patient_reference,
             old_params.code_system,
             old_params.code_code,
             old_params.date_datetime,
@@ -407,48 +411,49 @@ impl ObservationRepository {
                     content = $4,
                     identifier_system = $5,
                     identifier_value = $6,
-                    code_system = $7,
-                    code_code = $8,
-                    date_datetime = $9,
-                    date_period_start = $10,
-                    date_period_end = $11,
-                    encounter_reference = $12,
-                    based_on_reference = $13,
-                    category_system = $14,
-                    category_code = $15,
-                    combo_code_system = $16,
-                    combo_code_code = $17,
-                    combo_data_absent_reason_system = $18,
-                    combo_data_absent_reason_code = $19,
-                    combo_value_concept_code = $20,
-                    combo_value_quantity_value = $21,
-                    combo_value_quantity_unit = $22,
-                    combo_value_quantity_system = $23,
-                    component_value_quantity_value = $24,
-                    component_value_quantity_unit = $25,
-                    component_value_quantity_system = $26,
-                    component_value_reference_reference = $27,
-                    data_absent_reason_system = $28,
-                    data_absent_reason_code = $29,
-                    derived_from_reference = $30,
-                    device_reference = $31,
-                    focus_reference = $32,
-                    has_member_reference = $33,
-                    method_system = $34,
-                    method_code = $35,
-                    part_of_reference = $36,
-                    performer_reference = $37,
-                    specimen_reference = $38,
-                    status = $39,
-                    subject_reference = $40,
-                    value_concept_code = $41,
-                    value_date_datetime = $42,
-                    value_date_period_start = $43,
-                    value_date_period_end = $44,
-                    value_quantity_value = $45,
-                    value_quantity_unit = $46,
-                    value_quantity_system = $47,
-                    value_reference_reference = $48
+                    patient_reference = $7,
+                    code_system = $8,
+                    code_code = $9,
+                    date_datetime = $10,
+                    date_period_start = $11,
+                    date_period_end = $12,
+                    encounter_reference = $13,
+                    based_on_reference = $14,
+                    category_system = $15,
+                    category_code = $16,
+                    combo_code_system = $17,
+                    combo_code_code = $18,
+                    combo_data_absent_reason_system = $19,
+                    combo_data_absent_reason_code = $20,
+                    combo_value_concept_code = $21,
+                    combo_value_quantity_value = $22,
+                    combo_value_quantity_unit = $23,
+                    combo_value_quantity_system = $24,
+                    component_value_quantity_value = $25,
+                    component_value_quantity_unit = $26,
+                    component_value_quantity_system = $27,
+                    component_value_reference_reference = $28,
+                    data_absent_reason_system = $29,
+                    data_absent_reason_code = $30,
+                    derived_from_reference = $31,
+                    device_reference = $32,
+                    focus_reference = $33,
+                    has_member_reference = $34,
+                    method_system = $35,
+                    method_code = $36,
+                    part_of_reference = $37,
+                    performer_reference = $38,
+                    specimen_reference = $39,
+                    status = $40,
+                    subject_reference = $41,
+                    value_concept_code = $42,
+                    value_date_datetime = $43,
+                    value_date_period_start = $44,
+                    value_date_period_end = $45,
+                    value_quantity_value = $46,
+                    value_quantity_unit = $47,
+                    value_quantity_system = $48,
+                    value_reference_reference = $49
                 WHERE id = $1
                 "#,
                 id,
@@ -465,6 +470,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -585,6 +591,7 @@ impl ObservationRepository {
                 INSERT INTO observation (
                     id, version_id, last_updated, content,
                 identifier_system, identifier_value,
+                patient_reference,
                 code_system, code_code,
                 date_datetime,
                 date_period_start, date_period_end,
@@ -614,7 +621,7 @@ impl ObservationRepository {
                 value_quantity_value, value_quantity_unit, value_quantity_system,
                 value_reference_reference
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49)
                 "#,
                 id,
                 version_id,
@@ -630,6 +637,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -777,6 +785,7 @@ impl ObservationRepository {
             INSERT INTO observation_history (
                 id, version_id, last_updated, content,
                 identifier_system, identifier_value,
+                patient_reference,
                 code_system, code_code,
                 date_datetime,
                 date_period_start, date_period_end,
@@ -807,7 +816,7 @@ impl ObservationRepository {
                 value_reference_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51)
             "#,
             old_observation.id,
             old_observation.version_id,
@@ -823,6 +832,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&old_params.identifier_value[..])),
+            old_params.patient_reference,
             old_params.code_system,
             old_params.code_code,
             old_params.date_datetime,
@@ -924,48 +934,49 @@ impl ObservationRepository {
                 content = $4,
                     identifier_system = $5,
                     identifier_value = $6,
-                    code_system = $7,
-                    code_code = $8,
-                    date_datetime = $9,
-                    date_period_start = $10,
-                    date_period_end = $11,
-                    encounter_reference = $12,
-                    based_on_reference = $13,
-                    category_system = $14,
-                    category_code = $15,
-                    combo_code_system = $16,
-                    combo_code_code = $17,
-                    combo_data_absent_reason_system = $18,
-                    combo_data_absent_reason_code = $19,
-                    combo_value_concept_code = $20,
-                    combo_value_quantity_value = $21,
-                    combo_value_quantity_unit = $22,
-                    combo_value_quantity_system = $23,
-                    component_value_quantity_value = $24,
-                    component_value_quantity_unit = $25,
-                    component_value_quantity_system = $26,
-                    component_value_reference_reference = $27,
-                    data_absent_reason_system = $28,
-                    data_absent_reason_code = $29,
-                    derived_from_reference = $30,
-                    device_reference = $31,
-                    focus_reference = $32,
-                    has_member_reference = $33,
-                    method_system = $34,
-                    method_code = $35,
-                    part_of_reference = $36,
-                    performer_reference = $37,
-                    specimen_reference = $38,
-                    status = $39,
-                    subject_reference = $40,
-                    value_concept_code = $41,
-                    value_date_datetime = $42,
-                    value_date_period_start = $43,
-                    value_date_period_end = $44,
-                    value_quantity_value = $45,
-                    value_quantity_unit = $46,
-                    value_quantity_system = $47,
-                    value_reference_reference = $48
+                    patient_reference = $7,
+                    code_system = $8,
+                    code_code = $9,
+                    date_datetime = $10,
+                    date_period_start = $11,
+                    date_period_end = $12,
+                    encounter_reference = $13,
+                    based_on_reference = $14,
+                    category_system = $15,
+                    category_code = $16,
+                    combo_code_system = $17,
+                    combo_code_code = $18,
+                    combo_data_absent_reason_system = $19,
+                    combo_data_absent_reason_code = $20,
+                    combo_value_concept_code = $21,
+                    combo_value_quantity_value = $22,
+                    combo_value_quantity_unit = $23,
+                    combo_value_quantity_system = $24,
+                    component_value_quantity_value = $25,
+                    component_value_quantity_unit = $26,
+                    component_value_quantity_system = $27,
+                    component_value_reference_reference = $28,
+                    data_absent_reason_system = $29,
+                    data_absent_reason_code = $30,
+                    derived_from_reference = $31,
+                    device_reference = $32,
+                    focus_reference = $33,
+                    has_member_reference = $34,
+                    method_system = $35,
+                    method_code = $36,
+                    part_of_reference = $37,
+                    performer_reference = $38,
+                    specimen_reference = $39,
+                    status = $40,
+                    subject_reference = $41,
+                    value_concept_code = $42,
+                    value_date_datetime = $43,
+                    value_date_period_start = $44,
+                    value_date_period_end = $45,
+                    value_quantity_value = $46,
+                    value_quantity_unit = $47,
+                    value_quantity_system = $48,
+                    value_reference_reference = $49
             WHERE id = $1
             "#,
             id,
@@ -982,6 +993,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -1115,6 +1127,7 @@ impl ObservationRepository {
             INSERT INTO observation_history (
                 id, version_id, last_updated, content,
                 identifier_system, identifier_value,
+                patient_reference,
                 code_system, code_code,
                 date_datetime,
                 date_period_start, date_period_end,
@@ -1145,7 +1158,7 @@ impl ObservationRepository {
                 value_reference_reference,
                 history_operation, history_timestamp
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51)
             "#,
             id,
             new_version_id,
@@ -1161,6 +1174,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -1255,7 +1269,23 @@ impl ObservationRepository {
     pub async fn history(&self, id: &str, count: Option<i64>) -> Result<Vec<ObservationHistory>> {
         let limit = count.unwrap_or(50);
 
-        let history = sqlx::query_as!(
+        // Get current version
+        let current = sqlx::query_as!(
+            Observation,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM observation
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        // Get historical versions
+        let mut history = sqlx::query_as!(
             ObservationHistory,
             r#"
             SELECT
@@ -1272,6 +1302,21 @@ impl ObservationRepository {
         )
         .fetch_all(&self.pool)
         .await?;
+
+        // Prepend current version if it exists
+        if let Some(curr) = current {
+            history.insert(0, ObservationHistory {
+                id: curr.id,
+                version_id: curr.version_id,
+                last_updated: curr.last_updated,
+                content: curr.content,
+                history_operation: "UPDATE".to_string(),
+                history_timestamp: curr.last_updated,
+            });
+        }
+
+        // Apply limit
+        history.truncate(limit as usize);
 
         Ok(history)
     }
@@ -1395,48 +1440,49 @@ impl ObservationRepository {
                     content = $4,
                     identifier_system = $5,
                     identifier_value = $6,
-                    code_system = $7,
-                    code_code = $8,
-                    date_datetime = $9,
-                    date_period_start = $10,
-                    date_period_end = $11,
-                    encounter_reference = $12,
-                    based_on_reference = $13,
-                    category_system = $14,
-                    category_code = $15,
-                    combo_code_system = $16,
-                    combo_code_code = $17,
-                    combo_data_absent_reason_system = $18,
-                    combo_data_absent_reason_code = $19,
-                    combo_value_concept_code = $20,
-                    combo_value_quantity_value = $21,
-                    combo_value_quantity_unit = $22,
-                    combo_value_quantity_system = $23,
-                    component_value_quantity_value = $24,
-                    component_value_quantity_unit = $25,
-                    component_value_quantity_system = $26,
-                    component_value_reference_reference = $27,
-                    data_absent_reason_system = $28,
-                    data_absent_reason_code = $29,
-                    derived_from_reference = $30,
-                    device_reference = $31,
-                    focus_reference = $32,
-                    has_member_reference = $33,
-                    method_system = $34,
-                    method_code = $35,
-                    part_of_reference = $36,
-                    performer_reference = $37,
-                    specimen_reference = $38,
-                    status = $39,
-                    subject_reference = $40,
-                    value_concept_code = $41,
-                    value_date_datetime = $42,
-                    value_date_period_start = $43,
-                    value_date_period_end = $44,
-                    value_quantity_value = $45,
-                    value_quantity_unit = $46,
-                    value_quantity_system = $47,
-                    value_reference_reference = $48
+                    patient_reference = $7,
+                    code_system = $8,
+                    code_code = $9,
+                    date_datetime = $10,
+                    date_period_start = $11,
+                    date_period_end = $12,
+                    encounter_reference = $13,
+                    based_on_reference = $14,
+                    category_system = $15,
+                    category_code = $16,
+                    combo_code_system = $17,
+                    combo_code_code = $18,
+                    combo_data_absent_reason_system = $19,
+                    combo_data_absent_reason_code = $20,
+                    combo_value_concept_code = $21,
+                    combo_value_quantity_value = $22,
+                    combo_value_quantity_unit = $23,
+                    combo_value_quantity_system = $24,
+                    component_value_quantity_value = $25,
+                    component_value_quantity_unit = $26,
+                    component_value_quantity_system = $27,
+                    component_value_reference_reference = $28,
+                    data_absent_reason_system = $29,
+                    data_absent_reason_code = $30,
+                    derived_from_reference = $31,
+                    device_reference = $32,
+                    focus_reference = $33,
+                    has_member_reference = $34,
+                    method_system = $35,
+                    method_code = $36,
+                    part_of_reference = $37,
+                    performer_reference = $38,
+                    specimen_reference = $39,
+                    status = $40,
+                    subject_reference = $41,
+                    value_concept_code = $42,
+                    value_date_datetime = $43,
+                    value_date_period_start = $44,
+                    value_date_period_end = $45,
+                    value_quantity_value = $46,
+                    value_quantity_unit = $47,
+                    value_quantity_system = $48,
+                    value_reference_reference = $49
                 WHERE id = $1
                 "#,
                 id,
@@ -1453,6 +1499,7 @@ impl ObservationRepository {
                 .is_empty()
                 .then_some(None)
                 .unwrap_or(Some(&params.identifier_value[..])),
+            params.patient_reference,
             params.code_system,
             params.code_code,
             params.date_datetime,
@@ -1692,6 +1739,15 @@ impl ObservationRepository {
                         bind_values.push(param.value.clone());
                     }
                 }
+                "patient" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Patient/{}", ref_value);
+                    }
+                    sql.push_str(&format!(" AND observation.patient_reference = ${}", bind_idx));
+                    bind_values.push(ref_value);
+                }
                 "code" => {
                     if param.value.contains('|') {
                         let parts: Vec<&str> = param.value.split('|').collect();
@@ -1723,13 +1779,21 @@ impl ObservationRepository {
                 }
                 "encounter" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Encounter/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND observation.encounter_reference = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "based-on" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("DeviceRequest/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.based_on_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "category" => {
                     if param.value.contains('|') {
@@ -1796,8 +1860,12 @@ impl ObservationRepository {
                 }
                 "component-value-reference" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("MolecularSequence/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.component_value_reference_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "data-absent-reason" => {
                     if param.value.contains('|') {
@@ -1816,23 +1884,39 @@ impl ObservationRepository {
                 }
                 "derived-from" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("ImagingStudy/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.derived_from_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "device" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Device/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND observation.device_reference = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "focus" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Account/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.focus_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "has-member" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Observation/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.has_member_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "method" => {
                     if param.value.contains('|') {
@@ -1851,18 +1935,30 @@ impl ObservationRepository {
                 }
                 "part-of" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("ImagingStudy/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.part_of_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "performer" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Organization/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND EXISTS (SELECT 1 FROM unnest(observation.performer_reference) AS ref WHERE ref = ${})", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "specimen" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Group/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND observation.specimen_reference = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "status" => {
                     let bind_idx = bind_values.len() + 1;
@@ -1871,8 +1967,12 @@ impl ObservationRepository {
                 }
                 "subject" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("Device/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND observation.subject_reference = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 "value-concept" => {
                     if param.value.contains('|') {
@@ -1905,8 +2005,12 @@ impl ObservationRepository {
                 }
                 "value-reference" => {
                     let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!("MolecularSequence/{}", ref_value);
+                    }
                     sql.push_str(&format!(" AND observation.value_reference_reference = ${}", bind_idx));
-                    bind_values.push(param.value.clone());
+                    bind_values.push(ref_value);
                 }
                 _ => {
                     // Unknown parameter - ignore per FHIR spec
@@ -1922,7 +2026,9 @@ impl ObservationRepository {
                 if i > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&sort.field);
+                // Map FHIR search parameter name to database column name
+                let column_name = Self::map_sort_field_to_column(&sort.field);
+                sql.push_str(&column_name);
                 match sort.direction {
                     SortDirection::Ascending => sql.push_str(" ASC"),
                     SortDirection::Descending => sql.push_str(" DESC"),
@@ -1960,6 +2066,55 @@ impl ObservationRepository {
         };
 
         Ok((resources, total))
+    }
+
+    /// Map FHIR search parameter name to database column name for sorting
+    fn map_sort_field_to_column(field: &str) -> String {
+        match field {
+            "identifier" => "identifier_value".to_string(),
+            "patient" => "patient_reference".to_string(),
+            "code" => "code_code".to_string(),
+            "date" => "date_datetime".to_string(),
+            "encounter" => "encounter_reference".to_string(),
+            "based-on" => "based_on_reference".to_string(),
+            "category" => "category_code".to_string(),
+            "combo-code" => "combo_code_code".to_string(),
+            "combo-data-absent-reason" => "combo_data_absent_reason_code".to_string(),
+            "combo-value-concept" => "combo_value_concept_code".to_string(),
+            "combo-value-quantity" => "combo_value_quantity".to_string(),
+            "component-code" => "component_code_code".to_string(),
+            "component-data-absent-reason" => "component_data_absent_reason_code".to_string(),
+            "component-value-canonical" => "component_value_canonical_name".to_string(),
+            "component-value-concept" => "component_value_concept_code".to_string(),
+            "component-value-quantity" => "component_value_quantity".to_string(),
+            "component-value-reference" => "component_value_reference_reference".to_string(),
+            "data-absent-reason" => "data_absent_reason_code".to_string(),
+            "derived-from" => "derived_from_reference".to_string(),
+            "device" => "device_reference".to_string(),
+            "focus" => "focus_reference".to_string(),
+            "has-member" => "has_member_reference".to_string(),
+            "method" => "method_code".to_string(),
+            "part-of" => "part_of_reference".to_string(),
+            "performer" => "performer_reference".to_string(),
+            "specimen" => "specimen_reference".to_string(),
+            "status" => "status".to_string(),
+            "subject" => "subject_reference".to_string(),
+            "value-canonical" => "value_canonical_name".to_string(),
+            "value-concept" => "value_concept_code".to_string(),
+            "value-date" => "value_date_datetime".to_string(),
+            "value-markdown" => "value_markdown_name".to_string(),
+            "value-quantity" => "value_quantity".to_string(),
+            "value-reference" => "value_reference_reference".to_string(),
+            "code-value-concept" => "code_value_concept".to_string(),
+            "code-value-date" => "code_value_date".to_string(),
+            "code-value-quantity" => "code_value_quantity".to_string(),
+            "code-value-string" => "code_value_string".to_string(),
+            "combo-code-value-concept" => "combo_code_value_concept".to_string(),
+            "combo-code-value-quantity" => "combo_code_value_quantity".to_string(),
+            "component-code-value-concept" => "component_code_value_concept".to_string(),
+            "component-code-value-quantity" => "component_code_value_quantity".to_string(),
+            _ => field.to_string(),
+        }
     }
 
     /// Read a patient by ID (for chaining support)

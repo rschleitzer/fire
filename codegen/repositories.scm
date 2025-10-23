@@ -1,6 +1,46 @@
 ; Repository generator for Fire FHIR Server
 ; Generates CRUD and search methods for each resource
 
+; Get the database column name for a search parameter (for ORDER BY clauses)
+(define (search-param-to-column-name search)
+  (let* ((search-name (% "name" search))
+         (col-name (camel-to-snake (string-replace search-name "-" "_")))
+         (search-type (% "type" search))
+         (is-collection (search-is-collection? search)))
+    (case search-type
+      (("string" "uri")
+       ; String/URI searches use _name suffix for trgm index
+       ($ col-name "_name"))
+      (("token")
+       ; Token searches - check if simple code or system/code
+       (if (or (search-is-simple-code? search) (search-is-identifier? search))
+           (if (search-is-identifier? search)
+               ($ col-name "_value")  ; identifier uses _value
+               col-name)              ; simple code uses param name
+           ($ col-name "_code")))     ; complex token uses _code
+      (("reference")
+       ; Reference searches use _reference suffix
+       ($ col-name "_reference"))
+      (("date")
+       ; Date searches - check for datetime vs date
+       (let ((property (search-property search)))
+         (if (and property (property-has-variants? property))
+             (let* ((variants (property-variants property))
+                    (variant-list (node-list->list variants))
+                    (variant-types (map (lambda (v) (% "type" v)) variant-list))
+                    (has-datetime (member "dateTime" variant-types)))
+               (if has-datetime
+                   ($ col-name "_datetime")
+                   ($ col-name "_date")))
+             col-name)))
+      (("quantity")
+       ; Quantity searches use param name directly
+       col-name)
+      (("number")
+       ; Number searches use param name directly
+       col-name)
+      (else col-name))))
+
 ; Generate repository for current resource (called from rules.scm for each resource)
 (define (repository)
   (let ((resource (current-node)))
@@ -859,7 +899,23 @@ impl "struct-name" {
     pub async fn history(&""self, id: &""str, count: Option<""i64>) -> Result<""Vec<"resource-name"History>> {
         let limit = count.unwrap_or(50);
 
-        let history = sqlx::query_as!(
+        // Get current version
+        let current = sqlx::query_as!(
+            "resource-name",
+            r#\"
+            SELECT
+                id, version_id, last_updated,
+                content as \"content: Value\"
+            FROM "resource-lower"
+            WHERE id = $1
+            \"#,
+            id
+        )
+        .fetch_optional(&""self.pool)
+        .await?;
+
+        // Get historical versions
+        let mut history = sqlx::query_as!(
             "resource-name"History,
             r#\"
             SELECT
@@ -876,6 +932,21 @@ impl "struct-name" {
         )
         .fetch_all(&""self.pool)
         .await?;
+
+        // Prepend current version if it exists
+        if let Some(curr) = current {
+            history.insert(0, "resource-name"History {
+                id: curr.id,
+                version_id: curr.version_id,
+                last_updated: curr.last_updated,
+                content: curr.content,
+                history_operation: \"UPDATE\".to_string(),
+                history_timestamp: curr.last_updated,
+            });
+        }
+
+        // Apply limit
+        history.truncate(limit as usize);
 
         Ok(history)
     }
@@ -1188,7 +1259,9 @@ impl "struct-name" {
                 if i > 0 {
                     sql.push_str(\", \");
                 }
-                sql.push_str(&""sort.field);
+                // Map FHIR search parameter name to database column name
+                let column_name = Self::map_sort_field_to_column(&""sort.field);
+                sql.push_str(&""column_name);
                 match sort.direction {
                     SortDirection::Ascending => sql.push_str(\" ASC\"),
                     SortDirection::Descending => sql.push_str(\" DESC\"),
@@ -1227,8 +1300,30 @@ impl "struct-name" {
 
         Ok((resources, total))
     }
+
+    /// Map FHIR search parameter name to database column name for sorting
+    fn map_sort_field_to_column(field: &""str) -> String {
+        match field {
+"(generate-sort-field-mappings unique-searches resource-lower)"            _ => field.to_string(),
+        }
+    }
 ")
        (generate-helper-methods resource-name resource-lower))))
+
+; Generate sort field to column name mappings
+(define (generate-sort-field-mappings searches resource-lower)
+  (if (null? searches)
+      ""
+      (apply $ (map (lambda (search)
+                      (let* ((search-name (% "name" search))
+                             (col-name (search-param-to-column-name search)))
+                        ; Skip special parameters like _lastUpdated
+                        (if (and (> (string-length search-name) 0)
+                                 (char=? (string-ref search-name 0) #\_))
+                            ""
+                            ($"            \""search-name"\" => \""col-name"\".to_string(),
+"))))
+                    searches))))
 
 ; Generate match arms for each search parameter
 (define (generate-search-param-matches resource-name resource-lower searches)
@@ -1253,7 +1348,7 @@ impl "struct-name" {
           (("string") (generate-string-param-match search-name extraction-key resource-lower))
           (("token") (generate-token-param-match search-name col-name search resource-lower is-collection))
           (("date") (generate-date-param-match search-name col-name resource-lower))
-          (("reference") (generate-reference-param-match search-name col-name resource-lower is-collection))
+          (("reference") (generate-reference-param-match search-name col-name resource-lower is-collection search))
           (("composite") "") ; Skip composite for now
           (("special") "")
           (else "")))))
@@ -1419,20 +1514,45 @@ impl "struct-name" {
 ")))
 
 ; Generate reference parameter match
-(define (generate-reference-param-match search-name col-name resource-lower is-collection)
-  (if is-collection
-      ($"                \""search-name"\" => {
+(define (generate-reference-param-match search-name col-name resource-lower is-collection search)
+  (let* ((targets (search-target-resources search))
+         (has-targets (not (null? targets)))
+         (first-target (if has-targets (car targets) "")))
+    (if is-collection
+        (if has-targets
+            ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!(\""first-target"/{}\", ref_value);
+                    }
+                    sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                    bind_values.push(ref_value);
+                }
+")
+            ($"                \""search-name"\" => {
                     let bind_idx = bind_values.len() + 1;
                     sql.push_str(&""format!(\" AND EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
                     bind_values.push(param.value.clone());
                 }
+"))
+        (if has-targets
+            ($"                \""search-name"\" => {
+                    let bind_idx = bind_values.len() + 1;
+                    let mut ref_value = param.value.clone();
+                    if !ref_value.contains('/') {
+                        ref_value = format!(\""first-target"/{}\", ref_value);
+                    }
+                    sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
+                    bind_values.push(ref_value);
+                }
 ")
-      ($"                \""search-name"\" => {
+            ($"                \""search-name"\" => {
                     let bind_idx = bind_values.len() + 1;
                     sql.push_str(&""format!(\" AND "resource-lower"."col-name"_reference = ${}\", bind_idx));
                     bind_values.push(param.value.clone());
                 }
-")))
+")))))
 
 ; Generate helper methods (resource-specific)
 (define (generate-helper-methods resource-name resource-lower)

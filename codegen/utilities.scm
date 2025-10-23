@@ -420,3 +420,11 @@
         (str-len (string-length str)))
     (and (>= str-len suffix-len)
          (string=? suffix (substring str (- str-len suffix-len) str-len)))))
+
+; Join a list of strings with a separator
+(define (join-strings strings separator)
+  (if (null? strings)
+      ""
+      (if (null? (cdr strings))
+          (car strings)
+          ($ (car strings) separator (join-strings (cdr strings) separator)))))

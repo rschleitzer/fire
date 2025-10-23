@@ -168,7 +168,9 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     if let Some(refs) = content.get("generalPractitioner").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.general_practitioner_reference.push(reference.to_string());
+                if reference.starts_with("Organization/") || reference.starts_with("PractitionerRole/") || reference.starts_with("Practitioner/") {
+                    params.general_practitioner_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -189,7 +191,9 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
     if let Some(refs) = content.get("link").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.link_reference.push(reference.to_string());
+                if reference.starts_with("RelatedPerson/") || reference.starts_with("Patient/") {
+                    params.link_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -200,7 +204,9 @@ pub fn extract_patient_search_params(content: &Value) -> PatientSearchParams {
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.organization_reference = Some(reference.to_string());
+        if reference.starts_with("Organization/") {
+            params.organization_reference = Some(reference.to_string());
+        }
     }
 
     params

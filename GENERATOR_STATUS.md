@@ -162,6 +162,30 @@ Added proper 412 Precondition Failed response when conditional create matches mu
 
 **Results**: Tests improved from 179 → 183 passing, server logs show NO SQL errors.
 
+### 4. Array Comparison for Collection Properties
+**Problem**: CodeableConcept array columns (like `category_code TEXT[]`) were using direct `=` operator, causing SQL error:
+- `operator does not exist: text[] = text`
+
+**Fix**: Modified CodeableConcept handling in `codegen/repositories.scm` to check `is-collection` parameter and use array operators:
+
+**For Collections** (arrays):
+```scheme
+; Use EXISTS with unnest for array comparison
+sql.push_str(&format!(
+    " AND EXISTS (SELECT 1 FROM unnest(resource.column_system, resource.column_code)
+     AS cc(sys, code) WHERE cc.sys = ${} AND cc.code = ${})",
+    bind_idx, bind_idx + 1
+));
+```
+
+**For Non-Collections** (single values):
+```scheme
+; Use direct comparison for non-array columns
+sql.push_str(&format!(" AND resource.column_code = ${}", bind_idx));
+```
+
+**Results**: Tests improved from 183 → 184 passing. Category search now working correctly.
+
 ## Remaining Test Failures (46 tests)
 
 The remaining 46 failing tests are NOT code generator bugs. They fall into these categories:

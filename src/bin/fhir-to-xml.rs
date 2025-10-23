@@ -1369,8 +1369,13 @@ fn build_searches(
 
         let expression = search_param.expression.as_ref().unwrap();
 
-        // Skip complex expressions with extension() or other function calls we can't parse
-        if expression.contains(".extension(") || expression.contains("resolve()") {
+        // Skip complex expressions with extension() we can't parse
+        if expression.contains(".extension(") {
+            continue;
+        }
+
+        // Skip resolve() patterns we can't handle (but allow .where(resolve() is ResourceType))
+        if expression.contains("resolve()") && !expression.contains(".where(resolve() is ") {
             continue;
         }
 
@@ -1525,12 +1530,23 @@ fn parse_single_path(
 ) -> Option<Path> {
     let mut parts: Vec<Part> = Vec::new();
     let mut cast_vec: Vec<Cast> = Vec::new();
+    let mut target_resource_type: Option<String> = None;
 
     // Track the current property path (with dots preserved from original FHIRPath)
     let mut current_path = resource_name.to_lowercase();
 
     // Handle parentheses
-    let expr = expr.trim_matches(|c| c == '(' || c == ')');
+    let mut expr = expr.trim_matches(|c| c == '(' || c == ')');
+
+    // Strip .where(resolve() is ResourceType) pattern and extract the resource type
+    if let Some(where_idx) = expr.find(".where(resolve() is ") {
+        let base_expr = &expr[..where_idx];
+        let type_start = where_idx + 20; // ".where(resolve() is ".len()
+        if let Some(paren_end) = expr[type_start..].find(')') {
+            target_resource_type = Some(expr[type_start..type_start + paren_end].trim().to_string());
+            expr = base_expr;
+        }
+    }
 
     // Check for .ofType() or .as() cast
     let (base_expr, cast_type) = if let Some(idx) = expr.find(".ofType(") {
@@ -1676,14 +1692,24 @@ fn parse_single_path(
 
     // Add targets for reference search parameters
     let targets = if search_param.r#type == "reference" {
-        search_param.target.as_ref().map(|target_vec| Targets {
-            target: target_vec
-                .iter()
-                .map(|t| Target {
-                    resource: t.clone(),
-                })
-                .collect(),
-        })
+        // If we extracted a target from .where(resolve() is ResourceType), use that
+        if let Some(ref target_type) = target_resource_type {
+            Some(Targets {
+                target: vec![Target {
+                    resource: target_type.clone(),
+                }],
+            })
+        } else {
+            // Otherwise use the targets from the search parameter definition
+            search_param.target.as_ref().map(|target_vec| Targets {
+                target: target_vec
+                    .iter()
+                    .map(|t| Target {
+                        resource: t.clone(),
+                    })
+                    .collect(),
+            })
+        }
     } else {
         None
     };

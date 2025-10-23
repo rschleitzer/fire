@@ -9,6 +9,7 @@ CREATE TABLE observation (
     _lastUpdated DATE,
     identifier_system TEXT[],
     identifier_value TEXT[],
+    patient_reference TEXT DEFAULT '{}',
     code_system TEXT,
     code_code TEXT,
     date_datetime TIMESTAMPTZ,
@@ -68,6 +69,7 @@ CREATE TABLE observation (
 CREATE INDEX idx_observation_last_updated ON observation (last_updated);
 CREATE INDEX idx_observation__lastUpdated ON observation (_lastUpdated);
 CREATE INDEX idx_observation_identifier_value ON observation USING GIN (identifier_value);
+CREATE INDEX idx_observation_patient_reference ON observation (patient_reference);
 CREATE INDEX idx_observation_code_code ON observation (code_code);
 CREATE INDEX idx_observation_date_datetime ON observation (date_datetime);
 CREATE INDEX idx_observation_date_period ON observation (date_period_start, date_period_end);
@@ -117,6 +119,7 @@ CREATE TABLE observation_history (
     _lastUpdated DATE,
     identifier_system TEXT[],
     identifier_value TEXT[],
+    patient_reference TEXT DEFAULT '{}',
     code_system TEXT,
     code_code TEXT,
     date_datetime TIMESTAMPTZ,

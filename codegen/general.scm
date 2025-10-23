@@ -62,3 +62,29 @@
     (("BIGINT") "::bigint")
     (("DECIMAL") "::decimal")
     (else "")))
+
+; Get list of target resource types from a reference search parameter
+; Returns empty list if no targets found
+; search: search node
+(define (search-target-resources search)
+  (let* ((paths-node (select-children "paths" search))
+         (first-paths (if (node-list-empty? paths-node)
+                          #f
+                          (node-list-first paths-node)))
+         (path-nodes (if first-paths
+                          (select-children "path" first-paths)
+                          (empty-node-list)))
+         (first-path (if (node-list-empty? path-nodes)
+                         #f
+                         (node-list-first path-nodes))))
+    (if first-path
+        (let ((targets-node (select-children "targets" first-path)))
+          (if (node-list-empty? targets-node)
+              '()
+              (let* ((first-targets (node-list-first targets-node))
+                     (target-nodes (select-children "target" first-targets)))
+                (if (node-list-empty? target-nodes)
+                    '()
+                    (map (lambda (t) (% "resource" t))
+                         (node-list->list target-nodes))))))
+        '())))

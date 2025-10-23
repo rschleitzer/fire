@@ -759,7 +759,23 @@ impl PractitionerRepository {
     pub async fn history(&self, id: &str, count: Option<i64>) -> Result<Vec<PractitionerHistory>> {
         let limit = count.unwrap_or(50);
 
-        let history = sqlx::query_as!(
+        // Get current version
+        let current = sqlx::query_as!(
+            Practitioner,
+            r#"
+            SELECT
+                id, version_id, last_updated,
+                content as "content: Value"
+            FROM practitioner
+            WHERE id = $1
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        // Get historical versions
+        let mut history = sqlx::query_as!(
             PractitionerHistory,
             r#"
             SELECT
@@ -776,6 +792,21 @@ impl PractitionerRepository {
         )
         .fetch_all(&self.pool)
         .await?;
+
+        // Prepend current version if it exists
+        if let Some(curr) = current {
+            history.insert(0, PractitionerHistory {
+                id: curr.id,
+                version_id: curr.version_id,
+                last_updated: curr.last_updated,
+                content: curr.content,
+                history_operation: "UPDATE".to_string(),
+                history_timestamp: curr.last_updated,
+            });
+        }
+
+        // Apply limit
+        history.truncate(limit as usize);
 
         Ok(history)
     }
@@ -1201,7 +1232,9 @@ impl PractitionerRepository {
                 if i > 0 {
                     sql.push_str(", ");
                 }
-                sql.push_str(&sort.field);
+                // Map FHIR search parameter name to database column name
+                let column_name = Self::map_sort_field_to_column(&sort.field);
+                sql.push_str(&column_name);
                 match sort.direction {
                     SortDirection::Ascending => sql.push_str(" ASC"),
                     SortDirection::Descending => sql.push_str(" DESC"),
@@ -1239,6 +1272,27 @@ impl PractitionerRepository {
         };
 
         Ok((resources, total))
+    }
+
+    /// Map FHIR search parameter name to database column name for sorting
+    fn map_sort_field_to_column(field: &str) -> String {
+        match field {
+            "address" => "address_name".to_string(),
+            "address-city" => "address_city_name".to_string(),
+            "address-country" => "address_country_name".to_string(),
+            "address-postalcode" => "address_postalcode_name".to_string(),
+            "address-state" => "address_state_name".to_string(),
+            "address-use" => "address_use_code".to_string(),
+            "email" => "email_code".to_string(),
+            "family" => "family_name".to_string(),
+            "gender" => "gender".to_string(),
+            "active" => "active".to_string(),
+            "communication" => "communication_code".to_string(),
+            "deceased" => "deceased_code".to_string(),
+            "identifier" => "identifier_value".to_string(),
+            "qualification-period" => "qualification_period".to_string(),
+            _ => field.to_string(),
+        }
     }
 
     /// Find patients by practitioner ID (for _revinclude support)

@@ -108,6 +108,17 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         }
     }
 
+    // Extract patient reference
+    if let Some(reference) = content
+        .get("subject")
+        .and_then(|s| s.get("reference"))
+        .and_then(|r| r.as_str())
+    {
+        if reference.starts_with("Patient/") {
+            params.patient_reference = Some(reference.to_string());
+        }
+    }
+
     // Extract code
     if let Some(code_obj) = content.get("code") {
         if let Some(codings) = code_obj.get("coding").and_then(|c| c.as_array()) {
@@ -149,14 +160,18 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.encounter_reference = Some(reference.to_string());
+        if reference.starts_with("Encounter/") {
+            params.encounter_reference = Some(reference.to_string());
+        }
     }
 
     // Extract based-on references
     if let Some(refs) = content.get("basedOn").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.based_on_reference.push(reference.to_string());
+                if reference.starts_with("DeviceRequest/") || reference.starts_with("ServiceRequest/") || reference.starts_with("CarePlan/") || reference.starts_with("MedicationRequest/") || reference.starts_with("ImmunizationRecommendation/") || reference.starts_with("NutritionOrder/") {
+                    params.based_on_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -234,7 +249,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     if let Some(refs) = content.get("component").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.component_value_reference_reference.push(reference.to_string());
+                if reference.starts_with("MolecularSequence/") {
+                    params.component_value_reference_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -257,7 +274,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     if let Some(refs) = content.get("derivedFrom").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.derived_from_reference.push(reference.to_string());
+                if reference.starts_with("ImagingStudy/") || reference.starts_with("DocumentReference/") || reference.starts_with("Observation/") || reference.starts_with("MolecularSequence/") || reference.starts_with("GenomicStudy/") || reference.starts_with("ImagingSelection/") || reference.starts_with("QuestionnaireResponse/") {
+                    params.derived_from_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -268,14 +287,18 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.device_reference = Some(reference.to_string());
+        if reference.starts_with("Device/") || reference.starts_with("DeviceMetric/") {
+            params.device_reference = Some(reference.to_string());
+        }
     }
 
     // Extract focus references
     if let Some(refs) = content.get("focus").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.focus_reference.push(reference.to_string());
+                if reference.starts_with("Account/") || reference.starts_with("ActivityDefinition/") || reference.starts_with("ActorDefinition/") || reference.starts_with("AdministrableProductDefinition/") || reference.starts_with("AdverseEvent/") || reference.starts_with("AllergyIntolerance/") || reference.starts_with("Appointment/") || reference.starts_with("AppointmentResponse/") || reference.starts_with("ArtifactAssessment/") || reference.starts_with("AuditEvent/") || reference.starts_with("Basic/") || reference.starts_with("Binary/") || reference.starts_with("BiologicallyDerivedProduct/") || reference.starts_with("BiologicallyDerivedProductDispense/") || reference.starts_with("BodyStructure/") || reference.starts_with("Bundle/") || reference.starts_with("CapabilityStatement/") || reference.starts_with("CarePlan/") || reference.starts_with("CareTeam/") || reference.starts_with("ChargeItem/") || reference.starts_with("ChargeItemDefinition/") || reference.starts_with("Citation/") || reference.starts_with("Claim/") || reference.starts_with("ClaimResponse/") || reference.starts_with("ClinicalImpression/") || reference.starts_with("ClinicalUseDefinition/") || reference.starts_with("CodeSystem/") || reference.starts_with("Communication/") || reference.starts_with("CommunicationRequest/") || reference.starts_with("CompartmentDefinition/") || reference.starts_with("Composition/") || reference.starts_with("ConceptMap/") || reference.starts_with("Condition/") || reference.starts_with("ConditionDefinition/") || reference.starts_with("Consent/") || reference.starts_with("Contract/") || reference.starts_with("Coverage/") || reference.starts_with("CoverageEligibilityRequest/") || reference.starts_with("CoverageEligibilityResponse/") || reference.starts_with("DetectedIssue/") || reference.starts_with("Device/") || reference.starts_with("DeviceAssociation/") || reference.starts_with("DeviceDefinition/") || reference.starts_with("DeviceDispense/") || reference.starts_with("DeviceMetric/") || reference.starts_with("DeviceRequest/") || reference.starts_with("DeviceUsage/") || reference.starts_with("DiagnosticReport/") || reference.starts_with("DocumentReference/") || reference.starts_with("Encounter/") || reference.starts_with("EncounterHistory/") || reference.starts_with("Endpoint/") || reference.starts_with("EnrollmentRequest/") || reference.starts_with("EnrollmentResponse/") || reference.starts_with("EpisodeOfCare/") || reference.starts_with("EventDefinition/") || reference.starts_with("Evidence/") || reference.starts_with("EvidenceReport/") || reference.starts_with("EvidenceVariable/") || reference.starts_with("ExampleScenario/") || reference.starts_with("ExplanationOfBenefit/") || reference.starts_with("FamilyMemberHistory/") || reference.starts_with("Flag/") || reference.starts_with("FormularyItem/") || reference.starts_with("GenomicStudy/") || reference.starts_with("Goal/") || reference.starts_with("GraphDefinition/") || reference.starts_with("Group/") || reference.starts_with("GuidanceResponse/") || reference.starts_with("HealthcareService/") || reference.starts_with("ImagingSelection/") || reference.starts_with("ImagingStudy/") || reference.starts_with("Immunization/") || reference.starts_with("ImmunizationEvaluation/") || reference.starts_with("ImmunizationRecommendation/") || reference.starts_with("ImplementationGuide/") || reference.starts_with("Ingredient/") || reference.starts_with("InsurancePlan/") || reference.starts_with("InventoryItem/") || reference.starts_with("InventoryReport/") || reference.starts_with("Invoice/") || reference.starts_with("Library/") || reference.starts_with("Linkage/") || reference.starts_with("List/") || reference.starts_with("Location/") || reference.starts_with("ManufacturedItemDefinition/") || reference.starts_with("Measure/") || reference.starts_with("MeasureReport/") || reference.starts_with("Medication/") || reference.starts_with("MedicationAdministration/") || reference.starts_with("MedicationDispense/") || reference.starts_with("MedicationKnowledge/") || reference.starts_with("MedicationRequest/") || reference.starts_with("MedicationStatement/") || reference.starts_with("MedicinalProductDefinition/") || reference.starts_with("MessageDefinition/") || reference.starts_with("MessageHeader/") || reference.starts_with("MolecularSequence/") || reference.starts_with("NamingSystem/") || reference.starts_with("NutritionIntake/") || reference.starts_with("NutritionOrder/") || reference.starts_with("NutritionProduct/") || reference.starts_with("Observation/") || reference.starts_with("ObservationDefinition/") || reference.starts_with("OperationDefinition/") || reference.starts_with("OperationOutcome/") || reference.starts_with("Organization/") || reference.starts_with("OrganizationAffiliation/") || reference.starts_with("PackagedProductDefinition/") || reference.starts_with("Parameters/") || reference.starts_with("Patient/") || reference.starts_with("PaymentNotice/") || reference.starts_with("PaymentReconciliation/") || reference.starts_with("Permission/") || reference.starts_with("Person/") || reference.starts_with("PlanDefinition/") || reference.starts_with("Practitioner/") || reference.starts_with("PractitionerRole/") || reference.starts_with("Procedure/") || reference.starts_with("Provenance/") || reference.starts_with("Questionnaire/") || reference.starts_with("QuestionnaireResponse/") || reference.starts_with("RegulatedAuthorization/") || reference.starts_with("RelatedPerson/") || reference.starts_with("RequestOrchestration/") || reference.starts_with("Requirements/") || reference.starts_with("ResearchStudy/") || reference.starts_with("ResearchSubject/") || reference.starts_with("RiskAssessment/") || reference.starts_with("Schedule/") || reference.starts_with("SearchParameter/") || reference.starts_with("ServiceRequest/") || reference.starts_with("Slot/") || reference.starts_with("Specimen/") || reference.starts_with("SpecimenDefinition/") || reference.starts_with("StructureDefinition/") || reference.starts_with("StructureMap/") || reference.starts_with("Subscription/") || reference.starts_with("SubscriptionStatus/") || reference.starts_with("SubscriptionTopic/") || reference.starts_with("Substance/") || reference.starts_with("SubstanceDefinition/") || reference.starts_with("SubstanceNucleicAcid/") || reference.starts_with("SubstancePolymer/") || reference.starts_with("SubstanceProtein/") || reference.starts_with("SubstanceReferenceInformation/") || reference.starts_with("SubstanceSourceMaterial/") || reference.starts_with("SupplyDelivery/") || reference.starts_with("SupplyRequest/") || reference.starts_with("Task/") || reference.starts_with("TerminologyCapabilities/") || reference.starts_with("TestPlan/") || reference.starts_with("TestReport/") || reference.starts_with("TestScript/") || reference.starts_with("Transport/") || reference.starts_with("ValueSet/") || reference.starts_with("VerificationResult/") || reference.starts_with("VisionPrescription/") {
+                    params.focus_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -284,7 +307,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     if let Some(refs) = content.get("hasMember").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.has_member_reference.push(reference.to_string());
+                if reference.starts_with("Observation/") || reference.starts_with("MolecularSequence/") || reference.starts_with("QuestionnaireResponse/") {
+                    params.has_member_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -307,7 +332,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     if let Some(refs) = content.get("partOf").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.part_of_reference.push(reference.to_string());
+                if reference.starts_with("ImagingStudy/") || reference.starts_with("Procedure/") || reference.starts_with("MedicationStatement/") || reference.starts_with("MedicationAdministration/") || reference.starts_with("GenomicStudy/") || reference.starts_with("Immunization/") || reference.starts_with("MedicationDispense/") {
+                    params.part_of_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -316,7 +343,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
     if let Some(refs) = content.get("performer").and_then(|g| g.as_array()) {
         for ref_item in refs {
             if let Some(reference) = ref_item.get("reference").and_then(|r| r.as_str()) {
-                params.performer_reference.push(reference.to_string());
+                if reference.starts_with("Organization/") || reference.starts_with("CareTeam/") || reference.starts_with("RelatedPerson/") || reference.starts_with("PractitionerRole/") || reference.starts_with("Practitioner/") || reference.starts_with("Patient/") {
+                    params.performer_reference.push(reference.to_string());
+                }
             }
         }
     }
@@ -327,7 +356,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.specimen_reference = Some(reference.to_string());
+        if reference.starts_with("Group/") || reference.starts_with("Specimen/") {
+            params.specimen_reference = Some(reference.to_string());
+        }
     }
 
     // Extract status
@@ -341,7 +372,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.subject_reference = Some(reference.to_string());
+        if reference.starts_with("Device/") || reference.starts_with("Organization/") || reference.starts_with("Procedure/") || reference.starts_with("NutritionProduct/") || reference.starts_with("Group/") || reference.starts_with("Practitioner/") || reference.starts_with("BiologicallyDerivedProduct/") || reference.starts_with("Substance/") || reference.starts_with("Location/") || reference.starts_with("Patient/") || reference.starts_with("Medication/") {
+            params.subject_reference = Some(reference.to_string());
+        }
     }
 
     // Extract value-concept
@@ -396,7 +429,9 @@ pub fn extract_observation_search_params(content: &Value) -> ObservationSearchPa
         .and_then(|s| s.get("reference"))
         .and_then(|r| r.as_str())
     {
-        params.value_reference_reference = Some(reference.to_string());
+        if reference.starts_with("MolecularSequence/") {
+            params.value_reference_reference = Some(reference.to_string());
+        }
     }
 
     params
@@ -407,6 +442,7 @@ pub struct ObservationSearchParams {
     pub _last_updated: Option<NaiveDate>,
     pub identifier_system: Vec<String>,
     pub identifier_value: Vec<String>,
+    pub patient_reference: Option<String>,
     pub code_system: Option<String>,
     pub code_code: Option<String>,
     pub date_datetime: Option<DateTime<Utc>>,
