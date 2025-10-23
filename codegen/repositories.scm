@@ -68,7 +68,7 @@ use uuid::Uuid;
 
 use crate::error::{FhirError, Result};
 use crate::models::"resource-lower"::{extract_"resource-lower"_search_params, "resource-name", "resource-name"History};
-"(generate-cross-resource-imports resource-name)"use crate::search::{SearchQuery, SortDirection};
+"(generate-cross-resource-imports resource-name)"use crate::search::{SearchParam, SearchQuery, SortDirection};
 use crate::services::validate_"resource-lower";
 
 pub struct "struct-name" {
@@ -1269,15 +1269,58 @@ impl "struct-name" {
 
         let mut bind_values: Vec<""String> = Vec::new();
 
-        // Build WHERE clause from search parameters
+        // Group parameters by name for OR logic
+        let mut param_groups: HashMap<""String, Vec<""&""SearchParam>> = HashMap::new();
         for param in &""query.params {
-            match param.name.as_str() {
-")
-       (generate-search-param-matches resource-name resource-lower all-searches)
-       ($"                _ => {
-                    // Unknown parameter - ignore per FHIR spec
-                    tracing::warn!(\"Unknown search parameter for "resource-name": {}\", param.name);
+            param_groups.entry(param.name.clone()).or_insert_with(Vec::new).push(param);
+        }
+
+        // Build WHERE clause from grouped search parameters
+        for (param_name, param_list) in &""param_groups {
+            // Start OR group if multiple values
+            let needs_or_group = param_list.len() > 1;
+
+            // Track SQL length before processing to detect if condition was added
+            let sql_before_len = sql.len();
+
+            // Tentatively add AND - we'll revert if no condition generated
+            sql.push_str(\" AND \");
+
+            if needs_or_group {
+                sql.push_str(\"(\");
+            }
+
+            // Process each param in the group
+            for (param_idx, param) in param_list.iter().enumerate() {
+                // Add OR between params in same group
+                if needs_or_group &""&"" param_idx > 0 {
+                    sql.push_str(\" OR \");
                 }
+
+                // Generate condition based on parameter name
+                match param.name.as_str() {
+")
+       (generate-search-param-matches-or resource-name resource-lower all-searches)
+       ($"                    _ => {
+                        // Unknown parameter - ignore per FHIR spec
+                        tracing::warn!(\"Unknown search parameter for "resource-name": {}\", param.name);
+                    }
+                }
+            }
+
+            // Close OR group if needed
+            if needs_or_group {
+                sql.push_str(\")\");
+            }
+
+            // Check if any condition was actually added
+            // If sql length increased only by \" AND \" or \" AND ()\", revert it
+            let added_text_len = sql.len() - sql_before_len;
+            let expected_empty_len = if needs_or_group { 7 } else { 5 }; // \" AND ()\" or \" AND \"
+
+            if added_text_len == expected_empty_len {
+                // No actual condition was added, revert the AND
+                sql.truncate(sql_before_len);
             }
         }
 
@@ -1360,6 +1403,14 @@ impl "struct-name" {
       ""
       (apply $ (map (lambda (search)
                       (generate-search-param-match resource-name resource-lower search))
+                    searches))))
+
+; Generate match arms for OR logic (no AND prefix in conditions)
+(define (generate-search-param-matches-or resource-name resource-lower searches)
+  (if (null? searches)
+      ""
+      (apply $ (map (lambda (search)
+                      (generate-search-param-match-or resource-name resource-lower search))
                     searches))))
 
 ; Generate a single search parameter match arm
@@ -1728,6 +1779,350 @@ impl "struct-name" {
                         }
                     }
                 }
+")))))
+
+; Generate a single search parameter match arm for OR logic (no AND prefix)
+(define (generate-search-param-match-or resource-name resource-lower search)
+  (let* ((search-name (% "name" search))
+         (search-type (% "type" search))
+         (col-name (camel-to-snake (string-replace search-name "-" "_")))
+         (extraction-key (search-extraction-key search))
+         (is-collection (search-is-collection? search)))
+    ; Skip special parameters like _lastUpdated
+    (if (and (> (string-length search-name) 0)
+             (string=? (substring search-name 0 1) "_"))
+        ""
+        (case search-type
+          (("string") (generate-string-param-match-or search-name extraction-key resource-lower search))
+          (("token") (generate-token-param-match-or search-name col-name search resource-lower is-collection))
+          (("date") (generate-date-param-match-or search-name col-name resource-lower))
+          (("reference") (generate-reference-param-match-or search-name col-name resource-lower is-collection search))
+          (("composite") "") ; Skip composite for now
+          (("special") "")
+          (else "")))))
+
+; String parameter match for OR logic (no AND prefix)
+(define (generate-string-param-match-or search-name extraction-key resource-lower search)
+  (if (string=? extraction-key "name")
+      (let ((field-type (search-humanname-field search)))
+        (if field-type
+            (generate-humanname-search-or search-name field-type resource-lower)
+            ""))
+      ""))
+
+; HumanName search for OR logic  (no AND prefix)
+(define (generate-humanname-search-or search-name field-type resource-lower)
+  (cond
+    ((string=? field-type "all")
+     ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref().unwrap_or(\"contains\");
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            \"contains\" => {
+                                sql.push_str(&""format!(
+                                    \"(EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn ILIKE ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".given_name) AS gn WHERE gn ILIKE ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".prefix) AS p WHERE p ILIKE ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".suffix) AS s WHERE s ILIKE ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".name_text) AS nt WHERE nt ILIKE ${}))\",
+                                    bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                                ));
+                                bind_values.push(format!(\"%{}%\", param.value));
+                            }
+                            \"exact\" => {
+                                sql.push_str(&""format!(
+                                    \"(EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn = ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".given_name) AS gn WHERE gn = ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".prefix) AS p WHERE p = ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".suffix) AS s WHERE s = ${}) \\
+                                     OR EXISTS (SELECT 1 FROM unnest("resource-lower".name_text) AS nt WHERE nt = ${}))\",
+                                    bind_idx, bind_idx, bind_idx, bind_idx, bind_idx
+                                ));
+                                bind_values.push(param.value.clone());
+                            }
+                            \"missing\" => {
+                                sql.push_str(\"("resource-lower".family_name IS NULL OR array_length("resource-lower".family_name, 1) IS NULL)\");
+                            }
+                            \"not\" => {
+                                sql.push_str(&""format!(
+                                    \"NOT (EXISTS (SELECT 1 FROM unnest("resource-lower".family_name) AS fn WHERE fn ILIKE ${}))\",
+                                    bind_idx
+                                ));
+                                bind_values.push(format!(\"%{}%\", param.value));
+                            }
+                            _ => {}
+                        }
+                    }
+"))
+    (else
+     (let ((col-name ($ field-type "_name")))
+       ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref().unwrap_or(\"contains\");
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            \"contains\" => {
+                                sql.push_str(&""format!(
+                                    \"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v ILIKE ${})\",
+                                    bind_idx
+                                ));
+                                bind_values.push(format!(\"%{}%\", param.value));
+                            }
+                            \"exact\" => {
+                                sql.push_str(&""format!(
+                                    \"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v = ${})\",
+                                    bind_idx
+                                ));
+                                bind_values.push(param.value.clone());
+                            }
+                            \"missing\" => {
+                                sql.push_str(\"("resource-lower"."col-name" IS NULL OR array_length("resource-lower"."col-name", 1) IS NULL)\");
+                            }
+                            \"not\" => {
+                                sql.push_str(&""format!(
+                                    \"NOT (EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name") AS v WHERE v ILIKE ${}))\",
+                                    bind_idx
+                                ));
+                                bind_values.push(format!(\"%{}%\", param.value));
+                            }
+                            _ => {}
+                        }
+                    }
+")))))
+
+; Token parameter match for OR logic (no AND prefix)
+(define (generate-token-param-match-or search-name col-name search resource-lower is-collection)
+  (cond
+    ((search-is-simple-code? search)
+     (let* ((property (search-property search))
+            (property-type (if property (% "type" property) "code"))
+            (cast-suffix (if (string=? property-type "boolean") "::boolean" "")))
+       ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref();
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            None => {
+                                sql.push_str(&""format!(\"("resource-lower"."col-name" = ${}"cast-suffix")\", bind_idx));
+                                bind_values.push(param.value.clone());
+                            }
+                            Some(\"missing\") => {
+                                let is_missing = param.value == \"true\";
+                                if is_missing {
+                                    sql.push_str(\"("resource-lower"."col-name" IS NULL)\");
+                                } else {
+                                    sql.push_str(\"("resource-lower"."col-name" IS NOT NULL)\");
+                                }
+                            }
+                            Some(\"not\") => {
+                                sql.push_str(&""format!(\"("resource-lower"."col-name" != ${}"cast-suffix")\", bind_idx));
+                                bind_values.push(param.value.clone());
+                            }
+                            _ => {
+                                tracing::warn!(\"Unknown modifier for token search: {:?}\", modifier);
+                            }
+                        }
+                    }
+")))
+    ((search-is-identifier? search)
+     ($"                    \""search-name"\" => {
+                        if param.value.contains('|') {
+                            let parts: Vec<""&""str> = param.value.split('|').collect();
+                            if parts.len() == 2 {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&""format!(
+                                    \"EXISTS (SELECT 1 FROM unnest("resource-lower".identifier_system, "resource-lower".identifier_value) AS ident(sys, val) WHERE ident.sys = ${} AND ident.val = ${})\",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(parts[0].to_string());
+                                bind_values.push(parts[1].to_string());
+                            }
+                        } else {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(\"EXISTS (SELECT 1 FROM unnest("resource-lower".identifier_value) AS iv WHERE iv = ${})\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                    }
+"))
+    ((search-is-contactpoint? search)
+     ($"                    \""search-name"\" => {
+                        let bind_idx = bind_values.len() + 1;
+                        sql.push_str(&""format!(\"EXISTS (SELECT 1 FROM unnest("resource-lower".telecom_value) AS tv WHERE tv = ${})\", bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+"))
+    ((or (search-is-codeableconcept? search) (search-has-codeableconcept-variant? search))
+     (if is-collection
+       ($"                    \""search-name"\" => {
+                        if param.value.contains('|') {
+                            let parts: Vec<""&""str> = param.value.split('|').collect();
+                            if parts.len() == 2 {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&""format!(
+                                    \"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_system, "resource-lower"."col-name"_code) AS cc(sys, code) WHERE cc.sys = ${} AND cc.code = ${})\",
+                                    bind_idx, bind_idx + 1
+                                ));
+                                bind_values.push(parts[0].to_string());
+                                bind_values.push(parts[1].to_string());
+                            }
+                        } else {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(\"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_code) AS c WHERE c = ${})\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                    }
+")
+       ($"                    \""search-name"\" => {
+                        if param.value.contains('|') {
+                            let parts: Vec<""&""str> = param.value.split('|').collect();
+                            if parts.len() == 2 {
+                                let bind_idx = bind_values.len() + 1;
+                                sql.push_str(&""format!(\"("resource-lower"."col-name"_system = ${} AND "resource-lower"."col-name"_code = ${})\", bind_idx, bind_idx + 1));
+                                bind_values.push(parts[0].to_string());
+                                bind_values.push(parts[1].to_string());
+                            }
+                        } else {
+                            let bind_idx = bind_values.len() + 1;
+                            sql.push_str(&""format!(\"("resource-lower"."col-name"_code = ${})\", bind_idx));
+                            bind_values.push(param.value.clone());
+                        }
+                    }
+")))
+    (else "")))
+
+; Date parameter match for OR logic (no AND prefix)
+(define (generate-date-param-match-or search-name col-name resource-lower)
+  (let* ((is-datetime-col (or (string-ci=? col-name "last_updated")
+                               (string-ci=? col-name "_lastupdated")
+                               (string-suffix? "_datetime" col-name)
+                               (string-suffix? "_instant" col-name)
+                               (string-suffix? "_period_start" col-name)
+                               (string-suffix? "_period_end" col-name)))
+         (cast-suffix (if is-datetime-col "::timestamptz" "::date")))
+    ($"                    \""search-name"\" => {
+                        let bind_idx = bind_values.len() + 1;
+                        let op = match param.prefix.as_deref() {
+                            Some(\"eq\") | None => \"=\",
+                            Some(\"ne\") => \"!=\",
+                            Some(\"gt\") => \">\",
+                            Some(\"lt\") => \"<\",
+                            Some(\"ge\") => \">=\",
+                            Some(\"le\") => \"<=\",
+                            _ => \"=\",
+                        };
+                        sql.push_str(&""format!(\"("resource-lower"."col-name" {} ${}"cast-suffix")\", op, bind_idx));
+                        bind_values.push(param.value.clone());
+                    }
+")))
+
+; Reference parameter match for OR logic (no AND prefix)
+(define (generate-reference-param-match-or search-name col-name resource-lower is-collection search)
+  (let* ((targets (search-target-resources search))
+         (has-targets (not (null? targets)))
+         (first-target (if has-targets (car targets) "")))
+    (if is-collection
+        (if has-targets
+            ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref();
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            None => {
+                                let mut ref_value = param.value.clone();
+                                if !ref_value.contains('/') {
+                                    ref_value = format!(\""first-target"/{}\", ref_value);
+                                }
+                                sql.push_str(&""format!(\"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                                bind_values.push(ref_value);
+                            }
+                            Some(\"missing\") => {
+                                let is_missing = param.value == \"true\";
+                                if is_missing {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NULL OR array_length("resource-lower"."col-name"_reference, 1) IS NULL)\");
+                                } else {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NOT NULL AND array_length("resource-lower"."col-name"_reference, 1) > 0)\");
+                                }
+                            }
+                            _ => {
+                                tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                            }
+                        }
+                    }
+")
+            ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref();
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            None => {
+                                sql.push_str(&""format!(\"EXISTS (SELECT 1 FROM unnest("resource-lower"."col-name"_reference) AS ref WHERE ref = ${})\", bind_idx));
+                                bind_values.push(param.value.clone());
+                            }
+                            Some(\"missing\") => {
+                                let is_missing = param.value == \"true\";
+                                if is_missing {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NULL OR array_length("resource-lower"."col-name"_reference, 1) IS NULL)\");
+                                } else {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NOT NULL AND array_length("resource-lower"."col-name"_reference, 1) > 0)\");
+                                }
+                            }
+                            _ => {
+                                tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                            }
+                        }
+                    }
+"))
+        (if has-targets
+            ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref();
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            None => {
+                                let mut ref_value = param.value.clone();
+                                if !ref_value.contains('/') {
+                                    ref_value = format!(\""first-target"/{}\", ref_value);
+                                }
+                                sql.push_str(&""format!(\"("resource-lower"."col-name"_reference = ${})\", bind_idx));
+                                bind_values.push(ref_value);
+                            }
+                            Some(\"missing\") => {
+                                let is_missing = param.value == \"true\";
+                                if is_missing {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NULL)\");
+                                } else {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NOT NULL)\");
+                                }
+                            }
+                            _ => {
+                                tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                            }
+                        }
+                    }
+")
+            ($"                    \""search-name"\" => {
+                        let modifier = param.modifier.as_deref();
+                        let bind_idx = bind_values.len() + 1;
+
+                        match modifier {
+                            None => {
+                                sql.push_str(&""format!(\"("resource-lower"."col-name"_reference = ${})\", bind_idx));
+                                bind_values.push(param.value.clone());
+                            }
+                            Some(\"missing\") => {
+                                let is_missing = param.value == \"true\";
+                                if is_missing {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NULL)\");
+                                } else {
+                                    sql.push_str(\"("resource-lower"."col-name"_reference IS NOT NULL)\");
+                                }
+                            }
+                            _ => {
+                                tracing::warn!(\"Unknown modifier for reference search: {:?}\", modifier);
+                            }
+                        }
+                    }
 ")))))
 
 ; Generate helper methods (resource-specific)
