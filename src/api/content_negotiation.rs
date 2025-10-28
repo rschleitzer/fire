@@ -160,6 +160,14 @@ pub struct ObservationHistoryTemplate {
     pub total: usize,
 }
 
+#[derive(Template)]
+#[template(path = "practitioner_history.html")]
+pub struct PractitionerHistoryTemplate {
+    pub id: String,
+    pub history: Vec<HistoryRow>,
+    pub total: usize,
+}
+
 #[derive(Clone)]
 pub struct HistoryRow {
     pub version_id: String,

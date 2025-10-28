@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, Html},
     Json,
 };
 use percent_encoding::percent_decode_str;
@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::api::content_negotiation::preferred_format_with_query;
+use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::extractors::FhirJson;
@@ -139,11 +139,51 @@ pub async fn search_observations(
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
-    // For now, only support JSON and XML (HTML rendering requires templates)
+    // Handle response format
     match preferred_format_with_query(&uri, &headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Html => {
+            // Build HTML template data
+            let rows: Vec<ObservationRow> = observations
+                .iter()
+                .map(|r| ObservationRow {
+                    id: r.id.clone(),
+                    version_id: r.version_id.to_string(),
+                    code: extract_observation_code(&r.content),
+                    status: r.content
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("Unknown")
+                        .to_string(),
+                    value: extract_observation_value(&r.content),
+                    subject: r.content
+                        .get("subject")
+                        .and_then(|s| s.get("reference"))
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    effective_date: r.content
+                        .get("effectiveDateTime")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    last_updated: r.last_updated.to_rfc3339(),
+                })
+                .collect();
+
+            let template = ObservationListTemplate {
+                observations: rows,
+                total: total.unwrap_or(0) as usize,
+                current_url: self_link,
+            };
+
+            let html = template.render()
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok(Html(html).into_response())
+        }
+        ResponseFormat::Json => {
+            Ok(Json(bundle).into_response())
+        }
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -235,13 +275,19 @@ pub async fn read_observation(
     let etag = format!("W/\"{}\"", observation.version_id);
 
     match preferred_format_with_query(&uri, &headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => {
+        ResponseFormat::Html => {
+            let template = ObservationEditTemplate {
+                id: id.clone(),
+                resource_json: serde_json::to_string(&observation.content)?,
+            };
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => {
             let mut response_headers = HeaderMap::new();
             response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
             Ok((response_headers, Json(observation.content)).into_response())
         }
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&observation.content)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -369,9 +415,40 @@ pub async fn get_observation_history(
     let bundle: Value = serde_json::from_str(&bundle_str)?;
 
     match preferred_format_with_query(&uri, &headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Html => {
+            let history_rows: Vec<HistoryRow> = history
+                .iter()
+                .map(|h| {
+                    let operation = h.content
+                        .get("request")
+                        .and_then(|r| r.get("method"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("UPDATE")
+                        .to_string();
+
+                    let fhir_json = h.content.get("resource").unwrap_or(&h.content);
+                    let summary = extract_observation_code(fhir_json);
+
+                    HistoryRow {
+                        version_id: h.version_id.to_string(),
+                        operation,
+                        last_updated: h.last_updated.to_rfc3339(),
+                        summary,
+                    }
+                })
+                .collect();
+
+            let template = ObservationHistoryTemplate {
+                id: id.clone(),
+                history: history_rows,
+                total,
+            };
+            let html = template.render()
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok(Html(html).into_response())
+        }
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((

@@ -16,7 +16,7 @@
       ($"use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, Html},
     Json,
 };
 use percent_encoding::percent_decode_str;
@@ -24,7 +24,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::api::content_negotiation::preferred_format_with_query;
+use crate::api::content_negotiation::{*, preferred_format_with_query};
 use crate::api::xml_serializer::json_to_xml;
 use crate::error::Result;
 use crate::extractors::FhirJson;
@@ -144,11 +144,35 @@ pub async fn search_"resource-plural"(
     // Parse string back to Value for Json response
     let bundle: Value = serde_json::from_str(&""bundle_str)?;
 
-    // For now, only support JSON and XML (HTML rendering requires templates)
+    // Handle response format
     match preferred_format_with_query(&""uri, &""headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Html => {
+            // Build HTML template data
+            let rows: Vec<"""resource-name"Row> = "resource-plural"
+                .iter()
+                .map(|r| "resource-name"Row {
+                    id: r.id.clone(),
+                    version_id: r.version_id.to_string(),
+                    "
+                (generate-html-row-fields resource-name resource-lower)
+                "last_updated: r.last_updated.to_rfc3339(),
+                })
+                .collect();
+
+            let template = "resource-name"ListTemplate {
+                "resource-plural": rows,
+                total: total.unwrap_or(0) as usize,
+                current_url: self_link,
+            };
+
+            let html = template.render()
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok(Html(html).into_response())
+        }
+        ResponseFormat::Json => {
+            Ok(Json(bundle).into_response())
+        }
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&""bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -246,13 +270,19 @@ pub async fn read_"resource-lower"(
     let etag = format!(\"W/\\\"{}\\\"\", "resource-lower".version_id);
 
     match preferred_format_with_query(&""uri, &""headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => {
+        ResponseFormat::Html => {
+            let template = "resource-name"EditTemplate {
+                id: id.clone(),
+                resource_json: serde_json::to_string(&"resource-lower".content)?,
+            };
+            Ok(Html(template.render().unwrap()).into_response())
+        }
+        ResponseFormat::Json => {
             let mut response_headers = HeaderMap::new();
             response_headers.insert(axum::http::header::ETAG, etag.parse().unwrap());
             Ok((response_headers, Json("resource-lower".content)).into_response())
         }
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&"resource-lower".content)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -389,9 +419,9 @@ pub async fn get_"resource-lower"_history(
     let bundle: Value = serde_json::from_str(&""bundle_str)?;
 
     match preferred_format_with_query(&""uri, &""headers) {
-        crate::api::content_negotiation::ResponseFormat::Json |
-        crate::api::content_negotiation::ResponseFormat::Html => Ok(Json(bundle).into_response()),
-        crate::api::content_negotiation::ResponseFormat::Xml => {
+        ResponseFormat::Html => {"(generate-history-html-handler resource-name resource-lower)"}
+        ResponseFormat::Json => Ok(Json(bundle).into_response()),
+        ResponseFormat::Xml => {
             let xml_string = json_to_xml(&""bundle)
                 .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
             Ok((
@@ -637,3 +667,94 @@ pub async fn get_"resource-lower"_type_history(
         }
 "))
     (else "")))
+
+; Generate resource-specific row fields for HTML templates
+(define (generate-html-row-fields resource-name resource-lower)
+  (case resource-name
+    (("Patient") ($"name: extract_patient_name(&""r.content),
+                    gender: r.content
+                        .get(\"gender\")
+                        .and_then(|g| g.as_str())
+                        .unwrap_or(\"Unknown\")
+                        .to_string(),
+                    birth_date: r.content
+                        .get(\"birthDate\")
+                        .and_then(|b| b.as_str())
+                        .unwrap_or(\"Unknown\")
+                        .to_string(),
+                    active: r.content
+                        .get(\"active\")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(true),
+                    "))
+    (("Observation") ($"code: extract_observation_code(&""r.content),
+                    status: r.content
+                        .get(\"status\")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or(\"Unknown\")
+                        .to_string(),
+                    value: extract_observation_value(&""r.content),
+                    subject: r.content
+                        .get(\"subject\")
+                        .and_then(|s| s.get(\"reference\"))
+                        .and_then(|r| r.as_str())
+                        .unwrap_or(\"\")
+                        .to_string(),
+                    effective_date: r.content
+                        .get(\"effectiveDateTime\")
+                        .and_then(|d| d.as_str())
+                        .unwrap_or(\"\")
+                        .to_string(),
+                    "))
+    (("Practitioner") ($"name: extract_practitioner_name(&""r.content),
+                    active: r.content
+                        .get(\"active\")
+                        .and_then(|a| a.as_bool())
+                        .unwrap_or(true),
+                    "))
+    (else "")))
+
+; Generate resource-specific summary extractor for history
+(define (generate-history-summary-extractor resource-name)
+  (case resource-name
+    (("Patient" "Practitioner") ($"extract_"(downcase-string resource-name)"_name(fhir_json)"))
+    (("Observation") ($"extract_observation_code(fhir_json)"))
+    (else "String::from(\"N/A\")")))
+
+; Generate HTML handler for history endpoint
+(define (generate-history-html-handler resource-name resource-lower)
+  (case resource-name
+    (("Patient" "Observation" "Practitioner")
+     ($"<![CDATA[
+            let history_rows: Vec<HistoryRow> = history
+                .iter()
+                .map(|h| {
+                    let operation = h.content
+                        .get(\"request\")
+                        .and_then(|r| r.get(\"method\"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or(\"UPDATE\")
+                        .to_string();
+
+                    let fhir_json = h.content.get(\"resource\").unwrap_or(&h.content);
+                    let summary = ]]>"(generate-history-summary-extractor resource-name)"<![CDATA[;
+
+                    HistoryRow {
+                        version_id: h.version_id.to_string(),
+                        operation,
+                        last_updated: h.last_updated.to_rfc3339(),
+                        summary,
+                    }
+                })
+                .collect();
+
+            let template = ]]>"resource-name"<![CDATA[HistoryTemplate {
+                id: id.clone(),
+                history: history_rows,
+                total,
+            };
+            let html = template.render()
+                .map_err(|e| crate::error::FhirError::Internal(anyhow::anyhow!(e)))?;
+            Ok(Html(html).into_response())
+        ]]>"))
+    (else ($"Ok(Json(bundle).into_response())"))))
