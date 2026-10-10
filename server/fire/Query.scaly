@@ -1,0 +1,205 @@
+; A request's parameters: the pairs of a query string or of a form, decoded,
+; in the order they came. The pairs are cells of a text buffer -- key and
+; value, each as offset and length (as fire/Search.scaly's rows are).
+
+function hex_value(c: u8) returns int
+{
+    if c >= 48 and c <= 57
+        return (c as int) - 48
+    if c >= 65 and c <= 70
+        return (c as int) - 55
+    if c >= 97 and c <= 102
+        return (c as int) - 87
+    0 - 1
+}
+
+; s without its percent escapes, a `+` read as a blank; appended to out.
+procedure put_decoded(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        if c = 37 and i + 2 < s.length + 0 and hex_value(s[i + 1]) >= 0 and hex_value(s[i + 2]) >= 0
+        {
+            out.add((hex_value(s[i + 1]) * 16 + hex_value(s[i + 2])) as u8)
+            i := i + 3
+            continue
+        }
+        if c = 43
+            out.add(32 as u8)
+        else
+            out.add(c)
+        i := i + 1
+    }
+}
+
+; The pairs of raw (a=b&c=d), decoded, added to text and cells.
+procedure parse_pairs(raw: Slice[u8], mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]])
+{
+    var at: size_t 0
+    while at < raw.length
+    {
+        var end at
+        while end < raw.length and raw[end] <> 38
+            end := end + 1
+        let pair raw.subslice(at, end)
+        at := end + 1
+        if pair.length = 0
+            continue
+        var eq: size_t 0
+        while eq < pair.length and pair[eq] <> 61
+            eq := eq + 1
+        cells.add(text.length as i64)
+        put_decoded(text, pair.slice_to(eq))
+        cells.add((text.length as i64) - cells[cells.length - 1])
+        cells.add(text.length as i64)
+        if eq < pair.length
+            put_decoded(text, pair.slice_from(eq + 1))
+        cells.add((text.length as i64) - cells[cells.length - 1])
+    }
+}
+
+; How many pairs the cells hold.
+function pair_count(cells: Slice[i64]) returns size_t
+    cells.length / 4
+
+function pair_key(text: Slice[u8], cells: Slice[i64], i: size_t) returns Slice[u8]
+    text.subslice(cells[i * 4] as size_t, (cells[i * 4] + cells[i * 4 + 1]) as size_t)
+
+function pair_value(text: Slice[u8], cells: Slice[i64], i: size_t) returns Slice[u8]
+    text.subslice(cells[i * 4 + 2] as size_t, (cells[i * 4 + 2] + cells[i * 4 + 3]) as size_t)
+
+; The value of the first pair named key; empty when there is none.
+function first_value(text: Slice[u8], cells: Slice[i64], key: Slice[u8]) returns Slice[u8]
+{
+    var i: size_t 0
+    while i < pair_count(cells)
+    {
+        if pair_key(text, cells, i).equals(key)
+            return pair_value(text, cells, i)
+        i := i + 1
+    }
+    text.slice_to(0)
+}
+
+; An integer as .NET's int.TryParse takes it from a parameter: a sign and
+; digits, blanks around them. False for anything else.
+function whole_number(s: Slice[u8]) returns bool
+{
+    var from: size_t 0
+    var to s.length
+    while from < to and s[from] = 32
+        from := from + 1
+    while to > from and s[to - 1] = 32
+        to := to - 1
+    if from < to and (s[from] = 45 or s[from] = 43)
+        from := from + 1
+    if from = to or to - from > 9
+        return false
+    while from < to
+    {
+        if s[from] < 48 or s[from] > 57
+            return false
+        from := from + 1
+    }
+    true
+}
+
+; The value of a whole_number.
+function whole_value(s: Slice[u8]) returns i64
+{
+    var from: size_t 0
+    while from < s.length and s[from] = 32
+        from := from + 1
+    var negative false
+    if from < s.length and (s[from] = 45 or s[from] = 43)
+    {
+        negative := s[from] = 45
+        from := from + 1
+    }
+    let v digits_of(s.slice_from(from)) as i64
+    if negative
+        return (0 as i64) - v
+    v
+}
+
+; s as a value of a query string, as .NET's HttpUtility.UrlEncode writes
+; it: letters, digits and - _ . ! * ( ) as they are, a blank as +, every
+; other byte as %xx in lower case.
+procedure put_encoded(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    let digits: Slice[u8] "0123456789abcdef"
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        i := i + 1
+        if (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c = 45 or c = 95 or c = 46 or c = 33 or c = 42 or c = 40 or c = 41
+        {
+            out.add(c)
+            continue
+        }
+        if c = 32
+        {
+            out.add(43 as u8)
+            continue
+        }
+        out.add(37 as u8)
+        out.add(digits[(c >> 4) as size_t])
+        out.add(digits[(c & 15) as size_t])
+    }
+}
+
+; The pairs as a query string with _offset and _count set to the given
+; values -- in the place of the first pair of that name, or at the end --,
+; as upstream writes the link to another page.
+procedure put_page_query(mutable out: ref[Array[u8]], text: Slice[u8], cells: Slice[i64], offset: i64, count: i64)
+{
+    var has_offset false
+    var has_count false
+    var written 0
+    var i: size_t 0
+    while i < pair_count(cells)
+    {
+        let key pair_key(text, cells, i)
+        i := i + 1
+        let is_offset key.equals("_offset")
+        let is_count key.equals("_count")
+        if (is_offset and has_offset) or (is_count and has_count)
+            continue
+        if written > 0
+            out.add(38 as u8)
+        written := written + 1
+        put_encoded(out, key)
+        out.add(61 as u8)
+        if is_offset
+        {
+            put_decimal(out, offset)
+            has_offset := true
+            continue
+        }
+        if is_count
+        {
+            put_decimal(out, count)
+            has_count := true
+            continue
+        }
+        put_encoded(out, pair_value(text, cells, i - 1))
+    }
+    if has_offset = false
+    {
+        if written > 0
+            out.add(38 as u8)
+        written := written + 1
+        put_bytes(out, "_offset=")
+        put_decimal(out, offset)
+    }
+    if has_count = false
+    {
+        if written > 0
+            out.add(38 as u8)
+        put_bytes(out, "_count=")
+        put_decimal(out, count)
+    }
+}

@@ -33,6 +33,11 @@
 ;   number F           the number F, or every one of the array F
 ;   quantity p ...     every quantity the paths p (a.b) reach
 ;   none               nothing (upstream writes none either)
+; A parameter that is a column of the resource's own table has a line too,
+;   i table inline column kind
+; where table is the name its table would have (the lines are found by it)
+; and kind the column's (b boolean, t text, d instant, i int, l long,
+; m decimal).
 
 (define (scaly-part-prop part)
     (let ((r (% "ref" part)))
@@ -201,7 +206,18 @@
            (addr-fields (filter (lambda (s) (and (search-is-address? s) (> (length (search-path-parts s)) 1))) strings))
            (contactpoints (filter (lambda (s) (string=? "contactpoint" (token-category s))) tokens))
            (line (lambda (kind s shape) ($ kind " " (search-table-name s) " " shape "\\n"))))
-        ($ (apply $ (map (lambda (s) (line "s" s (scaly-string-shape s hn-all addr-fields))) strings))
+        ($ (apply $ (map (lambda (s)
+                (line "i" s ($ "inline " (% "name" s) " "
+                    (let ((prop (search-property s)))
+                        (case (if prop (% "type" prop) "string")
+                            (("boolean") "b")
+                            (("instant") "d")
+                            (("integer" "positiveInt" "unsignedInt") "i")
+                            (("integer64") "l")
+                            (("decimal") "m")
+                            (else "t"))))))
+                (node-list->list (inline-searches resource))))
+           (apply $ (map (lambda (s) (line "s" s (scaly-string-shape s hn-all addr-fields))) strings))
            (apply $ (map (lambda (s) (line "t" s (scaly-token-shape s contactpoints))) tokens))
            (apply $ (map (lambda (s) (line "d" s (scaly-date-shape s))) dates))
            (apply $ (map (lambda (s) (line "r" s (scaly-reference-shape s))) (of "reference")))

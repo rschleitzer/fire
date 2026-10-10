@@ -1,0 +1,968 @@
+; A search as PostgreSQL reads it, built parameter by parameter as
+; upstream's repository and its SearchQueryBuilder build it: joins to the
+; search tables, conditions, the values as parameters. The SQL need not be
+; upstream's letter for letter -- its rows must be.
+
+use fire.Resource.StoreResult
+
+; What a search is made of. The parameters are cells of `text` (as
+; fire/Search.scaly's rows), in the order of their numbers.
+define SearchQuery
+(
+    var joins: Array[u8]
+    var wheres: Array[u8]
+    var conditions: int
+    var text: Array[u8]
+    var cells: Array[i64]
+    var aliases: int
+    var sort: Array[u8]
+)
+{
+    init()
+    {
+        joins := Array[u8]^this()
+        wheres := Array[u8]^this()
+        conditions := 0
+        text := Array[u8]^this()
+        cells := Array[i64]^this()
+        aliases := 0
+        sort := Array[u8]^this()
+    }
+}
+
+; $n for the parameter value, which is added.
+procedure put_param(mutable q: ref[SearchQuery], mutable out: ref[Array[u8]], value: Slice[u8])
+{
+    cell(&q.text, &q.cells, value)
+    out.add(36 as u8)
+    put_decimal(out, (q.cells.length / 2) as i64)
+}
+
+; Begin a condition: AND between it and the one before.
+procedure begin_condition(mutable q: ref[SearchQuery])
+{
+    if q.conditions > 0
+        put_bytes(&q.wheres, " AND ")
+    q.conditions := q.conditions + 1
+}
+
+procedure put_alias(mutable out: ref[Array[u8]], alias: int)
+{
+    out.add(115 as u8)
+    put_decimal(out, alias as i64)
+}
+
+; " JOIN "Type".table sN ON sN.resource_id = r.id" (LEFT JOIN when left);
+; the answer is N.
+procedure join_table(mutable q: ref[SearchQuery], type: Slice[u8], table: Slice[u8], left: bool) returns int
+{
+    let alias q.aliases
+    q.aliases := q.aliases + 1
+    if left
+        put_bytes(&q.joins, " LEFT")
+    put_bytes(&q.joins, " JOIN ")
+    put_table(&q.joins, type)
+    q.joins.add(46 as u8)
+    q.joins.add(table)
+    q.joins.add(32 as u8)
+    put_alias(&q.joins, alias)
+    put_bytes(&q.joins, " ON ")
+    put_alias(&q.joins, alias)
+    put_bytes(&q.joins, ".resource_id = r.id")
+    alias
+}
+
+; What a condition compares: a column of the search table joined as sN
+; (alias N), of the resource's own table by its quoted name (alias -1), or
+; an expression as it stands (alias -2).
+procedure put_operand(mutable out: ref[Array[u8]], alias: int, column: Slice[u8])
+{
+    if alias >= 0
+    {
+        put_alias(out, alias)
+        out.add(46 as u8)
+        return out.add(column)
+    }
+    if alias = 0 - 1
+    {
+        put_bytes(out, "r.\"")
+        out.add(column)
+        return put_bytes(out, "\"")
+    }
+    out.add(column)
+}
+
+procedure put_dollar(mutable out: ref[Array[u8]], n: size_t)
+{
+    out.add(36 as u8)
+    put_decimal(out, n as i64)
+}
+
+; The k-th of the values a parameter's value names, separated by commas:
+; trimmed, the empty ones not counted. Empty past the last.
+function or_value(value: Slice[u8], k: size_t) returns Slice[u8]
+{
+    var at: size_t 0
+    var found: size_t 0
+    while at <= value.length
+    {
+        var end at
+        while end < value.length and value[end] <> 44
+            end := end + 1
+        let piece trimmed(value.subslice(at, end))
+        if piece.length > 0
+        {
+            if found = k
+                return piece
+            found := found + 1
+        }
+        at := end + 1
+    }
+    value.slice_to(0)
+}
+
+function is_letter(c: u8) returns bool
+    (c >= 65 and c <= 90) or (c >= 97 and c <= 122)
+
+; Does value begin with a prefix of two letters (and, when strict, no
+; third)?
+function has_prefix(value: Slice[u8], strict: bool) returns bool
+{
+    if value.length < 2 or is_letter(value[0]) = false or is_letter(value[1]) = false
+        return false
+    if strict and value.length > 2 and is_letter(value[2])
+        return false
+    true
+}
+
+; A date as upstream's ParseFhirDateRange takes it.
+function readable_date(s: Slice[u8]) returns bool
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] = 84
+            return well_formed("dateTime", s) and s.length > 10
+        i := i + 1
+    }
+    if date_at(s, 0) = false
+        return false
+    if s.length >= 7 and (digits_of(s.subslice(5, 7)) < 1 or digits_of(s.subslice(5, 7)) > 12)
+        return false
+    if s.length = 10 and (digits_of(s.subslice(8, 10)) < 1 or (digits_of(s.subslice(8, 10)) as i64) > days_in(digits_of(s.slice_to(4)) as i64, digits_of(s.subslice(5, 7)) as i64))
+        return false
+    true
+}
+
+; A decimal number: a sign, digits with or without a point, an exponent.
+function readable_number(s: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    if at < s.length and (s[at] = 45 or s[at] = 43)
+        at := at + 1
+    var digits 0
+    while at < s.length and s[at] >= 48 and s[at] <= 57
+    {
+        at := at + 1
+        digits := digits + 1
+    }
+    if at < s.length and s[at] = 46
+    {
+        at := at + 1
+        while at < s.length and s[at] >= 48 and s[at] <= 57
+        {
+            at := at + 1
+            digits := digits + 1
+        }
+    }
+    if digits = 0
+        return false
+    if at < s.length and (s[at] = 101 or s[at] = 69)
+    {
+        at := at + 1
+        if at < s.length and (s[at] = 45 or s[at] = 43)
+            at := at + 1
+        if at = s.length
+            return false
+        while at < s.length and s[at] >= 48 and s[at] <= 57
+            at := at + 1
+    }
+    at = s.length
+}
+
+; The operator of a comparison prefix; empty for one there is none for.
+function comparison(prefix: Slice[u8]) returns Slice[u8]
+{
+    if prefix.equals("eq")
+        return "="
+    if prefix.equals("ne")
+        return "<>"
+    if prefix.equals("gt")
+        return ">"
+    if prefix.equals("lt")
+        return "<"
+    if prefix.equals("ge")
+        return ">="
+    if prefix.equals("le")
+        return "<="
+    ""
+}
+
+; " OR " between the parts of a condition.
+procedure next_part(mutable q: ref[SearchQuery], mutable parts: ref[int])
+{
+    if parts > 0
+        put_bytes(&q.wheres, " OR ")
+    parts := parts + 1
+}
+
+; End a condition of `parts` parts begun where the wheres were `mark` long
+; and the conditions `before`: a condition without a part is taken back.
+procedure end_condition(mutable q: ref[SearchQuery], parts: int, mark: size_t, before: int)
+{
+    if parts > 0
+    {
+        q.wheres.add(41 as u8)
+        return
+    }
+    q.wheres.length := mark
+    q.conditions := before
+}
+
+; A date value against the span of the operands low and high (a table's
+; value_low and value_high, or one column twice). False for a date that
+; cannot be read.
+procedure date_part(mutable q: ref[SearchQuery], alias: int, low: Slice[u8], high: Slice[u8], value: Slice[u8], inline: bool, mutable parts: ref[int]) returns bool
+{
+    var prefix: Slice[u8] "eq"
+    var date value
+    if has_prefix(value, false)
+    {
+        prefix := value.slice_to(2)
+        date := value.slice_from(2)
+    }
+    if readable_date(date) = false
+        return false
+    ; the span of the value, as two parameters
+    let from q.cells.length / 2 + 1
+    let to from + 1
+    range_cells(&q.text, &q.cells, date, true, true)
+    let after prefix.equals("gt") or (inline = false and prefix.equals("sa"))
+    let before prefix.equals("lt") or (inline = false and prefix.equals("eb"))
+    if prefix.equals("eq") or (inline = false and prefix.equals("ne"))
+    {
+        next_part(q, parts)
+        if prefix.equals("ne")
+            put_bytes(&q.wheres, "NOT ")
+        put_bytes(&q.wheres, "(")
+        put_operand(&q.wheres, alias, low)
+        put_bytes(&q.wheres, " >= ")
+        put_dollar(&q.wheres, from)
+        put_bytes(&q.wheres, " AND ")
+        put_operand(&q.wheres, alias, high)
+        put_bytes(&q.wheres, " <= ")
+        put_dollar(&q.wheres, to)
+        put_bytes(&q.wheres, ")")
+        return true
+    }
+    if after or before or prefix.equals("ge") or prefix.equals("le")
+    {
+        next_part(q, parts)
+        put_bytes(&q.wheres, "(")
+        ; the bound the comparison does not use stays a parameter of the
+        ; statement and is given its type
+        if after
+        {
+            put_operand(&q.wheres, alias, low)
+            put_bytes(&q.wheres, " > ")
+            put_dollar(&q.wheres, to)
+        }
+        if before
+        {
+            put_operand(&q.wheres, alias, high)
+            put_bytes(&q.wheres, " < ")
+            put_dollar(&q.wheres, from)
+        }
+        if prefix.equals("ge")
+        {
+            put_operand(&q.wheres, alias, high)
+            put_bytes(&q.wheres, " >= ")
+            put_dollar(&q.wheres, from)
+        }
+        if prefix.equals("le")
+        {
+            put_operand(&q.wheres, alias, low)
+            put_bytes(&q.wheres, " <= ")
+            put_dollar(&q.wheres, to)
+        }
+        put_bytes(&q.wheres, " AND ")
+        if after or prefix.equals("le")
+            put_dollar(&q.wheres, from)
+        else
+            put_dollar(&q.wheres, to)
+        put_bytes(&q.wheres, "::timestamptz IS NOT NULL)")
+        return true
+    }
+    ; a prefix upstream has no case for: no condition, and the two
+    ; parameters must not stay
+    q.cells.length := q.cells.length - 4
+    true
+}
+
+; A number value (with its prefix) compared with the operand. False, with
+; `problem` saying why, for one that cannot be read; kind and name are what
+; the refusal calls the parameter.
+procedure number_part(mutable q: ref[SearchQuery], alias: int, column: Slice[u8], value: Slice[u8], kind: Slice[u8], name: Slice[u8], mutable parts: ref[int], mutable problem: ref[Array[u8]]) returns bool
+{
+    var prefix: Slice[u8] "eq"
+    var number value
+    if has_prefix(value, true)
+    {
+        prefix := value.slice_to(2)
+        number := value.slice_from(2)
+    }
+    if readable_number(number) = false
+    {
+        put_bytes(problem, "Invalid value '")
+        problem.add(value)
+        put_bytes(problem, "' for ")
+        put_what(problem, kind, name)
+        return false
+    }
+    if comparison(prefix).length = 0
+    {
+        put_bytes(problem, "Unsupported prefix '")
+        problem.add(prefix)
+        put_bytes(problem, "' for ")
+        put_what(problem, kind, name)
+        return false
+    }
+    next_part(q, parts)
+    put_operand(&q.wheres, alias, column)
+    q.wheres.add(32 as u8)
+    q.wheres.add(comparison(prefix))
+    q.wheres.add(32 as u8)
+    put_param(q, &q.wheres, number)
+    put_bytes(&q.wheres, "::numeric")
+    true
+}
+
+; What a parameter is called in a refusal: "number search parameter 'x'".
+procedure put_what(mutable out: ref[Array[u8]], kind: Slice[u8], name: Slice[u8])
+{
+    out.add(kind)
+    put_bytes(out, " search parameter")
+    if name.length > 0
+    {
+        put_bytes(out, " '")
+        out.add(name)
+        put_bytes(out, "'")
+    }
+}
+
+; "sN.column" into out.
+procedure put_column(mutable out: ref[Array[u8]], alias: int, column: Slice[u8])
+{
+    put_alias(out, alias)
+    out.add(46 as u8)
+    out.add(column)
+}
+
+; The condition of one parameter on a search table of that kind, its
+; values (separated by commas) alternatives. False, with `problem`, for a
+; value upstream refuses.
+procedure table_condition(mutable q: ref[SearchQuery], type: Slice[u8], kind: u8, table: Slice[u8], value: Slice[u8], modifier: Slice[u8], mutable problem: ref[Array[u8]]) returns bool
+{
+    let alias join_table(q, type, table, false)
+    let mark q.wheres.length
+    let before q.conditions
+    begin_condition(q)
+    q.wheres.add(40 as u8)
+    var parts 0
+    var k: size_t 0
+    while or_value(value, k).length > 0
+    {
+        let v or_value(value, k)
+        k := k + 1
+        match kind as int
+            case 115
+            {
+                next_part(q, &parts)
+                if modifier.equals("exact")
+                {
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v)
+                }
+                else
+                {
+                    put_bytes(&q.wheres, "LOWER(")
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, ") LIKE ")
+                    if modifier.equals("contains")
+                        put_bytes(&q.wheres, "'%' || ")
+                    put_bytes(&q.wheres, "LOWER(")
+                    put_param(q, &q.wheres, v)
+                    put_bytes(&q.wheres, "::text) || '%'")
+                }
+            }
+            case 116
+                token_part(q, alias, v, modifier.equals("contains"), &parts)
+            case 100
+                date_part(q, alias, "value_low", "value_high", v, false, &parts)
+            case 114
+            {
+                next_part(q, &parts)
+                var slash: size_t 0
+                while slash < v.length and v[slash] <> 47
+                    slash := slash + 1
+                if slash < v.length
+                {
+                    put_bytes(&q.wheres, "(")
+                    put_column(&q.wheres, alias, "target_type")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v.slice_to(slash))
+                    put_bytes(&q.wheres, " AND ")
+                    put_column(&q.wheres, alias, "target_id")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v.slice_from(slash + 1))
+                    put_bytes(&q.wheres, ")")
+                }
+                else
+                {
+                    put_column(&q.wheres, alias, "target_id")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v)
+                }
+            }
+            case 110
+            {
+                if number_part(q, alias, "value", v, "number", "", &parts, problem) = false
+                    return false
+            }
+            case 113
+            {
+                if quantity_part(q, alias, v, &parts, problem) = false
+                    return false
+            }
+    }
+    end_condition(q, parts, mark, before)
+    true
+}
+
+; One token value: system|code, |code, system|, or code.
+procedure token_part(mutable q: ref[SearchQuery], alias: int, value: Slice[u8], contains: bool, mutable parts: ref[int])
+{
+    var bar: size_t 0
+    while bar < value.length and value[bar] <> 124
+        bar := bar + 1
+    var system value.slice_to(0)
+    var code value
+    if bar < value.length
+    {
+        system := value.slice_to(bar)
+        code := value.slice_from(bar + 1)
+        if system.length = 0 and code.length = 0
+            return
+    }
+    next_part(q, parts)
+    put_bytes(&q.wheres, "(")
+    if system.length > 0
+    {
+        put_column(&q.wheres, alias, "system")
+        put_bytes(&q.wheres, " = ")
+        put_param(q, &q.wheres, system)
+        if code.length > 0
+            put_bytes(&q.wheres, " AND ")
+    }
+    if code.length > 0
+    {
+        if contains
+        {
+            put_bytes(&q.wheres, "LOWER(")
+            put_column(&q.wheres, alias, "value")
+            put_bytes(&q.wheres, ") LIKE '%' || LOWER(")
+            put_param(q, &q.wheres, code)
+            put_bytes(&q.wheres, "::text) || '%'")
+        }
+        else
+        {
+            put_column(&q.wheres, alias, "value")
+            put_bytes(&q.wheres, " = ")
+            put_param(q, &q.wheres, code)
+        }
+    }
+    put_bytes(&q.wheres, ")")
+}
+
+; One quantity value: number, or number|system|code.
+procedure quantity_part(mutable q: ref[SearchQuery], alias: int, value: Slice[u8], mutable parts: ref[int], mutable problem: ref[Array[u8]]) returns bool
+{
+    var bars 0
+    var i: size_t 0
+    while i < value.length
+    {
+        if value[i] = 124
+            bars := bars + 1
+        i := i + 1
+    }
+    if bars <> 0 and bars <> 2
+    {
+        put_bytes(problem, "Invalid value '")
+        problem.add(value)
+        put_bytes(problem, "' for quantity search parameter: number or number|system|code")
+        return false
+    }
+    let number_text entry(value, 124, 0)
+    var system value.slice_to(0)
+    var code value.slice_to(0)
+    if bars = 2
+    {
+        ; entry passes over nothing: the pieces by their bars
+        var first: size_t 0
+        while value[first] <> 124
+            first := first + 1
+        var second first + 1
+        while value[second] <> 124
+            second := second + 1
+        system := value.subslice(first + 1, second)
+        code := value.slice_from(second + 1)
+    }
+    var prefix: Slice[u8] "eq"
+    var number value.slice_to(value.length - system.length - code.length - (bars as size_t))
+    if has_prefix(number, true)
+    {
+        prefix := number.slice_to(2)
+        number := number.slice_from(2)
+    }
+    if readable_number(number) = false
+    {
+        put_bytes(problem, "Invalid value '")
+        problem.add(value)
+        put_bytes(problem, "' for quantity search parameter")
+        return false
+    }
+    if prefix.equals("ap") = false and comparison(prefix).length = 0
+    {
+        put_bytes(problem, "Unsupported prefix '")
+        problem.add(prefix)
+        put_bytes(problem, "' for quantity search parameter")
+        return false
+    }
+    next_part(q, parts)
+    put_bytes(&q.wheres, "(")
+    if prefix.equals("ap")
+    {
+        ; within a tenth of the value, either way
+        put_column(&q.wheres, alias, "value")
+        put_bytes(&q.wheres, " >= ")
+        put_param(q, &q.wheres, number)
+        put_bytes(&q.wheres, "::numeric - ABS(")
+        put_param(q, &q.wheres, number)
+        put_bytes(&q.wheres, "::numeric) * 0.1 AND ")
+        put_column(&q.wheres, alias, "value")
+        put_bytes(&q.wheres, " <= ")
+        put_param(q, &q.wheres, number)
+        put_bytes(&q.wheres, "::numeric + ABS(")
+        put_param(q, &q.wheres, number)
+        put_bytes(&q.wheres, "::numeric) * 0.1")
+    }
+    else
+    {
+        put_column(&q.wheres, alias, "value")
+        q.wheres.add(32 as u8)
+        q.wheres.add(comparison(prefix))
+        q.wheres.add(32 as u8)
+        put_param(q, &q.wheres, number)
+        put_bytes(&q.wheres, "::numeric")
+    }
+    if code.length > 0
+    {
+        if system.length > 0
+        {
+            put_bytes(&q.wheres, " AND ")
+            put_column(&q.wheres, alias, "system")
+            put_bytes(&q.wheres, " = ")
+            put_param(q, &q.wheres, system)
+            put_bytes(&q.wheres, " AND ")
+            put_column(&q.wheres, alias, "code")
+            put_bytes(&q.wheres, " = ")
+            put_param(q, &q.wheres, code)
+        }
+        else
+        {
+            put_bytes(&q.wheres, " AND (")
+            put_column(&q.wheres, alias, "code")
+            put_bytes(&q.wheres, " = ")
+            put_param(q, &q.wheres, code)
+            put_bytes(&q.wheres, " OR ")
+            put_column(&q.wheres, alias, "unit")
+            put_bytes(&q.wheres, " = ")
+            put_param(q, &q.wheres, code)
+            put_bytes(&q.wheres, ")")
+        }
+    }
+    put_bytes(&q.wheres, ")")
+    true
+}
+
+; The condition of one parameter on a column of the resource's own table
+; (alias -1: by its name; -2: as it stands -- r.last_updated, r.id).
+procedure inline_condition(mutable q: ref[SearchQuery], alias: int, column: Slice[u8], kind: u8, name: Slice[u8], value: Slice[u8], modifier: Slice[u8], mutable problem: ref[Array[u8]]) returns bool
+{
+    let mark q.wheres.length
+    let before q.conditions
+    begin_condition(q)
+    q.wheres.add(40 as u8)
+    var parts 0
+    var k: size_t 0
+    while or_value(value, k).length > 0
+    {
+        let v or_value(value, k)
+        k := k + 1
+        match kind as int
+            case 100
+            {
+                if date_part(q, alias, column, column, v, true, &parts) = false
+                {
+                    put_bytes(problem, "Invalid value '")
+                    problem.add(v)
+                    put_bytes(problem, "' for date search parameter '")
+                    problem.add(name)
+                    put_bytes(problem, "'")
+                    return false
+                }
+            }
+            case 98
+            {
+                ; upstream's bool.Parse: true or false in any case, else it fails
+                if keyword_is(v, "true") = false and keyword_is(v, "false") = false
+                    return false
+                next_part(q, &parts)
+                put_operand(&q.wheres, alias, column)
+                put_bytes(&q.wheres, " = ")
+                put_param(q, &q.wheres, v)
+                put_bytes(&q.wheres, "::boolean")
+            }
+            case 116
+            {
+                next_part(q, &parts)
+                if modifier.equals("contains")
+                {
+                    put_bytes(&q.wheres, "LOWER(")
+                    put_operand(&q.wheres, alias, column)
+                    put_bytes(&q.wheres, ") LIKE '%' || LOWER(")
+                    put_param(q, &q.wheres, v)
+                    put_bytes(&q.wheres, "::text) || '%'")
+                }
+                else
+                {
+                    put_operand(&q.wheres, alias, column)
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v)
+                }
+            }
+            else
+            {
+                if number_part(q, alias, column, v, "number", name, &parts, problem) = false
+                    return false
+            }
+    }
+    end_condition(q, parts, mark, before)
+    true
+}
+
+; The line of the model for the parameter `key` of a type; empty when the
+; type has none of that name.
+function search_line(type: Slice[u8], key: Slice[u8]) returns Slice[u8]
+{
+    let lines model_searches(type)
+    var at: size_t 0
+    while at < lines.length
+    {
+        let line line_from(lines, at)
+        at := at + line.length + 1
+        let table entry(line, 32, 1)
+        ; search_ and the name, its hyphens as underscores
+        if table.length <> key.length + 7
+            continue
+        var same true
+        var i: size_t 0
+        while i < key.length
+        {
+            var c key[i]
+            if c = 45
+                c := 95
+            if c <> table[i + 7] or (key[i] >= 65 and key[i] <= 90) or key[i] = 95
+                same := false
+            i := i + 1
+        }
+        if same
+            return line
+    }
+    lines.slice_to(0)
+}
+
+; One parameter of a search: key (with its modifier) and value. False,
+; with `problem`, when upstream refuses it; false with an empty problem
+; when upstream fails on it.
+procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key: Slice[u8], value: Slice[u8], mutable problem: ref[Array[u8]]) returns bool
+{
+    if whole_key.equals("_count") or whole_key.equals("_offset") or whole_key.equals("_total") or whole_key.equals("_include") or whole_key.equals("_revinclude") or whole_key.equals("_include:iterate") or whole_key.equals("_revinclude:iterate") or whole_key.equals("_summary") or whole_key.equals("_elements")
+        return true
+    ; chained, reverse chained and composite parameters are the handler's
+    var i: size_t 0
+    while i < whole_key.length
+    {
+        if whole_key[i] = 46
+            return true
+        i := i + 1
+    }
+    if contains(whole_key, "-value-") or (whole_key.length >= 5 and whole_key.slice_to(5).equals("_has:"))
+        return true
+    if whole_key.equals("_sort")
+    {
+        q.sort.length := 0
+        q.sort.add(value)
+        return true
+    }
+    var colon: size_t 0
+    while colon < whole_key.length and whole_key[colon] <> 58
+        colon := colon + 1
+    let key whole_key.slice_to(colon)
+    var modifier whole_key.slice_to(0)
+    if colon < whole_key.length
+        modifier := whole_key.slice_from(colon + 1)
+    let line search_line(type, key)
+    let last_updated key.equals("_lastUpdated")
+    ; the parameter as a column of the resource's own table
+    var inline last_updated
+    var inline_alias 0 - 2
+    var inline_column: Slice[u8] "r.last_updated"
+    if line.length > 0 and line[0] = 105
+    {
+        inline := true
+        inline_alias := 0 - 1
+        inline_column := entry(line, 32, 3)
+    }
+
+    if modifier.equals("missing")
+    {
+        let missing keyword_is(value, "true")
+        if inline
+        {
+            begin_condition(q)
+            put_operand(&q.wheres, inline_alias, inline_column)
+            if missing
+                put_bytes(&q.wheres, " IS NULL")
+            else
+                put_bytes(&q.wheres, " IS NOT NULL")
+            return true
+        }
+        if line.length = 0
+            return true
+        let alias join_table(q, type, entry(line, 32, 1), missing)
+        if missing
+        {
+            begin_condition(q)
+            put_alias(&q.wheres, alias)
+            put_bytes(&q.wheres, ".resource_id IS NULL")
+        }
+        return true
+    }
+    if modifier.equals("not")
+    {
+        if line.length = 0
+            return true
+        if line[0] = 105
+        {
+            let kind entry(line, 32, 4)[0]
+            if kind <> 98 and kind <> 116
+                return true
+            if kind = 98 and keyword_is(trimmed(value), "true") = false and keyword_is(trimmed(value), "false") = false
+                return false
+            begin_condition(q)
+            put_bytes(&q.wheres, "(")
+            put_operand(&q.wheres, inline_alias, inline_column)
+            put_bytes(&q.wheres, " IS NULL OR ")
+            put_operand(&q.wheres, inline_alias, inline_column)
+            put_bytes(&q.wheres, " != ")
+            put_param(q, &q.wheres, value)
+            if kind = 98
+                put_bytes(&q.wheres, "::boolean")
+            put_bytes(&q.wheres, ")")
+            return true
+        }
+        if line[0] <> 115 and line[0] <> 116
+            return true
+        ; no row of the table that matches
+        let alias join_table(q, type, entry(line, 32, 1), true)
+        if line[0] = 115
+        {
+            put_bytes(&q.joins, " AND LOWER(")
+            put_column(&q.joins, alias, "value")
+            put_bytes(&q.joins, ") LIKE LOWER(")
+            put_param(q, &q.joins, value)
+            put_bytes(&q.joins, "::text) || '%'")
+        }
+        else
+        {
+            var bar: size_t 0
+            while bar < value.length and value[bar] <> 124
+                bar := bar + 1
+            if bar < value.length
+            {
+                if bar > 0
+                {
+                    put_bytes(&q.joins, " AND ")
+                    put_column(&q.joins, alias, "system")
+                    put_bytes(&q.joins, " = ")
+                    put_param(q, &q.joins, value.slice_to(bar))
+                }
+                if bar + 1 < value.length
+                {
+                    put_bytes(&q.joins, " AND ")
+                    put_column(&q.joins, alias, "value")
+                    put_bytes(&q.joins, " = ")
+                    put_param(q, &q.joins, value.slice_from(bar + 1))
+                }
+            }
+            else
+            {
+                put_bytes(&q.joins, " AND ")
+                put_column(&q.joins, alias, "value")
+                put_bytes(&q.joins, " = ")
+                put_param(q, &q.joins, value)
+            }
+        }
+        begin_condition(q)
+        put_alias(&q.wheres, alias)
+        put_bytes(&q.wheres, ".resource_id IS NULL")
+        return true
+    }
+
+    if or_value(value, 0).length = 0
+    {
+        ; an _id without a value matches nothing; any other is no filter
+        if key.equals("_id")
+        {
+            begin_condition(q)
+            put_bytes(&q.wheres, "1 = 0")
+        }
+        return true
+    }
+    if key.equals("_id")
+        return inline_condition(q, 0 - 2, "r.id", 116, key, value, "", problem)
+    if last_updated
+        return inline_condition(q, inline_alias, inline_column, 100, key, value, modifier, problem)
+    if line.length = 0
+    {
+        put_bytes(problem, "Unknown search parameter: ")
+        problem.add(key)
+        return false
+    }
+    if line[0] = 105
+        return inline_condition(q, inline_alias, inline_column, entry(line, 32, 4)[0], key, value, modifier, problem)
+    table_condition(q, type, line[0], entry(line, 32, 1), value, modifier, problem)
+}
+
+; What a sort key orders by, over the rows named `r2`, into out; false
+; when the key is none to sort by.
+procedure put_sort_column(mutable out: ref[Array[u8]], type: Slice[u8], key: Slice[u8], line: Slice[u8]) returns bool
+{
+    if key.equals("_lastUpdated")
+    {
+        put_bytes(out, "r2.last_updated")
+        return true
+    }
+    if line.length = 0
+        return false
+    var from: Slice[u8] ""
+    match line[0] as int
+        case 105
+        {
+            put_bytes(out, "r2.\"")
+            out.add(entry(line, 32, 3))
+            put_bytes(out, "\"")
+            return true
+        }
+        case 100: from := "(SELECT x.value_low FROM "
+        case 115: from := "(SELECT LOWER(x.value) FROM "
+        case 116: from := "(SELECT x.value FROM "
+    if from.length = 0
+        return false
+    put_bytes(out, from)
+    put_table(out, type)
+    out.add(46 as u8)
+    out.add(entry(line, 32, 1))
+    put_bytes(out, " x WHERE x.resource_id = r2.id LIMIT 1)")
+    true
+}
+
+; ORDER BY for the sort the search asked for, over the rows named `r2`.
+; False, with `problem`, for a key that cannot be sorted by.
+procedure put_order(mutable q: ref[SearchQuery], type: Slice[u8], mutable out: ref[Array[u8]], mutable problem: ref[Array[u8]]) returns bool
+{
+    let sort q.sort.as_slice()
+    if or_value(sort, 0).length = 0
+    {
+        put_bytes(out, "r2.last_updated DESC, r2.id ASC")
+        return true
+    }
+    var k: size_t 0
+    while or_value(sort, k).length > 0
+    {
+        var key or_value(sort, k)
+        k := k + 1
+        var direction: Slice[u8] " ASC"
+        if key[0] = 45
+        {
+            direction := " DESC"
+            key := key.slice_from(1)
+        }
+        let line search_line(type, key)
+        if line.length > 0 and line[0] = 114
+        {
+            put_bytes(problem, "Sorting by reference parameter '")
+            problem.add(key)
+            put_bytes(problem, "' requires chaining syntax: _sort=")
+            problem.add(key)
+            put_bytes(problem, ":<TargetType>.<property>.")
+            return false
+        }
+        put_bytes(out, "CASE WHEN ")
+        if put_sort_column(out, type, key, line) = false
+        {
+            put_bytes(problem, "Sort '")
+            problem.add(key)
+            put_bytes(problem, "' is not supported.")
+            return false
+        }
+        put_bytes(out, " IS NULL THEN 1 ELSE 0 END, ")
+        put_sort_column(out, type, key, line)
+        out.add(direction)
+        put_bytes(out, ", ")
+    }
+    put_bytes(out, "r2.id ASC")
+    true
+}
+
+; The name a statement goes by on a connection: one per text.
+procedure put_statement_name(mutable out: ref[Array[u8]], sql: Slice[u8])
+{
+    var hash: u64 14695981039346656037
+    var i: size_t 0
+    while i < sql.length
+    {
+        hash := (hash xor (sql[i] as u64)) * 1099511628211
+        i := i + 1
+    }
+    let digits: Slice[u8] "0123456789abcdef"
+    out.add(113 as u8)
+    var shift 60
+    while shift >= 0
+    {
+        out.add(digits[((hash >> (shift as u64)) & 15) as size_t])
+        shift := shift - 4
+    }
+}

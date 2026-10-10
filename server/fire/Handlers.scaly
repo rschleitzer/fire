@@ -6,6 +6,7 @@ use http.Request.Request
 use http.Response.Response
 use http.Router.Router
 use json.Value.JsonValue
+use json.Writer.JsonWriter
 use fire.Resource.StoreResult
 
 ; The routes of every resource type; the patterns lie on page.
@@ -16,6 +17,8 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
     while entry(types, 32, i).length > 0
     {
         let type entry(types, 32, i)
+        app.get(pattern(page, type, ""), &resource_search_get)
+        app.post(pattern(page, type, "/_search"), &resource_search_post)
         app.post(pattern(page, type, ""), &resource_post)
         app.get(pattern(page, type, "/{id}"), &resource_read)
         app.get(pattern(page, type, "/{id}/_history/{vid}"), &resource_vread)
@@ -328,3 +331,142 @@ procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable
 ; POST /fire/<type>/{id}
 procedure resource_post_instance(req: ref[Request], mutable res: ref[Response])
     send_error(res, "invalid", "POST to instance endpoint is not allowed", 405)
+
+; One link of a bundle: relation and url.
+procedure bundle_link(mutable w: ref[JsonWriter], relation: Slice[u8], url: Slice[u8])
+{
+    w.begin_object()
+    w.key("relation")
+    w.text(relation)
+    w.key("url")
+    w.text_dotnet(url)
+    w.end_object()
+}
+
+; The search of a type by the pairs in text and cells, answered as a
+; searchset Bundle the way upstream's handler builds it. `asked` is the
+; query string as it came.
+procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8], text: Slice[u8], cells: Slice[i64]) mutable pg_pool
+{
+    let type type_of(req)
+    var count: i64 20
+    var offset: i64 0
+    if whole_number(first_value(text, cells, "_count"))
+    {
+        count := whole_value(first_value(text, cells, "_count"))
+        if count < 0
+            count := 0
+        if count > 1000
+            count := 1000
+    }
+    if whole_number(first_value(text, cells, "_offset"))
+        offset := whole_value(first_value(text, cells, "_offset"))
+    if first_value(text, cells, "_summary").equals("count")
+        count := 0
+
+    var found Array[u8]()
+    var rows Array[i64]()
+    var problem Array[u8]()
+    let result resource_search(type, text, cells, count, offset, &found, &rows, &problem)
+    if result.status = REFUSED
+        return send_error(res, "invalid", problem.as_slice(), 400)
+    if result.status = BROKEN
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    if result.status <> STORED
+        return send_unavailable(res)
+    let total result.version_id
+
+    ; http://host/fire/Type, and the page asked for
+    var base Array[u8]()
+    put_bytes(&base, "http://")
+    base.add(trim(req.header("host")))
+    put_bytes(&base, "/fire/")
+    base.add(type)
+    var url Array[u8]()
+    url.add(base.as_slice())
+    if asked.length > 0
+    {
+        put_bytes(&url, "?")
+        url.add(asked)
+    }
+
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("Bundle")
+    w.key("type")
+    w.text("searchset")
+    w.key("link")
+    w.begin_array()
+    bundle_link(&w, "self", url.as_slice())
+    if offset + count < total
+    {
+        var next Array[u8]()
+        next.add(base.as_slice())
+        put_bytes(&next, "?")
+        put_page_query(&next, text, cells, offset + count, count)
+        bundle_link(&w, "next", next.as_slice())
+    }
+    if offset > 0
+    {
+        var previous Array[u8]()
+        previous.add(base.as_slice())
+        put_bytes(&previous, "?")
+        var back offset - count
+        if back < 0
+            back := 0
+        put_page_query(&previous, text, cells, back, count)
+        bundle_link(&w, "previous", previous.as_slice())
+    }
+    w.end_array()
+    if first_value(text, cells, "_total").equals("none") = false
+    {
+        w.key("total")
+        w.integer(total)
+    }
+    w.key("entry")
+    w.begin_array()
+    var i: size_t 0
+    while i * 4 < rows.length
+    {
+        w.begin_object()
+        w.key("fullUrl")
+        var full Array[u8]()
+        full.add(base.as_slice())
+        put_bytes(&full, "/")
+        full.add(found.as_slice().subslice(rows[i * 4] as size_t, (rows[i * 4] + rows[i * 4 + 1]) as size_t))
+        w.text_dotnet(full.as_slice())
+        w.key("resource")
+        w.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
+        w.key("search")
+        w.begin_object()
+        w.key("mode")
+        w.text("match")
+        w.end_object()
+        w.end_object()
+        i := i + 1
+    }
+    w.end_array()
+    w.end_object()
+    send_resource(res, w.bytes())
+}
+
+; GET /fire/<type>?...
+procedure resource_search_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    search(req, res, req.query, text.as_slice(), cells.as_slice())
+}
+
+; POST /fire/<type>/_search: the parameters of the form, then those of the
+; query string.
+procedure resource_search_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.body, &text, &cells)
+    parse_pairs(req.query, &text, &cells)
+    search(req, res, req.query, text.as_slice(), cells.as_slice())
+}

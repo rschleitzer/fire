@@ -8,6 +8,7 @@ use json.Value.JsonValue
 use json.Writer.JsonWriter
 use fire.Instant.Instant
 use fire.Resource.StoreResult
+use fire.postgresql.SearchQueryBuilder.SearchQuery
 
 ; The statement `what` of a type: its name on the connection.
 procedure statement_name(mutable name: ref[Array[u8]], type: Slice[u8], what: Slice[u8])
@@ -177,6 +178,8 @@ procedure insert_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]
     {
         let line line_from(tables, at)
         at := at + line.length + 1
+        if line[0] = 105
+            continue
         var text Array[u8]()
         var cells Array[i64]()
         search_rows(line, root, &text, &cells)
@@ -237,6 +240,8 @@ procedure delete_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]
     {
         let line line_from(tables, at)
         at := at + line.length + 1
+        if line[0] = 105
+            continue
         var name Array[u8]()
         statement_name(&name, type, entry(line, 32, 1))
         put_bytes(&name, "_clear")
@@ -569,4 +574,110 @@ procedure postgresql_select(type: Slice[u8], id: Slice[u8], version_id: i64, mut
         result := StoreResult(FAILED, 0, 0)
     release(c)
     result
+}
+
+; Bind the parameters of q to the statement started on c.
+procedure bind_parameters(mutable c: ref[PgConn], q: ref[SearchQuery])
+{
+    var i: size_t 0
+    while i * 2 < q.cells.length
+    {
+        let offset q.cells[i * 2]
+        let length q.cells[i * 2 + 1]
+        if length < 0
+            c.param_null()
+        else
+            c.param_text(q.text.as_slice().subslice(offset as size_t, (offset + length) as size_t))
+        i := i + 1
+    }
+}
+
+; Search the resources of `type` by the pairs of a request (text, cells:
+; fire/Query.scaly): at most `count` of them from `offset` on, their ids
+; and contents appended to found, with a cell each in rows (id, content).
+; The answer's status is STORED and its version_id the number of ALL that
+; match; REFUSED, with `problem`, for what upstream refuses, BROKEN for
+; what it fails on, FAILED when the database does not answer.
+procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    var q SearchQuery()
+    var i: size_t 0
+    while i < pair_count(cells)
+    {
+        if add_parameter(&q, type, pair_key(text, cells, i), pair_value(text, cells, i), problem) = false
+        {
+            if problem.length > 0
+                return StoreResult(REFUSED, 0, 0)
+            return StoreResult(BROKEN, 0, 0)
+        }
+        i := i + 1
+    }
+    var order Array[u8]()
+    if put_order(&q, type, &order, problem) = false
+        return StoreResult(REFUSED, 0, 0)
+    var matching Array[u8]()
+    put_bytes(&matching, " FROM ")
+    put_table(&matching, type)
+    put_bytes(&matching, " r")
+    matching.add(q.joins.as_slice())
+    if q.conditions > 0
+    {
+        put_bytes(&matching, " WHERE ")
+        matching.add(q.wheres.as_slice())
+    }
+
+    let got acquire()
+    if got = null
+        return StoreResult(FAILED, 0, 0)
+    var c got as ref[PgConn]
+    var counting Array[u8]()
+    put_bytes(&counting, "SELECT COUNT(DISTINCT r.id)")
+    counting.add(matching.as_slice())
+    var name Array[u8]()
+    put_statement_name(&name, counting.as_slice())
+    var total: i64 0
+    var ok c.prepare(name.as_slice(), counting.as_slice())
+    if ok
+    {
+        c.start(name.as_slice())
+        bind_parameters(c, &q)
+        ok := c.run() and c.next_row()
+        if ok
+            total := c.column_int(0)
+    }
+    if ok and count > 0
+    {
+        var page Array[u8]()
+        put_bytes(&page, "SELECT r2.id, r2.content FROM ")
+        put_table(&page, type)
+        put_bytes(&page, " r2 WHERE r2.id IN (SELECT DISTINCT r.id")
+        page.add(matching.as_slice())
+        put_bytes(&page, ") ORDER BY ")
+        page.add(order.as_slice())
+        put_bytes(&page, " LIMIT $")
+        put_decimal(&page, (q.cells.length / 2 + 1) as i64)
+        put_bytes(&page, " OFFSET $")
+        put_decimal(&page, (q.cells.length / 2 + 2) as i64)
+        var page_name Array[u8]()
+        put_statement_name(&page_name, page.as_slice())
+        ok := c.prepare(page_name.as_slice(), page.as_slice())
+        if ok
+        {
+            c.start(page_name.as_slice())
+            bind_parameters(c, &q)
+            c.param_int(count)
+            c.param_int(offset)
+            c.binary_column(1)
+            ok := c.run()
+            while ok and c.next_row()
+            {
+                cell(found, rows, c.column(0))
+                cell(found, rows, c.column(1))
+            }
+        }
+    }
+    release(c)
+    if ok = false
+        return StoreResult(FAILED, 0, 0)
+    StoreResult(STORED, total, 0)
 }

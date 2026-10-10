@@ -28,6 +28,7 @@ define fire
     module Validator
     module Binary
     module Search
+    module Query
     module postgresql
     module Database
     module Repository

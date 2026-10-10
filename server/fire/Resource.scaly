@@ -12,6 +12,8 @@ define NOT_FOUND: int 1
 define CONFLICT: int 2
 define FAILED: int 3
 define UNREADABLE: int 4
+define REFUSED: int 5
+define BROKEN: int 6
 
 ; How a write or a read ended (STORED, NOT_FOUND, CONFLICT -- the version
 ; an If-Match named is not the current one --, FAILED: the database did not

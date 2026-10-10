@@ -38,3 +38,11 @@ procedure resource_select(type: Slice[u8], id: Slice[u8], version_id: i64, mutab
         return postgresql_select(type, id, version_id, content)
     StoreResult(FAILED, 0, 0)
 }
+
+; Search (see postgresql_search).
+procedure resource_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_search(type, text, cells, count, offset, found, rows, problem)
+    StoreResult(FAILED, 0, 0)
+}
