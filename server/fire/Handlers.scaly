@@ -516,7 +516,7 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
 ; The search of a type by the pairs in text and cells, answered as a
 ; searchset Bundle the way upstream's handler builds it. `asked` is the
 ; query string as it came.
-procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8], text: Slice[u8], cells: Slice[i64]) mutable pg_pool
+procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8], cells: Slice[i64]) mutable pg_pool
 {
     let type type_of(req)
     var count: i64 20
@@ -608,22 +608,22 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
     var base Array[u8]()
     base.add(root.as_slice())
     base.add(type)
-    var url Array[u8]()
-    url.add(base.as_slice())
-    if asked.length > 0
-    {
-        put_bytes(&url, "?")
-        url.add(asked)
-    }
-
     var w JsonWriter()
     w.begin_object()
     w.key("resourceType")
     w.text("Bundle")
     w.key("type")
     w.text("searchset")
+    ; the links are made of the query string alone, also when the
+    ; parameters came in a form; without a total there is no next page
+    var asked_text Array[u8]()
+    var asked_cells Array[i64]()
+    parse_pairs(req.query, &asked_text, &asked_cells)
+    var known total
+    if first_value(text, cells, "_total").equals("none")
+        known := 0 - 1
     w.key("link")
-    page_links(&w, base.as_slice(), asked, text, cells, total, count, offset)
+    page_links(&w, base.as_slice(), req.query, asked_text.as_slice(), asked_cells.as_slice(), known, count, offset)
     if first_value(text, cells, "_total").equals("none") = false
     {
         w.key("total")
@@ -681,7 +681,7 @@ procedure resource_search_get(req: ref[Request], mutable res: ref[Response]) mut
     var text Array[u8]()
     var cells Array[i64]()
     parse_pairs(req.query, &text, &cells)
-    search(req, res, req.query, text.as_slice(), cells.as_slice())
+    search(req, res, text.as_slice(), cells.as_slice())
 }
 
 ; POST /fire/<type>/_search: the parameters of the form, then those of the
@@ -692,5 +692,5 @@ procedure resource_search_post(req: ref[Request], mutable res: ref[Response]) mu
     var cells Array[i64]()
     parse_pairs(req.body, &text, &cells)
     parse_pairs(req.query, &text, &cells)
-    search(req, res, req.query, text.as_slice(), cells.as_slice())
+    search(req, res, text.as_slice(), cells.as_slice())
 }

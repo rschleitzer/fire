@@ -274,6 +274,37 @@ searches() {
   done
 }
 
+# The resources the questions are about: every file of tools/turns/linked/,
+# named <Type>.<id>.json, is PUT under its id. They refer to each other.
+linked() {
+  local f name type id
+  for f in "$ROOT"/tools/turns/linked/*.json; do
+    name=$(basename "$f" .json); type=${name%%.*}; id=${name#*.}
+    call "$1.linked.$name" 201 PUT "$type/$id" "linked/$name.json"
+  done
+}
+
+# Ask the running server every request of tools/turns/queries.txt; status
+# and body of each answer are kept under its number.
+#   asks <server: s or c> <id of A> <id of B>
+asks() {
+  local n=0 method path rest out
+  while read -r method path rest; do
+    case "$method" in ''|'#'*) continue ;; esac
+    n=$((n+1)); out="$WORK/turns.$1.ask.$n"
+    path=${path//\{A\}/$2}; path=${path//\{B\}/$3}
+    case "$method" in
+      GET) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" "$BASE/fire/$path" > "$out.status" ;;
+      POST) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
+              -H 'Content-Type: application/x-www-form-urlencoded' --data "$rest" "$BASE/fire/$path" > "$out.status" ;;
+      BUNDLE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
+              -H 'Content-Type: application/fhir+json' --data-binary @"$ROOT/tools/turns/bundles/$path" "$BASE/fire" > "$out.status" ;;
+    esac
+    echo "$method $path $rest" > "$out.request"
+  done < "$ROOT/tools/turns/queries.txt"
+  ASKED=$n
+}
+
 # What must not be stored: every file of tools/turns/refused/, named
 # <Type>.<case>.json, is POSTed and must be answered with 400.
 refusals() {
@@ -311,6 +342,7 @@ turns() {
   refusals s
   binary s
   searches s
+  linked s
   stop_server
 
   echo "turns: 2 csharp  -- reads A and its first version, updates A; creates, updates and deletes B"
@@ -347,6 +379,25 @@ turns() {
   call c.read-b 200 GET "Patient/$b";                    same c.read-b s.recreate
   call c.recreate 201 PUT "Patient/$a" patient.json
   stop_server
+
+  echo "turns: 5 scaly   -- answers the $(grep -vc '^#' "$ROOT/tools/turns/queries.txt") requests of tools/turns/queries.txt"
+  rm -f "$WORK"/turns.?.ask.*
+  start_server scaly
+  asks s "$a" "$b"
+  stop_server
+  echo "turns: 6 csharp  -- answers the same"
+  start_server csharp
+  asks c "$a" "$b"
+  stop_server
+  local n=1 different=0
+  while [ $n -le "$ASKED" ]; do
+    if ! cmp -s "$WORK/turns.s.ask.$n.status" "$WORK/turns.c.ask.$n.status" || ! cmp -s "$WORK/turns.s.ask.$n.body" "$WORK/turns.c.ask.$n.body"; then
+      different=$((different+1))
+      echo "turns: FAIL -- $(cat "$WORK/turns.s.ask.$n.request"): scaly $(cat "$WORK/turns.s.ask.$n.status"), csharp $(cat "$WORK/turns.c.ask.$n.status") (diff $WORK/turns.s.ask.$n.body $WORK/turns.c.ask.$n.body)"
+      TURNS_FAILED=1
+    fi
+    n=$((n+1))
+  done
 
   # what one refuses the other refuses, in the same words
   local f
@@ -400,7 +451,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words; $ASKED requests (searches, histories, bundles) answered the same by both"
   exit 0
 }
 

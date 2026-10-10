@@ -1,0 +1,1 @@
+{"resourceType":"Patient","id":"p2","identifier":[{"system":"urn:mrn","value":"P-2"}],"active":false,"name":[{"family":"Taylor","given":["Émile"]}],"gender":"male","birthDate":"1985-12-31","deceasedBoolean":true,"generalPractitioner":[{"reference":"Practitioner/gp2"}]}

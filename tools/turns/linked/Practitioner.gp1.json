@@ -1,0 +1,1 @@
+{"resourceType":"Practitioner","id":"gp1","identifier":[{"system":"urn:lanr","value":"GP-1"}],"active":true,"name":[{"family":"Chainsmith","given":["Ada"]}],"gender":"female"}

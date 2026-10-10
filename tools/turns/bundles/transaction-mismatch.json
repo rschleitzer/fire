@@ -1,0 +1,1 @@
+{"resourceType":"Bundle","type":"transaction","entry":[{"request":{"method":"PUT","url":"Patient/p1"},"resource":{"resourceType":"Practitioner","active":"yes"}}]}

@@ -312,10 +312,7 @@ procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64],
         let target entry(key, 58, 1)
         let reference entry(key, 58, 2)
         if target.length = 0 or reference.length = 0 or key.length <= 7 + target.length + reference.length
-        {
-            any := true
             continue
-        }
         let parameter key.slice_from(7 + target.length + reference.length)
         var one_text Array[u8]()
         var one_cells Array[i64]()
@@ -327,11 +324,9 @@ procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64],
         if status <> STORED
             return status
         let line reference_line(target, reference)
+        ; a reference parameter the type does not have says nothing
         if line.length = 0 or entry(line, 32, 1).equals("-")
-        {
-            any := true
             continue
-        }
         var referenced Array[u8]()
         var r: size_t 0
         while r * 4 < rows.length

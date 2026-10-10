@@ -633,6 +633,33 @@ procedure postgresql_select(scope: u64, type: Slice[u8], id: Slice[u8], version_
     result
 }
 
+; Put the data back into every content of a list that was read with its
+; versions: read holds, for each row, `width` cells of which the first is
+; the id and the last the content, and versions the version of each row.
+; The rows are written anew into found and rows.
+procedure restore_all(mutable c: ref[PgConn], type: Slice[u8], read: Slice[u8], read_cells: Slice[i64], versions: Slice[i64], width: size_t, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns bool
+{
+    var r: size_t 0
+    while r < versions.length
+    {
+        let first r * width * 2
+        var k: size_t 0
+        while k + 1 < width
+        {
+            cell(found, rows, read.subslice(read_cells[first + k * 2] as size_t, (read_cells[first + k * 2] + read_cells[first + k * 2 + 1]) as size_t))
+            k := k + 1
+        }
+        let last first + (width - 1) * 2
+        var content Array[u8]()
+        put_bytes(&content, read.subslice(read_cells[last] as size_t, (read_cells[last] + read_cells[last + 1]) as size_t))
+        if content.length > 0 and restore_data(c, type, read.subslice(read_cells[first] as size_t, (read_cells[first] + read_cells[first + 1]) as size_t), versions[r], &content) = false
+            return false
+        cell(found, rows, content.as_slice())
+        r := r + 1
+    }
+    true
+}
+
 ; Bind the parameters of q to the statement started on c.
 procedure bind_parameters(mutable c: ref[PgConn], q: ref[SearchQuery])
 {
@@ -705,7 +732,7 @@ procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells:
     if ok and count > 0
     {
         var page Array[u8]()
-        put_bytes(&page, "SELECT r2.id, r2.content FROM ")
+        put_bytes(&page, "SELECT r2.id, r2.content, r2.version_id FROM ")
         put_table(&page, type)
         put_bytes(&page, " r2 WHERE r2.id IN (SELECT DISTINCT r.id")
         page.add(matching.as_slice())
@@ -726,10 +753,28 @@ procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells:
             c.param_int(offset)
             c.binary_column(1)
             ok := c.run()
-            while ok and c.next_row()
+            if keeps_data_apart(type)
             {
-                cell(found, rows, c.column(0))
-                cell(found, rows, c.column(1))
+                ; the data is in a table of its own: read the page first
+                var read Array[u8]()
+                var read_cells Array[i64]()
+                var versions Array[i64]()
+                while ok and c.next_row()
+                {
+                    cell(&read, &read_cells, c.column(0))
+                    cell(&read, &read_cells, c.column(1))
+                    versions.add(c.column_int(2))
+                }
+                if ok
+                    ok := restore_all(c, type, read.as_slice(), read_cells.as_slice(), versions.as_slice(), 2, found, rows)
+            }
+            else
+            {
+                while ok and c.next_row()
+                {
+                    cell(found, rows, c.column(0))
+                    cell(found, rows, c.column(1))
+                }
             }
         }
     }
@@ -769,7 +814,7 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
     put_bytes(&counting, and_id)
     put_bytes(&counting, ")")
     var listing Array[u8]()
-    put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content FROM ((SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")
+    put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content, h.version_id FROM ((SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")
     put_table(&listing, type)
     put_bytes(&listing, of_id)
     put_bytes(&listing, ") UNION ALL (SELECT id, version_id, last_updated, content, history_operation FROM ")
@@ -816,12 +861,31 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
             c.param_int(offset)
             c.binary_column(3)
             ok := c.run()
-            while ok and c.next_row()
+            if keeps_data_apart(type)
             {
-                cell(found, rows, c.column(0))
-                cell(found, rows, c.column(1))
-                cell(found, rows, c.column(2))
-                cell(found, rows, c.column(3))
+                var read Array[u8]()
+                var read_cells Array[i64]()
+                var versions Array[i64]()
+                while ok and c.next_row()
+                {
+                    cell(&read, &read_cells, c.column(0))
+                    cell(&read, &read_cells, c.column(1))
+                    cell(&read, &read_cells, c.column(2))
+                    cell(&read, &read_cells, c.column(3))
+                    versions.add(c.column_int(4))
+                }
+                if ok
+                    ok := restore_all(c, type, read.as_slice(), read_cells.as_slice(), versions.as_slice(), 4, found, rows)
+            }
+            else
+            {
+                while ok and c.next_row()
+                {
+                    cell(found, rows, c.column(0))
+                    cell(found, rows, c.column(1))
+                    cell(found, rows, c.column(2))
+                    cell(found, rows, c.column(3))
+                }
             }
         }
     }

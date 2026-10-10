@@ -1,0 +1,1 @@
+{"resourceType":"Observation","id":"o3","status":"final","code":{"coding":[{"system":"http://loinc.org","code":"8867-4"}]},"subject":{"reference":"Patient/p2"},"effectiveDateTime":"2025-12-31T23:59:59+01:00","valueQuantity":{"value":95.5,"unit":"/min","system":"http://unitsofmeasure.org","code":"/min"},"hasMember":[{"reference":"Observation/o1"}]}

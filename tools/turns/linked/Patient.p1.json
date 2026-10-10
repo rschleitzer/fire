@@ -1,0 +1,1 @@
+{"resourceType":"Patient","id":"p1","identifier":[{"system":"urn:mrn","value":"P-1"}],"active":true,"name":[{"family":"Brown","given":["Emma","Ann"]}],"gender":"female","birthDate":"1990-04-05","generalPractitioner":[{"reference":"Practitioner/gp1"}],"link":[{"other":{"reference":"Patient/p2"},"type":"seealso"}]}

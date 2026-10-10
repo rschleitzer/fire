@@ -1,0 +1,1 @@
+{"resourceType":"Practitioner","id":"gp2","identifier":[{"system":"urn:lanr","value":"GP-2"}],"active":false,"name":[{"family":"Johnson","given":["Bo"]}],"gender":"male"}

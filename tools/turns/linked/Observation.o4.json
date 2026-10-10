@@ -1,0 +1,1 @@
+{"resourceType":"Observation","id":"o4","status":"final","code":{"coding":[{"system":"urn:local","code":"mood"}]},"subject":{"reference":"Patient/p2"},"valueCodeableConcept":{"coding":[{"system":"urn:v","code":"good"}]}}
