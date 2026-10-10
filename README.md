@@ -36,5 +36,10 @@ with the DTD it is valid against. It is a copy held fast, so the port needs
 neither dotnet nor the definitions; `tools/pin-model.sh` renews it after a
 run of `upstream/fire.sh`.
 
+## Licence
+
+MIT, `LICENSE`. `upstream/` carries its own, `upstream/LICENSE`, also MIT,
+and `model/` is under that one: it is what upstream's converter wrote.
+
 The server product this generator was developed for, its configuration and
 any data are not in this repository.
