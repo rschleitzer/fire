@@ -1,0 +1,593 @@
+; What a search does beyond one type's tables, as upstream's SearchHelper
+; does it: a chained parameter (general-practitioner.family=X) is answered
+; by searching the type the reference points to and asking for those
+; references; a reverse chain (_has:Observation:patient:code=X) by
+; searching the type that refers and asking for the ids it refers to;
+; _include and _revinclude add the resources at either end of a reference
+; to the answer.
+;
+; A set of strings here is a text of lines.
+
+use json.Value.JsonValue
+use fire.Resource.StoreResult
+
+; The line of the model for the reference parameter `name` of a type;
+; empty when it has none.
+function reference_line(type: Slice[u8], name: Slice[u8]) returns Slice[u8]
+{
+    let lines model_references(type)
+    var at: size_t 0
+    while at < lines.length
+    {
+        let line line_from(lines, at)
+        at := at + line.length + 1
+        if entry(line, 32, 0).equals(name)
+            return line
+    }
+    lines.slice_to(0)
+}
+
+; Is type one the server stores?
+function known_type(type: Slice[u8]) returns bool
+{
+    let types resource_types()
+    var i: size_t 0
+    while entry(types, 32, i).length > 0
+    {
+        if entry(types, 32, i).equals(type)
+            return true
+        i := i + 1
+    }
+    false
+}
+
+function has_line(set: Slice[u8], line: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    while at < set.length
+    {
+        let one line_from(set, at)
+        if one.equals(line)
+            return true
+        at := at + one.length + 1
+    }
+    false
+}
+
+; Keep of set the lines that other has too.
+procedure intersect(mutable set: ref[Array[u8]], other: Slice[u8])
+{
+    var kept: size_t 0
+    var at: size_t 0
+    while at < set.length
+    {
+        let length line_from(set.as_slice(), at).length
+        if has_line(other, set.as_slice().subslice(at, at + length))
+        {
+            var i: size_t 0
+            while i <= length
+            {
+                set.put(kept + i, set[at + i])
+                i := i + 1
+            }
+            kept := kept + length + 1
+        }
+        at := at + length + 1
+    }
+    set.length := kept
+}
+
+; The lines of set as one value, commas between them, as a cell.
+procedure joined_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], set: Slice[u8])
+{
+    open_cell(text, cells)
+    var at: size_t 0
+    while at < set.length
+    {
+        let line line_from(set, at)
+        if at > 0
+            text.add(44 as u8)
+        text.add(line)
+        at := at + line.length + 1
+    }
+    close_cell(text, cells)
+}
+
+; The reference of a node as a line of set, once: type/id as it stands,
+; or, with ids, what follows its last slash. One without a slash is none.
+procedure reference_line_of(mutable set: ref[Array[u8]], reference: JsonValue, ids: bool)
+{
+    if reference.is_text() = false
+        return
+    let length reference.text().length
+    var slash length
+    var first length
+    var i: size_t 0
+    while i < length
+    {
+        if reference.text()[i] = 47
+        {
+            slash := i
+            if first = length
+                first := i
+        }
+        i := i + 1
+    }
+    if slash = length
+        return
+    var from: size_t 0
+    if ids
+        from := slash + 1
+    if has_line(set.as_slice(), reference.text().slice_from(from))
+        return
+    set.add(reference.text().slice_from(from))
+    set.add(10 as u8)
+}
+
+; Every reference the path (a.b, from its part `at`) reaches below value,
+; an array on the way taken item by item.
+procedure collect_references(value: JsonValue, path: Slice[u8], at: size_t, mutable set: ref[Array[u8]], ids: bool)
+{
+    if value.is_array()
+    {
+        var i: size_t 0
+        while i < value.length()
+        {
+            collect_references(value.item(i), path, at, set, ids)
+            i := i + 1
+        }
+        return
+    }
+    if value.is_null()
+        return
+    if entry(path, 46, at).length > 0
+        return collect_references(value.get(entry(path, 46, at)), path, at + 1, set, ids)
+    reference_line_of(set, value.get("reference"), ids)
+}
+
+; Search a type for everything the pairs match (upstream asks for ten
+; thousand). A type the server does not store has nothing. STORED, FAILED
+; when the database does not answer, BROKEN for a search upstream fails on.
+procedure search_all(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns int mutable pg_pool
+{
+    if known_type(type) = false
+        return STORED
+    var problem Array[u8]()
+    let result resource_search(type, text, cells, 10000, 0, found, rows, &problem)
+    if result.status = STORED or result.status = FAILED
+        return result.status
+    BROKEN
+}
+
+; Is key a chained parameter?
+function chained(key: Slice[u8]) returns bool
+{
+    if key.length = 0 or key[0] = 95
+        return false
+    var i: size_t 0
+    while i < key.length
+    {
+        if key[i] = 46
+            return true
+        i := i + 1
+    }
+    false
+}
+
+; The reference parameter a chained key begins with: what stands before
+; its first dot, without a type (subject:Patient.name -> subject).
+function chain_base(key: Slice[u8]) returns Slice[u8]
+{
+    var end: size_t 0
+    while end < key.length and key[end] <> 46 and key[end] <> 58
+        end := end + 1
+    key.slice_to(end)
+}
+
+; The pairs with every chained parameter resolved: in its place the
+; references that match (as the value of the reference parameter), or an
+; _id nothing has when none does. The answer is STORED, or what
+; search_all answered.
+procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    var i: size_t 0
+    while i < pair_count(cells)
+    {
+        if chained(pair_key(text, cells, i)) = false
+        {
+            cell(out_text, out_cells, pair_key(text, cells, i))
+            cell(out_text, out_cells, pair_value(text, cells, i))
+        }
+        i := i + 1
+    }
+    i := 0
+    while i < pair_count(cells)
+    {
+        let first_key pair_key(text, cells, i)
+        i := i + 1
+        if chained(first_key) = false
+            continue
+        let base chain_base(first_key)
+        ; a group is resolved where its first parameter stands
+        var earlier false
+        var e: size_t 0
+        while e + 1 < i
+        {
+            if chained(pair_key(text, cells, e)) and chain_base(pair_key(text, cells, e)).equals(base)
+                earlier := true
+            e := e + 1
+        }
+        if earlier
+            continue
+        var matched Array[u8]()
+        var first true
+        var j i - 1
+        while j < pair_count(cells)
+        {
+            let key pair_key(text, cells, j)
+            let value pair_value(text, cells, j)
+            j := j + 1
+            if chained(key) = false or chain_base(key).equals(base) = false
+                continue
+            var dot: size_t 0
+            while key[dot] <> 46
+                dot := dot + 1
+            let remaining key.slice_from(dot + 1)
+            var targets: Slice[u8] ""
+            var skip: size_t 0
+            if base.length < dot
+                targets := key.subslice(base.length + 1, dot)
+            else
+            {
+                targets := reference_line(type, base)
+                skip := 2
+            }
+            var references Array[u8]()
+            var t skip
+            while entry(targets, 32, t).length > 0
+            {
+                let target entry(targets, 32, t)
+                t := t + 1
+                var one_text Array[u8]()
+                var one_cells Array[i64]()
+                cell(&one_text, &one_cells, remaining)
+                cell(&one_text, &one_cells, value)
+                var resolved_text Array[u8]()
+                var resolved_cells Array[i64]()
+                let resolved resolve_chains(target, one_text.as_slice(), one_cells.as_slice(), &resolved_text, &resolved_cells)
+                if resolved <> STORED
+                    return resolved
+                var found Array[u8]()
+                var rows Array[i64]()
+                let status search_all(target, resolved_text.as_slice(), resolved_cells.as_slice(), &found, &rows)
+                if status <> STORED
+                    return status
+                var r: size_t 0
+                while r * 4 < rows.length
+                {
+                    references.add(target)
+                    references.add(47 as u8)
+                    references.add(found.as_slice().subslice(rows[r * 4] as size_t, (rows[r * 4] + rows[r * 4 + 1]) as size_t))
+                    references.add(10 as u8)
+                    r := r + 1
+                }
+            }
+            if first
+                matched.add(references.as_slice())
+            else
+                intersect(&matched, references.as_slice())
+            first := false
+        }
+        if matched.length > 0
+        {
+            cell(out_text, out_cells, base)
+            joined_cell(out_text, out_cells, matched.as_slice())
+        }
+        else
+        {
+            cell(out_text, out_cells, "_id")
+            cell(out_text, out_cells, "__no_match__")
+        }
+    }
+    STORED
+}
+
+; The reverse chains of the request (asked: its own pairs), applied to the
+; pairs in text and cells: when there are any, the _id of the pairs is the
+; ids the chains leave -- or one nothing has. STORED, or what search_all
+; answered.
+procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    var ids Array[u8]()
+    var any false
+    var i: size_t 0
+    while i < pair_count(asked_cells)
+    {
+        let key pair_key(asked_text, asked_cells, i)
+        let value pair_value(asked_text, asked_cells, i)
+        i := i + 1
+        if key.length < 5 or key.slice_to(5).equals("_has:") = false
+            continue
+        ; _has:Type:reference:parameter -- the parameter keeps its colons
+        let target entry(key, 58, 1)
+        let reference entry(key, 58, 2)
+        if target.length = 0 or reference.length = 0 or key.length <= 7 + target.length + reference.length
+        {
+            any := true
+            continue
+        }
+        let parameter key.slice_from(7 + target.length + reference.length)
+        var one_text Array[u8]()
+        var one_cells Array[i64]()
+        cell(&one_text, &one_cells, parameter)
+        cell(&one_text, &one_cells, value)
+        var found Array[u8]()
+        var rows Array[i64]()
+        let status search_all(target, one_text.as_slice(), one_cells.as_slice(), &found, &rows)
+        if status <> STORED
+            return status
+        let line reference_line(target, reference)
+        if line.length = 0 or entry(line, 32, 1).equals("-")
+        {
+            any := true
+            continue
+        }
+        var referenced Array[u8]()
+        var r: size_t 0
+        while r * 4 < rows.length
+        {
+            let parsed JsonValue.parse(found.as_slice().subslice(rows[r * 4 + 2] as size_t, (rows[r * 4 + 2] + rows[r * 4 + 3]) as size_t))
+            if parsed.ok()
+                collect_references(parsed.value, entry(line, 32, 1), 0, &referenced, true)
+            r := r + 1
+        }
+        if any = false
+            ids.add(referenced.as_slice())
+        else
+            intersect(&ids, referenced.as_slice())
+        any := true
+    }
+    var p: size_t 0
+    while p < pair_count(cells)
+    {
+        if any = false or pair_key(text, cells, p).equals("_id") = false
+        {
+            cell(out_text, out_cells, pair_key(text, cells, p))
+            cell(out_text, out_cells, pair_value(text, cells, p))
+        }
+        p := p + 1
+    }
+    if any = false
+        return STORED
+    cell(out_text, out_cells, "_id")
+    if ids.length > 0
+        joined_cell(out_text, out_cells, ids.as_slice())
+    else
+        cell(out_text, out_cells, "__no_match__")
+    STORED
+}
+
+; Add what the references at `path` in the resources of contents (cells of
+; four: id, content -- or key, content) point to, each once (seen), read
+; from its own type, to included (cells of four: type/id, content).
+procedure include_targets(contents: Slice[u8], content_cells: Slice[i64], path: Slice[u8], only_type: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    var references Array[u8]()
+    var r: size_t 0
+    while r * 4 < content_cells.length
+    {
+        let parsed JsonValue.parse(contents.subslice(content_cells[r * 4 + 2] as size_t, (content_cells[r * 4 + 2] + content_cells[r * 4 + 3]) as size_t))
+        if parsed.ok()
+            collect_references(parsed.value, path, 0, &references, false)
+        r := r + 1
+    }
+    var at: size_t 0
+    while at < references.length
+    {
+        let reference line_from(references.as_slice(), at)
+        at := at + reference.length + 1
+        var slash: size_t 0
+        while reference[slash] <> 47
+            slash := slash + 1
+        let type reference.slice_to(slash)
+        if only_type.length > 0 and only_type.equals(type) = false
+            continue
+        if has_line(seen.as_slice(), reference)
+            continue
+        let mark seen.length
+        seen.add(reference)
+        seen.add(10 as u8)
+        if known_type(type) = false
+            continue
+        ; the key out of seen and the content read straight into included,
+        ; both taken back when there is no such resource
+        let before included.length
+        let before_cells included_cells.length
+        cell(included, included_cells, seen.as_slice().subslice(mark, seen.length - 1))
+        open_cell(included, included_cells)
+        let read resource_select(type, reference.slice_from(slash + 1), 0, included)
+        if read.status = STORED
+            close_cell(included, included_cells)
+        else
+        {
+            included.length := before
+            included_cells.length := before_cells
+        }
+        if read.status = FAILED
+            return FAILED
+    }
+    STORED
+}
+
+; Add the resources of `searching` that refer through `parameter` to the
+; references in `targets` (type/id, commas between), each once.
+procedure include_referrers(searching: Slice[u8], parameter: Slice[u8], targets: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    var one_text Array[u8]()
+    var one_cells Array[i64]()
+    cell(&one_text, &one_cells, parameter)
+    cell(&one_text, &one_cells, targets)
+    var found Array[u8]()
+    var rows Array[i64]()
+    let status search_all(searching, one_text.as_slice(), one_cells.as_slice(), &found, &rows)
+    if status <> STORED
+        return status
+    var r: size_t 0
+    while r * 4 < rows.length
+    {
+        ; the key is written where it would stand in seen, and taken back
+        ; when it stands there already
+        let mark seen.length
+        seen.add(searching)
+        seen.add(47 as u8)
+        seen.add(found.as_slice().subslice(rows[r * 4] as size_t, (rows[r * 4] + rows[r * 4 + 1]) as size_t))
+        let end seen.length
+        if has_line(seen.as_slice().slice_to(mark), seen.as_slice().subslice(mark, end))
+            seen.length := mark
+        else
+        {
+            cell(included, included_cells, seen.as_slice().subslice(mark, end))
+            seen.add(10 as u8)
+            cell(included, included_cells, found.as_slice().subslice(rows[r * 4 + 2] as size_t, (rows[r * 4 + 2] + rows[r * 4 + 3]) as size_t))
+        }
+        r := r + 1
+    }
+    STORED
+}
+
+; What _include, _include:iterate, _revinclude and _revinclude:iterate of
+; the request (its pairs) add to the resources found (cells of four: id,
+; content): into included, cells of four (type/id, content).
+procedure resolve_includes(type: Slice[u8], text: Slice[u8], cells: Slice[i64], found: Slice[u8], rows: Slice[i64], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    var seen Array[u8]()
+    var p: size_t 0
+    while p < pair_count(cells)
+    {
+        if pair_key(text, cells, p).equals("_include")
+        {
+            var k: size_t 0
+            while or_value(pair_value(text, cells, p), k).length > 0
+            {
+                let include or_value(pair_value(text, cells, p), k)
+                k := k + 1
+                let parameter entry(include, 58, 1)
+                if parameter.length = 0 or entry(include, 58, 0).equals(type) = false
+                    continue
+                if parameter.equals("*")
+                {
+                    let lines model_references(type)
+                    var at: size_t 0
+                    while at < lines.length
+                    {
+                        let line line_from(lines, at)
+                        at := at + line.length + 1
+                        if entry(line, 32, 1).equals("-") = false and include_targets(found, rows, entry(line, 32, 1), "", &seen, included, included_cells) = FAILED
+                            return FAILED
+                    }
+                    continue
+                }
+                let line reference_line(type, parameter)
+                if line.length = 0 or entry(line, 32, 1).equals("-")
+                    continue
+                if include_targets(found, rows, entry(line, 32, 1), entry(include, 58, 2), &seen, included, included_cells) = FAILED
+                    return FAILED
+            }
+        }
+        p := p + 1
+    }
+    ; a second pass over what was included
+    p := 0
+    while p < pair_count(cells)
+    {
+        if pair_key(text, cells, p).equals("_include:iterate")
+        {
+            var k: size_t 0
+            while or_value(pair_value(text, cells, p), k).length > 0
+            {
+                let include or_value(pair_value(text, cells, p), k)
+                k := k + 1
+                let line reference_line(entry(include, 58, 0), entry(include, 58, 1))
+                if entry(include, 58, 1).length = 0 or line.length = 0 or entry(line, 32, 1).equals("-")
+                    continue
+                var before Array[u8]()
+                before.add(included.as_slice())
+                var before_cells Array[i64]()
+                before_cells.add(included_cells.as_slice())
+                if include_targets(before.as_slice(), before_cells.as_slice(), entry(line, 32, 1), "", &seen, included, included_cells) = FAILED
+                    return FAILED
+            }
+        }
+        p := p + 1
+    }
+    ; what refers to the resources found
+    var targets Array[u8]()
+    var r: size_t 0
+    while r * 4 < rows.length
+    {
+        if r > 0
+            targets.add(44 as u8)
+        targets.add(type)
+        targets.add(47 as u8)
+        targets.add(found.subslice(rows[r * 4] as size_t, (rows[r * 4] + rows[r * 4 + 1]) as size_t))
+        r := r + 1
+    }
+    p := 0
+    while p < pair_count(cells)
+    {
+        if pair_key(text, cells, p).equals("_revinclude") and rows.length > 0
+        {
+            var k: size_t 0
+            while or_value(pair_value(text, cells, p), k).length > 0
+            {
+                let include or_value(pair_value(text, cells, p), k)
+                k := k + 1
+                if entry(include, 58, 1).length = 0
+                    continue
+                let status include_referrers(entry(include, 58, 0), entry(include, 58, 1), targets.as_slice(), &seen, included, included_cells)
+                if status <> STORED
+                    return status
+            }
+        }
+        p := p + 1
+    }
+    ; ... and to what was included
+    p := 0
+    while p < pair_count(cells)
+    {
+        if pair_key(text, cells, p).equals("_revinclude:iterate")
+        {
+            var k: size_t 0
+            while or_value(pair_value(text, cells, p), k).length > 0
+            {
+                let include or_value(pair_value(text, cells, p), k)
+                k := k + 1
+                let line reference_line(entry(include, 58, 0), entry(include, 58, 1))
+                let source entry(line, 32, 2)
+                if entry(include, 58, 1).length = 0 or source.length = 0
+                    continue
+                ; the included resources of the first type the parameter points to
+                var of_source Array[u8]()
+                var c: size_t 0
+                while c * 4 < included_cells.length
+                {
+                    let key included.as_slice().subslice(included_cells[c * 4] as size_t, (included_cells[c * 4] + included_cells[c * 4 + 1]) as size_t)
+                    if key.length > source.length and key.slice_to(source.length).equals(source) and key[source.length] = 47
+                    {
+                        if of_source.length > 0
+                            of_source.add(44 as u8)
+                        of_source.add(key)
+                    }
+                    c := c + 1
+                }
+                if of_source.length = 0
+                    continue
+                let status include_referrers(entry(include, 58, 0), entry(include, 58, 1), of_source.as_slice(), &seen, included, included_cells)
+                if status <> STORED
+                    return status
+            }
+        }
+        p := p + 1
+    }
+    STORED
+}

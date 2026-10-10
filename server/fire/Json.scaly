@@ -1,7 +1,17 @@
 ; Bytes appended to a buffer: text and decimal numbers.
 
+; s appended to out, byte by byte: a copy the compiler can see is one (an
+; `out.add(s)` counts as out KEEPING s, and a buffer of this routine's
+; caller could then not be filled from one of its own).
 procedure put_bytes(mutable out: ref[Array[u8]], s: Slice[u8])
-    out.add(s)
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        out.add(s[i])
+        i := i + 1
+    }
+}
 
 ; v in decimal.
 procedure put_decimal(mutable out: ref[Array[u8]], v: i64)

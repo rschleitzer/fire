@@ -228,3 +228,38 @@
 "    if name.equals(\"" (name-of resource) "\")
         return \"" (scaly-search-lines resource) "\"
 "))
+
+; A resource's reference parameters, one a line: its name, the path of the
+; reference in the resource (a.b) and the active types it may point to --
+; what upstream's SearchHelper answers as GetReferencePropertyName and
+; GetActiveTargetTypes (boilerplate.scm: search-dot-path,
+; search-helper-target-case).
+(define (scaly-dot-path parts)
+    (if (null? parts) #f
+        (let loop ((ps parts) (names '()))
+            (if (null? ps) (scaly-joined (reverse names))
+                (let ((prop (scaly-part-prop (car ps))))
+                    (if prop (loop (cdr ps) (cons (% "name" prop) names)) #f))))))
+
+(define (scaly-reference-line s active-names)
+    (let* ((paths-node (select-children "paths" s))
+           (path-nodes (if (node-list-empty? paths-node) (empty-node-list)
+                          (select-children "path" (node-list-first paths-node))))
+           (first-path (if (node-list-empty? path-nodes) #f (node-list-first path-nodes)))
+           (targets-node (if first-path (select-children "targets" first-path) (empty-node-list)))
+           (targets (if (node-list-empty? targets-node) '()
+                        (node-list->list (children (node-list-first targets-node)))))
+           (path (scaly-dot-path (search-path-parts s))))
+        ($ (% "name" s) " " (if path path "-")
+           (apply $ (map (lambda (t)
+               (if (member (% "resource" t) active-names) ($ " " (% "resource" t)) ""))
+               targets))
+           "\\n")))
+
+(define (scaly-references resource active-names) ($
+"    if name.equals(\"" (name-of resource) "\")
+        return \""
+    (apply $ (map (lambda (s) (scaly-reference-line s active-names))
+        (node-list->list (reference-searches-of resource))))
+"\"
+"))

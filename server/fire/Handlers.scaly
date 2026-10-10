@@ -170,6 +170,31 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
         return send_resource(res, outcome.as_slice())
     }
 
+    ; conditional create: If-None-Exist names a search; one match is the
+    ; answer, more than one a refusal
+    let if_none_exist trim(req.header("if-none-exist"))
+    if if_none_exist.length > 0
+    {
+        var criteria if_none_exist
+        if criteria[0] = 63
+            criteria := criteria.slice_from(1)
+        var text Array[u8]()
+        var cells Array[i64]()
+        parse_pairs(criteria, &text, &cells)
+        var found Array[u8]()
+        var rows Array[i64]()
+        var problem Array[u8]()
+        let matches resource_search(type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
+        if matches.status = FAILED
+            return send_unavailable(res)
+        if matches.status <> STORED
+            return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        if matches.version_id = 1
+            return send_resource(res, found.as_slice().subslice(rows[2] as size_t, (rows[2] + rows[3]) as size_t))
+        if matches.version_id > 1
+            return send_error(res, "duplicate", "Multiple matches found for conditional create", 412)
+    }
+
     var id_bytes u8[36]
     var id Slice[u8](36, &id_bytes[0])
     if new_uuid(id) = false
@@ -364,10 +389,26 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
     if first_value(text, cells, "_summary").equals("count")
         count := 0
 
+    ; the chains, forward and reverse, become plain parameters
+    var chained_text Array[u8]()
+    var chained_cells Array[i64]()
+    let chains resolve_chains(type, text, cells, &chained_text, &chained_cells)
+    if chains = FAILED
+        return send_unavailable(res)
+    if chains <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    var plain_text Array[u8]()
+    var plain_cells Array[i64]()
+    let reverse resolve_reverse_chains(text, cells, chained_text.as_slice(), chained_cells.as_slice(), &plain_text, &plain_cells)
+    if reverse = FAILED
+        return send_unavailable(res)
+    if reverse <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+
     var found Array[u8]()
     var rows Array[i64]()
     var problem Array[u8]()
-    let result resource_search(type, text, cells, count, offset, &found, &rows, &problem)
+    let result resource_search(type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
     if result.status = REFUSED
         return send_error(res, "invalid", problem.as_slice(), 400)
     if result.status = BROKEN
@@ -375,12 +416,21 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
     if result.status <> STORED
         return send_unavailable(res)
     let total result.version_id
+    var included Array[u8]()
+    var included_cells Array[i64]()
+    let includes resolve_includes(type, text, cells, found.as_slice(), rows.as_slice(), &included, &included_cells)
+    if includes = FAILED
+        return send_unavailable(res)
+    if includes <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
 
     ; http://host/fire/Type, and the page asked for
+    var root Array[u8]()
+    put_bytes(&root, "http://")
+    root.add(trim(req.header("host")))
+    put_bytes(&root, "/fire/")
     var base Array[u8]()
-    put_bytes(&base, "http://")
-    base.add(trim(req.header("host")))
-    put_bytes(&base, "/fire/")
+    base.add(root.as_slice())
     base.add(type)
     var url Array[u8]()
     url.add(base.as_slice())
@@ -442,6 +492,25 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
         w.begin_object()
         w.key("mode")
         w.text("match")
+        w.end_object()
+        w.end_object()
+        i := i + 1
+    }
+    i := 0
+    while i * 4 < included_cells.length
+    {
+        w.begin_object()
+        w.key("fullUrl")
+        var full Array[u8]()
+        full.add(root.as_slice())
+        full.add(included.as_slice().subslice(included_cells[i * 4] as size_t, (included_cells[i * 4] + included_cells[i * 4 + 1]) as size_t))
+        w.text_dotnet(full.as_slice())
+        w.key("resource")
+        w.raw(included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t))
+        w.key("search")
+        w.begin_object()
+        w.key("mode")
+        w.text("include")
         w.end_object()
         w.end_object()
         i := i + 1

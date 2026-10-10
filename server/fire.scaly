@@ -32,6 +32,7 @@ define fire
     module postgresql
     module Database
     module Repository
+    module Chains
     module Metadata
     module Handlers
 }

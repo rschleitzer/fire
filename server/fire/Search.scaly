@@ -14,7 +14,7 @@ procedure cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], val
 {
     cells.add(text.length as i64)
     cells.add(value.length as i64)
-    text.add(value)
+    put_bytes(text, value)
 }
 
 ; A cell written piece by piece: what is added to text between the two

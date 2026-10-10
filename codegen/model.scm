@@ -143,4 +143,17 @@ function model_searches(name: Slice[u8]) returns Slice[u8]
             (for (node-list-filter active? (children (select-children "resources" root))) scaly-searches)
 "    \"\"
 }
+
+; The reference parameters of the resource type `name`, one per line: the
+; parameter, the reference's path in the resource, the active types it may
+; point to (codegen/search.scm).
+function model_references(name: Slice[u8]) returns Slice[u8]
+{
+"
+            (let ((active-names (map name-of (node-list->list
+                    (node-list-filter active? (children (select-children "resources" root)))))))
+                (for (node-list-filter active? (children (select-children "resources" root)))
+                    (lambda (r) (scaly-references r active-names))))
+"    \"\"
+}
 "))))
