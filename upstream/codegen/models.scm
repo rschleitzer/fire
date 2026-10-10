@@ -236,10 +236,14 @@ namespace " (project-name) ".Search;
                             ; FHIR `instant` is the only date-ish type that gets inlined
                             ; (see search-is-inline-instant? in migration.scm). It's encoded as a
                             ; JSON string, so GetValue<""DateTime>() throws — read raw and parse.
+                            ; The value handed to the database is the instant in UTC: a
+                            ; DateTime of another kind goes out as a time without zone and
+                            ; is stored as the server's wall clock read it (an hour off for
+                            ; +01:00 on a machine in that zone).
                             (case prop-type
                                 (("instant")
                                     ($"        var " col "Str = content[\"" json-name "\"]?.GetValue<""string>();
-        DateTime? " col " = " col "Str != null ? DateTime.Parse(" col "Str, null, System.Globalization.DateTimeStyles.RoundtripKind) : null;
+        DateTime? " col " = " col "Str != null ? DateTimeOffset.Parse(" col "Str, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal).UtcDateTime : null;
 " (loop (cdr items))))
                                 (else
                                     ($"        " cs-type "? " col " = content[\"" json-name "\"]?.GetValue<"cs-type">();
