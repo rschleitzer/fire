@@ -11,7 +11,7 @@
 
 package scaly 0.1.0
 package http 0.1.0
-package json 0.1.0
+package json 0.1.1
 package pg 0.2.0
 
 use http.Router.Router
@@ -30,10 +30,6 @@ define fire
     module Patient
 }
 
-; What print wrote leaves the process now: the server ends by a signal, and
-; nothing flushes standard output then.
-procedure fflush(stream: pointer[void]) returns i32 extern
-
 procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
 {
     let page Page.allocate_page()
@@ -43,7 +39,7 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
 
     if supported_database(database_type) = false
     {
-        print "Unsupported database type: `String(database_type.data as pointer[const_char], database_type.length)`"
+        Console.println("Unsupported database type: `String(database_type.data as pointer[const_char], database_type.length)`")
         return 2
     }
     let db make_provider(page, database_type, connection_string)
@@ -62,11 +58,10 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
     var l TcpListener.listen(port)
     if l.is_open() = false
     {
-        print "Cannot listen on port `port`"
+        Console.println("Cannot listen on port `port`")
         return 4
     }
-    print "Now listening on: http://localhost:`port`"
-    fflush(null)
+    Console.println("Now listening on: http://localhost:`port`")
     let server start(app, l)
     server.wait()
     l.close()

@@ -59,15 +59,6 @@ define PostgreSqlProvider
         )
     }
 
-    ; A connection of its own; the caller closes it. Null when the server
-    ; cannot be reached or refuses. (`mutable this`: a connection counts as
-    ; reaching the strings it was opened with, and its user writes it.)
-    procedure open_connection(mutable this) returns ref[PgConn]?
-    {
-        var h String(host)
-        PgConn.connect(h, port, user.as_slice(), password.as_slice(), database.as_slice())
-    }
-
     ; The work at the server's start, as upstream's Database does it: the
     ; database answers, and it has the schema -- created with upstream's
     ; own text when the database is empty -- at a version this software
@@ -75,10 +66,12 @@ define PostgreSqlProvider
     ; when any of it fails.
     procedure initialize(mutable this, software_version: Slice[u8]) returns bool
     {
-        let got this.open_connection()
+        var reason Array[u8]()
+        var h String(host)
+        let got PgConn.open(h, port, user.as_slice(), password.as_slice(), database.as_slice(), &reason)
         if got = null
         {
-            print "Cannot connect to PostgreSQL at `host`:`port`, database `database`"
+            Console.println("Cannot connect to PostgreSQL at `host`:`port`, database `database`: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
             return false
         }
         var c got as ref[PgConn]
@@ -86,7 +79,7 @@ define PostgreSqlProvider
         if ok = false
         {
             let m c.error_message()
-            print "PostgreSQL refused: `String(m.data as pointer[const_char], m.length)`"
+            Console.println("PostgreSQL refused: `String(m.data as pointer[const_char], m.length)`")
         }
         c.close()
         if ok
@@ -105,7 +98,7 @@ procedure prepare_schema(mutable c: ref[PgConn], software_version: Slice[u8]) re
         let version c.column(0)
         if version_newer(version, software_version)
         {
-            print "Database version `String(version.data as pointer[const_char], version.length)` is newer than software version `String(software_version.data as pointer[const_char], software_version.length)`"
+            Console.println("Database version `String(version.data as pointer[const_char], version.length)` is newer than software version `String(software_version.data as pointer[const_char], software_version.length)`")
             return false
         }
         return true
@@ -116,7 +109,7 @@ procedure prepare_schema(mutable c: ref[PgConn], software_version: Slice[u8]) re
     var version: Slice[u8] "0.0.0"
     if has_meta = false
     {
-        print "Creating database schema..."
+        Console.println("Creating database schema...")
         if c.execute(postgresql_initial_schema()) = false
             return false
         version := software_version
@@ -129,7 +122,7 @@ procedure prepare_schema(mutable c: ref[PgConn], software_version: Slice[u8]) re
     c.param_text(version)
     if c.run() = false
         return false
-    print "Database initialized at version `String(version.data as pointer[const_char], version.length)`."
+    Console.println("Database initialized at version `String(version.data as pointer[const_char], version.length)`.")
     true
 }
 

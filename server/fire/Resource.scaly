@@ -2,6 +2,7 @@
 ; extractors give it (InjectMeta, ExtractInlineParams).
 
 use json.Value.JsonValue
+use json.Writer.JsonWriter
 use fire.Instant.Instant
 
 define STORED: int 0
@@ -16,8 +17,8 @@ define PatientResult (status: int, version_id: i64, seconds: i64)
 
 ; The resource `root` with its id, meta.versionId and meta.lastUpdated set
 ; -- each in its place when the member is there, else as the last --,
-; written to content as it is stored.
-procedure write_resource(page: ref[Page], root: JsonValue, id: Slice[u8], version_id: i64, now: Instant, mutable content: ref[Array[u8]])
+; appended to content as it is stored: the bytes System.Text.Json writes.
+procedure write_resource(root: JsonValue, id: Slice[u8], version_id: i64, now: Instant, mutable content: ref[Array[u8]])
 {
     var version Array[u8]()
     put_decimal(&version, version_id)
@@ -25,12 +26,14 @@ procedure write_resource(page: ref[Page], root: JsonValue, id: Slice[u8], versio
     put_last_updated(&last_updated, now)
     var meta root.get("meta")
     if meta.is_object() = false
-        meta := json_object(page)
-    meta := with_member(page, meta, "versionId", json_text(version.as_slice()))
-    meta := with_member(page, meta, "lastUpdated", json_text(last_updated.as_slice()))
-    var resource with_member(page, root, "id", json_text(id))
-    resource := with_member(page, resource, "meta", meta)
-    write_json(content, resource)
+        meta := JsonValue.empty_object()
+    meta := meta.with_member("versionId", JsonValue.of_text(version.as_slice()))
+    meta := meta.with_member("lastUpdated", JsonValue.of_text(last_updated.as_slice()))
+    var resource root.with_member("id", JsonValue.of_text(id))
+    resource := resource.with_member("meta", meta)
+    var w JsonWriter()
+    w.value_dotnet(resource)
+    content.add(w.bytes())
 }
 
 ; A boolean member as a column: 1, 0, or -1 when the resource has none.

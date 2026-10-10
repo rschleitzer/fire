@@ -6,14 +6,9 @@
 ;   ConnectionString                          Host=...;Port=...;Database=...;Username=...;Password=...
 ;   Kestrel__Endpoints__MyHttpEndpoint__Url   http://localhost:5080
 
-; The environment variable `name` as bytes, empty when it is not set.
+; The setting `name`, empty when it is not set.
 procedure setting(name: pointer[const_char]) returns Slice[u8]
-{
-    let v getenv(name)
-    if v = null
-        return Slice[u8](0, null)
-    Slice[u8](strlen(v), v as pointer[u8])
-}
+    os.environment_variable(name)
 
 ; The same, or `fallback` when it is not set or empty.
 procedure setting_or(name: pointer[const_char], fallback: Slice[u8]) returns Slice[u8]

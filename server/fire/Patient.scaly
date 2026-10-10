@@ -85,14 +85,6 @@ procedure type_mismatch(mutable res: ref[Response], got: Slice[u8])
 ; POST /fire/Patient
 procedure patient_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
-    let page Page.allocate_page()
-    patient_post_on(page, req, res)
-    page.deallocate_extensions()
-    Page.release_page(page)
-}
-
-procedure patient_post_on(page: ref[Page], req: ref[Request], mutable res: ref[Response]) mutable pg_pool
-{
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
         return send_error(res, "invalid", "Invalid JSON", 400)
@@ -103,11 +95,12 @@ procedure patient_post_on(page: ref[Page], req: ref[Request], mutable res: ref[R
     if resource_type.text().equals("Patient") = false
         return type_mismatch(res, resource_type.text())
 
-    var id allocate_slice[u8]^page(page, 36)
+    var id_bytes u8[36]
+    var id Slice[u8](36, &id_bytes[0])
     if new_uuid(id) = false
         return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     var content Array[u8]()
-    let stored patient_create(page, root, id, false, &content)
+    let stored patient_create(root, id, false, &content)
     if stored.status <> STORED
         return send_unavailable(res)
     res.set_status(201)
@@ -166,15 +159,6 @@ procedure patient_vread(req: ref[Request], mutable res: ref[Response]) mutable p
     send_resource(res, content.as_slice())
 }
 
-; PUT /fire/Patient/{id}
-procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
-{
-    let page Page.allocate_page()
-    patient_put_on(page, req, res)
-    page.deallocate_extensions()
-    Page.release_page(page)
-}
-
 ; Letters, digits, '-' and '.', at most 64 of them.
 function valid_id(id: Slice[u8]) returns bool
 {
@@ -192,7 +176,8 @@ function valid_id(id: Slice[u8]) returns bool
     true
 }
 
-procedure patient_put_on(page: ref[Page], req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; PUT /fire/Patient/{id}
+procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
     let id req.param("id")
     if valid_id(id) = false
@@ -216,13 +201,13 @@ procedure patient_put_on(page: ref[Page], req: ref[Request], mutable res: ref[Re
     }
 
     var content Array[u8]()
-    var stored patient_update(page, root, id, version_of(trim(req.header("if-match"))), &content)
+    var stored patient_update(root, id, version_of(trim(req.header("if-match"))), &content)
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
     if stored.status = NOT_FOUND
     {
         ; update as create: a PUT to an id that is not there creates it
-        stored := patient_create(page, root, id, true, &content)
+        stored := patient_create(root, id, true, &content)
         if stored.status = STORED
         {
             res.set_status(201)

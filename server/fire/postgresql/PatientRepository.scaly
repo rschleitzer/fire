@@ -72,7 +72,7 @@ procedure keep_history(mutable c: ref[PgConn], id: Slice[u8], operation: Slice[u
 ; Create the Patient `id` from root; its stored bytes are appended to
 ; content. An id the client chose (after_delete) continues the versions its
 ; history holds.
-procedure patient_create(page: ref[Page], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns PatientResult mutable pg_pool
+procedure patient_create(root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns PatientResult mutable pg_pool
 {
     let got acquire()
     if got = null
@@ -95,7 +95,7 @@ procedure patient_create(page: ref[Page], root: JsonValue, id: Slice[u8], after_
     let now instant_now()
     if ok
     {
-        write_resource(page, root, id, version_id, now, content)
+        write_resource(root, id, version_id, now, content)
         ok := c.prepare("patient_insert", "INSERT INTO \"Patient\" (id, version_id, last_updated, content, \"active\", \"gender\") VALUES ($1, $2, $3, $4, $5, $6)")
     }
     if ok
@@ -112,7 +112,7 @@ procedure patient_create(page: ref[Page], root: JsonValue, id: Slice[u8], after_
 
 ; Replace the Patient `id` by root; if_match is the version the client
 ; expects, 0 for none.
-procedure patient_update(page: ref[Page], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns PatientResult mutable pg_pool
+procedure patient_update(root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns PatientResult mutable pg_pool
 {
     let got acquire()
     if got = null
@@ -137,7 +137,7 @@ procedure patient_update(page: ref[Page], root: JsonValue, id: Slice[u8], if_mat
     let now instant_now()
     if ok
     {
-        write_resource(page, root, id, current + 1, now, content)
+        write_resource(root, id, current + 1, now, content)
         ok := c.prepare("patient_update", "UPDATE \"Patient\" SET version_id = $2, last_updated = $3, content = $4, \"active\" = $5, \"gender\" = $6 WHERE id = $1")
     }
     if ok
