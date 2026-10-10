@@ -1,56 +1,75 @@
 ; The repository the handlers speak to: each operation goes to the
-; provider the server was started with (Database.database_kind).
+; provider the server was started with (Database.database_kind). An
+; operation runs in a transaction of its own (scope 0), or in the one a
+; scope stands for (transaction_begin).
 
 use json.Value.JsonValue
 use fire.Resource.StoreResult
 
-procedure resource_create(type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_create(type, root, id, after_delete, content)
+        return postgresql_create(scope, type, root, id, after_delete, content)
     StoreResult(FAILED, 0, 0)
 }
 
-procedure resource_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_update(type, root, id, if_match, content)
+        return postgresql_update(scope, type, root, id, if_match, content)
     StoreResult(FAILED, 0, 0)
 }
 
-procedure resource_delete(type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
+procedure resource_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_delete(type, id)
+        return postgresql_delete(scope, type, id)
     FAILED
 }
 
-procedure resource_is_deleted(type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
+procedure resource_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_is_deleted(type, id)
+        return postgresql_is_deleted(scope, type, id)
     false
 }
 
-procedure resource_select(type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_select(type, id, version_id, content)
+        return postgresql_select(scope, type, id, version_id, content)
     StoreResult(FAILED, 0, 0)
 }
 
 ; Search (see postgresql_search).
-procedure resource_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_search(type, text, cells, count, offset, found, rows, problem)
+        return postgresql_search(scope, type, text, cells, count, offset, found, rows, problem)
     StoreResult(FAILED, 0, 0)
 }
 
 ; The versions of a resource or of a type (see postgresql_history).
-procedure resource_history(type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+procedure resource_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_history(type, id, count, offset, found, rows)
+        return postgresql_history(scope, type, id, count, offset, found, rows)
     StoreResult(FAILED, 0, 0)
+}
+
+; Begin a transaction over several operations: its scope, 0 when the
+; database does not answer.
+procedure transaction_begin() returns u64 mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_begin()
+    0
+}
+
+; End it: commit, or roll back.
+procedure transaction_end(scope: u64, commit: bool) returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_end(scope, commit)
+    false
 }

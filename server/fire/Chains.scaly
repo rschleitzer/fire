@@ -153,7 +153,7 @@ procedure search_all(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutabl
     if known_type(type) = false
         return STORED
     var problem Array[u8]()
-    let result resource_search(type, text, cells, 10000, 0, found, rows, &problem)
+    let result resource_search(0, type, text, cells, 10000, 0, found, rows, &problem)
     if result.status = STORED or result.status = FAILED
         return result.status
     BROKEN
@@ -405,7 +405,7 @@ procedure include_targets(contents: Slice[u8], content_cells: Slice[i64], path: 
         let before_cells included_cells.length
         cell(included, included_cells, seen.as_slice().subslice(mark, seen.length - 1))
         open_cell(included, included_cells)
-        let read resource_select(type, reference.slice_from(slash + 1), 0, included)
+        let read resource_select(0, type, reference.slice_from(slash + 1), 0, included)
         if read.status = STORED
             close_cell(included, included_cells)
         else

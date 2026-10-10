@@ -261,14 +261,71 @@ procedure delete_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]
     true
 }
 
-; End the transaction on c and give c back: COMMIT when ok, else ROLLBACK.
-procedure end_transaction(mutable c: ref[PgConn], ok: bool) returns bool mutable pg_pool
+; The connection an operation runs on: the one of the transaction `scope`
+; (transaction_begin's answer), or with no scope one of the pool's.
+procedure scoped(scope: u64) returns ref[PgConn]? mutable pg_pool
 {
+    if scope <> 0
+        return (scope as size_t) as ref[PgConn]
+    acquire()
+}
+
+; Begin an operation's own transaction; within a scope there is one.
+procedure begin(mutable c: ref[PgConn], scope: u64) returns bool
+{
+    if scope <> 0
+        return true
+    c.execute("BEGIN")
+}
+
+; End an operation: its own transaction is committed when ok, else rolled
+; back, and its connection given back; within a scope nothing ends here,
+; and what failed fails the scope.
+procedure end_transaction(mutable c: ref[PgConn], scope: u64, ok: bool) returns bool mutable pg_pool
+{
+    if scope <> 0
+        return ok
     var done false
     if ok
         done := c.execute("COMMIT")
     else
         c.execute("ROLLBACK")
+    release(c)
+    done
+}
+
+; Give the connection of an operation that only read back.
+procedure give_back(mutable c: ref[PgConn], scope: u64) mutable pg_pool
+{
+    if scope = 0
+        release(c)
+}
+
+; A transaction over several operations: its scope, 0 when the database
+; does not answer.
+procedure postgresql_begin() returns u64 mutable pg_pool
+{
+    let got acquire()
+    if got = null
+        return 0
+    var c got as ref[PgConn]
+    if c.execute("BEGIN") = false
+    {
+        release(c)
+        return 0
+    }
+    c as u64
+}
+
+; End the transaction `scope`: commit it, or roll it back.
+procedure postgresql_end(scope: u64, commit: bool) returns bool mutable pg_pool
+{
+    var c (scope as size_t) as ref[PgConn]
+    var done false
+    if commit
+        done := c.execute("COMMIT")
+    else
+        done := c.execute("ROLLBACK")
     release(c)
     done
 }
@@ -320,19 +377,19 @@ procedure keep_history(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], o
 ; Create the resource `id` from root; its stored bytes are appended to
 ; content. An id the client chose (after_delete) continues the versions its
 ; history holds.
-procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure postgresql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     var data Array[u8]()
     var apart false
     if take_data(type, root, &data, &apart) = false
         return StoreResult(UNREADABLE, 0, 0)
     var stored Array[u8]()
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
     var version_id: i64 1
-    var ok c.execute("BEGIN")
+    var ok begin(c, scope)
     if ok and after_delete
     {
         var name Array[u8]()
@@ -385,33 +442,33 @@ procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], aft
         if ok
             ok := insert_searches(c, type, id, root)
     }
-    if end_transaction(c, ok) = false
+    if end_transaction(c, scope, ok) = false
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, version_id, now.seconds)
 }
 
 ; Replace the resource `id` by root; if_match is the version the client
 ; expects, 0 for none.
-procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure postgresql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     var data Array[u8]()
     var apart false
     if take_data(type, root, &data, &apart) = false
         return StoreResult(UNREADABLE, 0, 0)
     var stored Array[u8]()
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
-    if c.execute("BEGIN") = false
+    if begin(c, scope) = false
     {
-        end_transaction(c, false)
+        end_transaction(c, scope, false)
         return StoreResult(FAILED, 0, 0)
     }
     let current lock_current(c, type, id)
     if current <= 0 or (if_match > 0 and if_match <> current)
     {
-        end_transaction(c, false)
+        end_transaction(c, scope, false)
         if current < 0
             return StoreResult(FAILED, 0, 0)
         if current = 0
@@ -453,27 +510,27 @@ procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_
         if ok
             ok := delete_searches(c, type, id) and insert_searches(c, type, id, root)
     }
-    if end_transaction(c, ok) = false
+    if end_transaction(c, scope, ok) = false
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, current + 1, now.seconds)
 }
 
 ; Delete the resource `id`: STORED, NOT_FOUND or FAILED.
-procedure postgresql_delete(type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
+procedure postgresql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
 {
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return FAILED
     var c got as ref[PgConn]
-    if c.execute("BEGIN") = false
+    if begin(c, scope) = false
     {
-        end_transaction(c, false)
+        end_transaction(c, scope, false)
         return FAILED
     }
     let current lock_current(c, type, id)
     if current <= 0
     {
-        end_transaction(c, false)
+        end_transaction(c, scope, false)
         if current < 0
             return FAILED
         return NOT_FOUND
@@ -495,15 +552,15 @@ procedure postgresql_delete(type: Slice[u8], id: Slice[u8]) returns int mutable 
             ok := c.run()
         }
     }
-    if end_transaction(c, ok) = false
+    if end_transaction(c, scope, ok) = false
         return FAILED
     STORED
 }
 
 ; Was the resource `id` deleted at some time?
-procedure postgresql_is_deleted(type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
+procedure postgresql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return false
     var c got as ref[PgConn]
@@ -520,7 +577,7 @@ procedure postgresql_is_deleted(type: Slice[u8], id: Slice[u8]) returns bool mut
         c.param_text(id)
         deleted := c.run() and c.next_row() and c.column_int(0) > 0
     }
-    release(c)
+    give_back(c, scope)
     deleted
 }
 
@@ -555,9 +612,9 @@ procedure select_row(mutable c: ref[PgConn], type: Slice[u8], what: Slice[u8], h
 
 ; Read the resource `id` -- its current version, or version_id (not 0) from
 ; the current row or the history; the content is appended to `content`.
-procedure postgresql_select(type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure postgresql_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
@@ -572,7 +629,7 @@ procedure postgresql_select(type: Slice[u8], id: Slice[u8], version_id: i64, mut
     }
     if result.status = STORED and keeps_data_apart(type) and restore_data(c, type, id, result.version_id, content) = false
         result := StoreResult(FAILED, 0, 0)
-    release(c)
+    give_back(c, scope)
     result
 }
 
@@ -598,7 +655,7 @@ procedure bind_parameters(mutable c: ref[PgConn], q: ref[SearchQuery])
 ; The answer's status is STORED and its version_id the number of ALL that
 ; match; REFUSED, with `problem`, for what upstream refuses, BROKEN for
 ; what it fails on, FAILED when the database does not answer.
-procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
     var q SearchQuery()
     var i: size_t 0
@@ -626,7 +683,7 @@ procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64],
         matching.add(q.wheres.as_slice())
     }
 
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
@@ -676,7 +733,7 @@ procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64],
             }
         }
     }
-    release(c)
+    give_back(c, scope)
     if ok = false
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, total, 0)
@@ -688,7 +745,7 @@ procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64],
 ; TOMBSTONE beside its row. At most `count` from `offset` on, each as four
 ; cells in rows (id, the time it is from, what it is, content); the answer's
 ; version_id is how many there are in all.
-procedure postgresql_history(type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
 {
     let one id.length > 0
     var of_id: Slice[u8] ""
@@ -728,7 +785,7 @@ procedure postgresql_history(type: Slice[u8], id: Slice[u8], count: i64, offset:
     else
         put_bytes(&listing, ")) h ORDER BY h.last_updated DESC, h.history_operation DESC LIMIT $1 OFFSET $2")
 
-    let got acquire()
+    let got scoped(scope)
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
@@ -768,7 +825,7 @@ procedure postgresql_history(type: Slice[u8], id: Slice[u8], count: i64, offset:
             }
         }
     }
-    release(c)
+    give_back(c, scope)
     if ok = false
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, total, 0)

@@ -36,6 +36,7 @@ define fire
     module Composite
     module Metadata
     module Handlers
+    module Bundle
 }
 
 procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
@@ -57,6 +58,7 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
     var app Router.create(page)
     app.get("/fire/metadata", &metadata)
     add_resource_routes(app, page)
+    app.post("/fire", &bundle_post)
 
     var l TcpListener.listen(port)
     if l.is_open() = false

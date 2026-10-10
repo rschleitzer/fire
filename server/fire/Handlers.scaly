@@ -186,7 +186,7 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
         var found Array[u8]()
         var rows Array[i64]()
         var problem Array[u8]()
-        let matches resource_search(type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
+        let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
         if matches.status = FAILED
             return send_unavailable(res)
         if matches.status <> STORED
@@ -202,7 +202,7 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
     if new_uuid(id) = false
         return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     var content Array[u8]()
-    let stored resource_create(type, root, id, false, &content)
+    let stored resource_create(0, type, root, id, false, &content)
     if stored.status = UNREADABLE
         return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status <> STORED
@@ -218,12 +218,12 @@ procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable p
     let type type_of(req)
     let id req.param("id")
     var content Array[u8]()
-    let row resource_select(type, id, 0, &content)
+    let row resource_select(0, type, id, 0, &content)
     if row.status = FAILED
         return send_unavailable(res)
     if row.status = NOT_FOUND
     {
-        if resource_is_deleted(type, id)
+        if resource_is_deleted(0, type, id)
             return send_error(res, "deleted", "Resource has been deleted", 410)
         return not_found(res, type, id, "")
     }
@@ -258,7 +258,7 @@ procedure resource_vread(req: ref[Request], mutable res: ref[Response]) mutable 
     var content Array[u8]()
     var row StoreResult(NOT_FOUND, 0, 0)
     if digits_of(vid) > 0
-        row := resource_select(type, id, digits_of(vid), &content)
+        row := resource_select(0, type, id, digits_of(vid), &content)
     if row.status = FAILED
         return send_unavailable(res)
     if row.status = NOT_FOUND
@@ -319,7 +319,7 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     }
 
     var content Array[u8]()
-    var stored resource_update(type, root, id, version_of(trim(req.header("if-match"))), &content)
+    var stored resource_update(0, type, root, id, version_of(trim(req.header("if-match"))), &content)
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
     if stored.status = UNREADABLE
@@ -327,7 +327,7 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     if stored.status = NOT_FOUND
     {
         ; update as create: a PUT to an id that is not there creates it
-        stored := resource_create(type, root, id, true, &content)
+        stored := resource_create(0, type, root, id, true, &content)
         if stored.status = STORED
         {
             res.set_status(201)
@@ -346,7 +346,7 @@ procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable
 {
     let type type_of(req)
     let id req.param("id")
-    let status resource_delete(type, id)
+    let status resource_delete(0, type, id)
     if status = FAILED
         return send_unavailable(res)
     if status = NOT_FOUND
@@ -429,7 +429,7 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
         return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     var found Array[u8]()
     var rows Array[i64]()
-    let result resource_history(type, id, count, offset, &found, &rows)
+    let result resource_history(0, type, id, count, offset, &found, &rows)
     if result.status <> STORED
         return send_unavailable(res)
     if id.length > 0 and rows.length = 0
@@ -563,7 +563,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
         composite_pairs(text, cells, plain_text.as_slice(), plain_cells.as_slice(), &code_text, &code_cells)
         var all Array[u8]()
         var all_rows Array[i64]()
-        result := resource_search(type, code_text.as_slice(), code_cells.as_slice(), 10000, 0, &all, &all_rows, &problem)
+        result := resource_search(0, type, code_text.as_slice(), code_cells.as_slice(), 10000, 0, &all, &all_rows, &problem)
         var matching: i64 0
         var r: size_t 0
         while result.status = STORED and r * 4 < all_rows.length
@@ -584,7 +584,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
             result := StoreResult(STORED, matching, 0)
     }
     else
-        result := resource_search(type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
+        result := resource_search(0, type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
     if result.status = REFUSED
         return send_error(res, "invalid", problem.as_slice(), 400)
     if result.status = BROKEN

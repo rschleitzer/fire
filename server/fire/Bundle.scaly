@@ -1,0 +1,453 @@
+; POST /fire: a batch, a transaction or a searchset, entry by entry, as
+; upstream's BundleHandler processes it. A batch answers every entry for
+; itself; a transaction is one database transaction, and the first entry
+; that fails ends it and rolls it back; a searchset puts each of its
+; resources under its id.
+
+use http.Request.Request
+use http.Response.Response
+use json.Value.JsonValue
+use json.Writer.JsonWriter
+use fire.Resource.StoreResult
+
+; {"response":{"status":s[,"location":l]}[,"resource":r]} -- r as it stands.
+procedure answer_entry(mutable e: ref[JsonWriter], status: Slice[u8], location: Slice[u8], resource: Slice[u8])
+{
+    e.begin_object()
+    e.key("response")
+    e.begin_object()
+    e.key("status")
+    e.text(status)
+    if location.length > 0
+    {
+        e.key("location")
+        e.text_dotnet(location)
+    }
+    e.end_object()
+    if resource.length > 0
+    {
+        e.key("resource")
+        e.raw(resource)
+    }
+    e.end_object()
+}
+
+; An entry that failed: its status and an OperationOutcome saying why.
+procedure error_entry(mutable e: ref[JsonWriter], status: Slice[u8], message: Slice[u8])
+{
+    var outcome Array[u8]()
+    write_outcome(&outcome, "error", "invalid", message)
+    answer_entry(e, status, "", outcome.as_slice())
+}
+
+; "<Type>/<id> not found" as an entry.
+procedure missing_entry(mutable e: ref[JsonWriter], type: Slice[u8], id: Slice[u8])
+{
+    var message Array[u8]()
+    put_bytes(&message, type)
+    put_bytes(&message, "/")
+    put_bytes(&message, id)
+    put_bytes(&message, " not found")
+    error_entry(e, "404", message.as_slice())
+}
+
+procedure unknown_type_entry(mutable e: ref[JsonWriter], type: Slice[u8])
+{
+    var message Array[u8]()
+    put_bytes(&message, "Unknown resource type: ")
+    put_bytes(&message, type)
+    error_entry(e, "404", message.as_slice())
+}
+
+; base/Type/id/_history/version
+procedure put_location(mutable out: ref[Array[u8]], base: Slice[u8], type: Slice[u8], id: Slice[u8], version_id: i64)
+{
+    put_bytes(out, base)
+    put_bytes(out, "/")
+    put_bytes(out, type)
+    put_bytes(out, "/")
+    put_bytes(out, id)
+    put_bytes(out, "/_history/")
+    put_decimal(out, version_id)
+}
+
+; What a store operation that did not store answers with.
+procedure failed_entry(mutable e: ref[JsonWriter], status: int)
+{
+    if status = UNREADABLE
+        return error_entry(e, "400", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.")
+    if status = CONFLICT
+        return error_entry(e, "409", "Version conflict")
+    error_entry(e, "400", "The data store is currently unavailable. Please retry later.")
+}
+
+; Put `resource` under `id` (update, or create when it is not there).
+procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, resource: JsonValue, if_match: i64, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+{
+    if resource.is_null()
+        return error_entry(e, "400", "Missing resource")
+    if has_id = false
+        return error_entry(e, "400", "PUT requires resource ID in URL")
+    if known_type(type) = false
+        return unknown_type_entry(e, type)
+    var outcome Array[u8]()
+    if acceptable(type, resource, &outcome) = false
+        return answer_entry(e, "400", "", outcome.as_slice())
+    var content Array[u8]()
+    var status: Slice[u8] "200"
+    var stored resource_update(scope, type, resource, id, if_match, &content)
+    if stored.status = NOT_FOUND
+    {
+        stored := resource_create(scope, type, resource, id, true, &content)
+        status := "201"
+    }
+    if stored.status <> STORED
+        return failed_entry(e, stored.status)
+    var location Array[u8]()
+    put_location(&location, base, type, id, stored.version_id)
+    answer_entry(e, status, location.as_slice(), content.as_slice())
+}
+
+; One entry of a batch or a transaction.
+procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+{
+    if entry.is_object() = false
+        return error_entry(e, "400", "Invalid entry")
+    let request entry.get("request")
+    if request.is_object() = false
+        return error_entry(e, "400", "Entry missing request")
+    if request.get("method").is_text() = false or request.get("url").is_text() = false
+        return error_entry(e, "400", "Entry missing method or url")
+    let method request.get("method").text()
+    let url request.get("url").text()
+    var question: size_t 0
+    while question < url.length and url[question] <> 63
+        question := question + 1
+    let path url.slice_to(question)
+    var query url.slice_to(0)
+    if question < url.length
+        query := url.slice_from(question + 1)
+    var slash: size_t 0
+    while slash < path.length and path[slash] <> 47
+        slash := slash + 1
+    let type path.slice_to(slash)
+    let has_id slash < path.length
+    var id path.slice_to(0)
+    if has_id
+    {
+        var end slash + 1
+        while end < path.length and path[end] <> 47
+            end := end + 1
+        id := path.subslice(slash + 1, end)
+    }
+    let resource entry.get("resource")
+
+    if method.equals("POST")
+    {
+        if resource.is_null()
+            return error_entry(e, "400", "Missing resource")
+        if resource.get("resourceType").is_text() = false
+            return error_entry(e, "400", "Missing resourceType")
+        if resource.get("resourceType").text().equals(type) = false
+        {
+            var message Array[u8]()
+            put_bytes(&message, "Resource type mismatch: expected ")
+            put_bytes(&message, type)
+            put_bytes(&message, ", got ")
+            put_bytes(&message, resource.get("resourceType").text())
+            return error_entry(e, "400", message.as_slice())
+        }
+        if known_type(type) = false
+            return unknown_type_entry(e, type)
+        var outcome Array[u8]()
+        if acceptable(type, resource, &outcome) = false
+            return answer_entry(e, "400", "", outcome.as_slice())
+        if request.get("ifNoneExist").is_text()
+        {
+            var text Array[u8]()
+            var cells Array[i64]()
+            var criteria request.get("ifNoneExist").text()
+            if criteria.length > 0 and criteria[0] = 63
+                criteria := criteria.slice_from(1)
+            parse_pairs(criteria, &text, &cells)
+            var found Array[u8]()
+            var rows Array[i64]()
+            var problem Array[u8]()
+            let matches resource_search(scope, type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
+            if matches.status = REFUSED
+                return error_entry(e, "400", problem.as_slice())
+            if matches.status <> STORED
+                return failed_entry(e, matches.status)
+            if matches.version_id = 1
+                return answer_entry(e, "200", "", found.as_slice().subslice(rows[2] as size_t, (rows[2] + rows[3]) as size_t))
+            if matches.version_id > 1
+                return error_entry(e, "412", "Multiple matches found for conditional create")
+        }
+        var id_bytes u8[36]
+        var new_id Slice[u8](36, &id_bytes[0])
+        if new_uuid(new_id) = false
+            return error_entry(e, "400", "An unexpected internal error occurred.")
+        var content Array[u8]()
+        let stored resource_create(scope, type, resource, new_id, false, &content)
+        if stored.status <> STORED
+            return failed_entry(e, stored.status)
+        var location Array[u8]()
+        put_location(&location, base, type, new_id, stored.version_id)
+        return answer_entry(e, "201", location.as_slice(), content.as_slice())
+    }
+    if method.equals("GET")
+    {
+        if known_type(type) = false
+            return unknown_type_entry(e, type)
+        if has_id
+        {
+            var content Array[u8]()
+            let read resource_select(scope, type, id, 0, &content)
+            if read.status = NOT_FOUND
+                return missing_entry(e, type, id)
+            if read.status <> STORED
+                return failed_entry(e, read.status)
+            return answer_entry(e, "200", "", content.as_slice())
+        }
+        ; a search: its first ten, as a searchset
+        var text Array[u8]()
+        var cells Array[i64]()
+        parse_pairs(query, &text, &cells)
+        var found Array[u8]()
+        var rows Array[i64]()
+        var problem Array[u8]()
+        let result resource_search(scope, type, text.as_slice(), cells.as_slice(), 10, 0, &found, &rows, &problem)
+        if result.status = REFUSED
+            return error_entry(e, "400", problem.as_slice())
+        if result.status <> STORED
+            return failed_entry(e, result.status)
+        var address Array[u8]()
+        put_bytes(&address, base)
+        put_bytes(&address, "/")
+        put_bytes(&address, type)
+        var bundle JsonWriter()
+        bundle.begin_object()
+        bundle.key("resourceType")
+        bundle.text("Bundle")
+        bundle.key("type")
+        bundle.text("searchset")
+        bundle.key("link")
+        page_links(&bundle, address.as_slice(), query, text.as_slice(), cells.as_slice(), result.version_id, 10, 0)
+        bundle.key("total")
+        bundle.integer(result.version_id)
+        bundle.key("entry")
+        bundle.begin_array()
+        var i: size_t 0
+        while i * 4 < rows.length
+        {
+            var full Array[u8]()
+            put_bytes(&full, address.as_slice())
+            put_bytes(&full, "/")
+            put_bytes(&full, found.as_slice().subslice(rows[i * 4] as size_t, (rows[i * 4] + rows[i * 4 + 1]) as size_t))
+            bundle.begin_object()
+            bundle.key("fullUrl")
+            bundle.text_dotnet(full.as_slice())
+            bundle.key("resource")
+            bundle.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
+            bundle.key("search")
+            bundle.begin_object()
+            bundle.key("mode")
+            bundle.text("match")
+            bundle.end_object()
+            bundle.end_object()
+            i := i + 1
+        }
+        bundle.end_array()
+        bundle.end_object()
+        return answer_entry(e, "200", "", bundle.bytes())
+    }
+    if method.equals("PUT")
+    {
+        var if_match: i64 0
+        if request.get("ifMatch").is_text()
+            if_match := version_of(request.get("ifMatch").text())
+        return put_entry(scope, type, id, has_id, resource, if_match, base, e)
+    }
+    if method.equals("DELETE")
+    {
+        if has_id = false
+            return error_entry(e, "400", "DELETE requires resource ID in URL")
+        if known_type(type) = false
+            return unknown_type_entry(e, type)
+        let status resource_delete(scope, type, id)
+        if status = NOT_FOUND
+            return missing_entry(e, type, id)
+        if status <> STORED
+            return failed_entry(e, status)
+        return answer_entry(e, "204", "", "")
+    }
+    var message Array[u8]()
+    put_bytes(&message, "Unsupported method: ")
+    put_bytes(&message, method)
+    error_entry(e, "400", message.as_slice())
+}
+
+; What upstream asks of a transaction's entry before any of them runs: true
+; when it may run, else `outcome` is the OperationOutcome to refuse the
+; bundle with.
+procedure transaction_entry_valid(entry: JsonValue, mutable outcome: ref[Array[u8]]) returns bool
+{
+    let request entry.get("request")
+    if request.is_object() = false
+    {
+        write_outcome(outcome, "error", "invalid", "Bundle entry missing request")
+        return false
+    }
+    if request.get("method").is_text() = false or request.get("url").is_text() = false
+    {
+        write_outcome(outcome, "error", "invalid", "Bundle entry missing method or url")
+        return false
+    }
+    let method request.get("method").text()
+    if method.equals("POST") = false and method.equals("PUT") = false
+        return true
+    let resource entry.get("resource")
+    if resource.is_null()
+    {
+        var message Array[u8]()
+        put_bytes(&message, "Bundle entry missing resource for ")
+        put_bytes(&message, method)
+        write_outcome(outcome, "error", "invalid", message.as_slice())
+        return false
+    }
+    if resource.get("resourceType").is_text() = false
+    {
+        write_outcome(outcome, "error", "invalid", "Missing resourceType")
+        return false
+    }
+    let url request.get("url").text()
+    var end: size_t 0
+    while end < url.length and url[end] <> 47 and url[end] <> 63
+        end := end + 1
+    let type resource.get("resourceType").text()
+    if type.equals(url.slice_to(end)) = false
+    {
+        var message Array[u8]()
+        put_bytes(&message, "Resource type mismatch: expected ")
+        put_bytes(&message, url.slice_to(end))
+        put_bytes(&message, ", got ")
+        put_bytes(&message, type)
+        write_outcome(outcome, "error", "invalid", message.as_slice())
+        return false
+    }
+    if resource.get("active").is_null() = false and resource.get("active").is_bool() = false
+    {
+        write_outcome(outcome, "error", "invalid", "Field 'active' must be a boolean")
+        return false
+    }
+    var required: Slice[u8] ""
+    if type.equals("Binary") and resource.get("contentType").is_null()
+        required := "contentType"
+    if type.equals("Observation") and resource.get("code").is_null()
+        required := "code"
+    if type.equals("Observation") and resource.get("status").is_null()
+        required := "status"
+    if required.length > 0
+    {
+        var message Array[u8]()
+        put_bytes(&message, "Missing required field: ")
+        put_bytes(&message, required)
+        write_outcome(outcome, "error", "required", message.as_slice())
+        return false
+    }
+    true
+}
+
+; POST /fire
+procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let parsed JsonValue.parse(req.body)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "invalid", "Invalid JSON", 400)
+    let root parsed.value
+    if root.get("resourceType").is_text() = false or root.get("resourceType").text().equals("Bundle") = false
+        return send_error(res, "invalid", "Expected Bundle resource", 400)
+    var kind: Slice[u8] ""
+    if root.get("type").is_text()
+        kind := root.get("type").text()
+    let transaction kind.equals("transaction")
+    if transaction = false and kind.equals("batch") = false and kind.equals("searchset") = false
+    {
+        var message Array[u8]()
+        put_bytes(&message, "Unsupported bundle type: ")
+        put_bytes(&message, kind)
+        return send_error(res, "invalid", message.as_slice(), 400)
+    }
+    let entries root.get("entry")
+    var base Array[u8]()
+    put_bytes(&base, "http://")
+    put_bytes(&base, trim(req.header("host")))
+    put_bytes(&base, "/fire")
+
+    var scope: u64 0
+    if transaction
+    {
+        var i: size_t 0
+        while i < entries.length()
+        {
+            var outcome Array[u8]()
+            if entries.item(i).is_object() and transaction_entry_valid(entries.item(i), &outcome) = false
+            {
+                res.set_status(400)
+                return send_resource(res, outcome.as_slice())
+            }
+            i := i + 1
+        }
+        if entries.length() > 0
+        {
+            scope := transaction_begin()
+            if scope = 0
+                return send_unavailable(res)
+        }
+    }
+
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("Bundle")
+    w.key("type")
+    if transaction
+        w.text("transaction-response")
+    else
+        w.text("batch-response")
+    w.key("entry")
+    w.begin_array()
+    var i: size_t 0
+    while i < entries.length()
+    {
+        let entry entries.item(i)
+        i := i + 1
+        var e JsonWriter()
+        if kind.equals("searchset")
+        {
+            let resource entry.get("resource")
+            if resource.get("resourceType").is_text() = false or resource.get("id").is_text() = false
+                error_entry(&e, "400", "searchset entry missing resource/resourceType/id")
+            else
+                put_entry(scope, resource.get("resourceType").text(), resource.get("id").text(), true, resource, 0, base.as_slice(), &e)
+        }
+        else
+            process_entry(scope, entry, base.as_slice(), &e)
+        ; {"response":{"status":"4.. or 5..: the transaction ends here
+        let first_digit e.bytes()[23]
+        if transaction and (first_digit = 52 or first_digit = 53)
+        {
+            transaction_end(scope, false)
+            var message Array[u8]()
+            put_bytes(&message, "Transaction processing failed: ")
+            put_bytes(&message, e.bytes())
+            return send_error(res, "invalid", message.as_slice(), 400)
+        }
+        w.raw(e.bytes())
+    }
+    w.end_array()
+    w.end_object()
+    if scope <> 0 and transaction_end(scope, true) = false
+        return send_unavailable(res)
+    send_resource(res, w.bytes())
+}
