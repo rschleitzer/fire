@@ -17,7 +17,7 @@ here and nowhere else.
   into the XML model.
 - `documentation/` — the server's documentation in DocBook; the generator
   writes its pages into the server's `wwwroot`.
-- `test/`, `fire.sln`, `Dockerfile`, `docker_build`, `sql/` — the test
+- `test/`, `fire.sln`, `Dockerfile`, `docker_build` — the test
   project and what builds and ships the server.
 
 `upstream/fire.sh` runs all of it: it fetches the definitions, writes
