@@ -29,5 +29,12 @@ on the PATH).
 
 Licence of `upstream/`: MIT, `upstream/LICENSE`.
 
+## model/
+
+The input both generators read: `fhir.xml` as upstream's converter wrote it,
+with the DTD it is valid against. It is a copy held fast, so the port needs
+neither dotnet nor the definitions; `tools/pin-model.sh` renews it after a
+run of `upstream/fire.sh`.
+
 The server product this generator was developed for, its configuration and
 any data are not in this repository.
