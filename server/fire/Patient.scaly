@@ -1,0 +1,254 @@
+; The Patient handlers, as upstream's PatientHandlers answer: create, read,
+; version read, update, delete.
+
+use http.Request.Request
+use http.Response.Response
+use json.Value.JsonValue
+use fire.Resource.PatientResult
+
+; Location (with a host), ETag and Last-Modified for version `version_id`
+; of Patient `id`.
+procedure version_fields(mutable res: ref[Response], host: Slice[u8], id: Slice[u8], version_id: i64, seconds: i64)
+{
+    var version Array[u8]()
+    put_decimal(&version, version_id)
+    if host.length > 0
+    {
+        var location Array[u8]()
+        put_bytes(&location, "http://")
+        location.add(host)
+        put_bytes(&location, "/fire/Patient/")
+        location.add(id)
+        put_bytes(&location, "/_history/")
+        location.add(version.as_slice())
+        res.header("Location", location.as_slice())
+    }
+    var etag Array[u8]()
+    put_bytes(&etag, "W/\"")
+    etag.add(version.as_slice())
+    put_bytes(&etag, "\"")
+    res.header("ETag", etag.as_slice())
+    var date u8[29]
+    let d Slice[u8](29, &date[0])
+    format_date(d, seconds)
+    res.header("Last-Modified", d)
+}
+
+; The body of a write's answer, as the Prefer field asks for it.
+procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Slice[u8])
+{
+    let prefer trim(req.header("prefer"))
+    if prefer.equals("return=minimal")
+        return res.send("", "")
+    if prefer.equals("return=OperationOutcome")
+    {
+        var outcome Array[u8]()
+        write_outcome(&outcome, "information", "informational", "Operation successful")
+        return send_resource(res, outcome.as_slice())
+    }
+    send_resource(res, content)
+}
+
+; The version a conditional field names (W/"3", "3", 3); 0 when none.
+function version_of(field: Slice[u8]) returns i64
+{
+    var at: size_t 0
+    if field.length >= 2 and field[0] = 87 and field[1] = 47
+        at := 2
+    if at < field.length and field[at] = 34
+        at := at + 1
+    digits_of(field.slice_from(at))
+}
+
+procedure not_found(mutable res: ref[Response], id: Slice[u8], version: Slice[u8])
+{
+    var message Array[u8]()
+    put_bytes(&message, "Patient/")
+    message.add(id)
+    if version.length > 0
+    {
+        put_bytes(&message, "/_history/")
+        message.add(version)
+    }
+    put_bytes(&message, " not found")
+    send_error(res, "not-found", message.as_slice(), 404)
+}
+
+procedure type_mismatch(mutable res: ref[Response], got: Slice[u8])
+{
+    var message Array[u8]()
+    put_bytes(&message, "Resource type mismatch: expected Patient, got ")
+    message.add(got)
+    send_error(res, "invalid", message.as_slice(), 400)
+}
+
+; POST /fire/Patient
+procedure patient_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let page Page.allocate_page()
+    patient_post_on(page, req, res)
+    page.deallocate_extensions()
+    Page.release_page(page)
+}
+
+procedure patient_post_on(page: ref[Page], req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let parsed JsonValue.parse(req.body)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "invalid", "Invalid JSON", 400)
+    let root parsed.value
+    let resource_type root.get("resourceType")
+    if resource_type.is_text() = false
+        return send_error(res, "invalid", "Missing required field: resourceType", 400)
+    if resource_type.text().equals("Patient") = false
+        return type_mismatch(res, resource_type.text())
+
+    var id allocate_slice[u8]^page(page, 36)
+    if new_uuid(id) = false
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    var content Array[u8]()
+    let stored patient_create(page, root, id, false, &content)
+    if stored.status <> STORED
+        return send_unavailable(res)
+    res.set_status(201)
+    version_fields(res, trim(req.header("host")), id, stored.version_id, stored.seconds)
+    send_stored(req, res, content.as_slice())
+}
+
+; GET /fire/Patient/{id}
+procedure patient_read(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let id req.param("id")
+    var content Array[u8]()
+    let row patient_select(id, 0, &content)
+    if row.status = FAILED
+        return send_unavailable(res)
+    if row.status = NOT_FOUND
+    {
+        if patient_is_deleted(id)
+            return send_error(res, "deleted", "Resource has been deleted", 410)
+        return not_found(res, id, "")
+    }
+    let if_none_match trim(req.header("if-none-match"))
+    if if_none_match.length > 0 and version_of(if_none_match) = row.version_id
+    {
+        res.set_status(304)
+        return res.send("", "")
+    }
+    version_fields(res, "", id, row.version_id, row.seconds)
+    send_resource(res, content.as_slice())
+}
+
+; GET /fire/Patient/{id}/_history/{vid}
+procedure patient_vread(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let id req.param("id")
+    let vid req.param("vid")
+    var all_digits vid.length > 0 and vid.length < 10
+    var i: size_t 0
+    while i < vid.length
+    {
+        if vid[i] < 48 or vid[i] > 57
+            all_digits := false
+        i := i + 1
+    }
+    if all_digits = false
+        return send_error(res, "invalid", "Invalid version id", 400)
+    var content Array[u8]()
+    var row PatientResult(NOT_FOUND, 0, 0)
+    if digits_of(vid) > 0
+        row := patient_select(id, digits_of(vid), &content)
+    if row.status = FAILED
+        return send_unavailable(res)
+    if row.status = NOT_FOUND
+        return not_found(res, id, vid)
+    version_fields(res, "", id, row.version_id, row.seconds)
+    send_resource(res, content.as_slice())
+}
+
+; PUT /fire/Patient/{id}
+procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let page Page.allocate_page()
+    patient_put_on(page, req, res)
+    page.deallocate_extensions()
+    Page.release_page(page)
+}
+
+; Letters, digits, '-' and '.', at most 64 of them.
+function valid_id(id: Slice[u8]) returns bool
+{
+    if id.length > 64
+        return false
+    var i: size_t 0
+    while i < id.length
+    {
+        let c id[i]
+        if (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c = 45 or c = 46
+            i := i + 1
+        else
+            return false
+    }
+    true
+}
+
+procedure patient_put_on(page: ref[Page], req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let id req.param("id")
+    if valid_id(id) = false
+        return send_error(res, "invalid", "Invalid resource ID format", 400)
+    let parsed JsonValue.parse(req.body)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "invalid", "Invalid JSON", 400)
+    let root parsed.value
+    if root.get("resourceType").text().equals("Patient") = false
+        return type_mismatch(res, root.get("resourceType").text())
+    let body_id root.get("id")
+    if body_id.is_text() and body_id.text().equals(id) = false
+    {
+        var message Array[u8]()
+        put_bytes(&message, "Resource ID in body (")
+        message.add(body_id.text())
+        put_bytes(&message, ") does not match URL ID (")
+        message.add(id)
+        put_bytes(&message, ")")
+        return send_error(res, "invalid", message.as_slice(), 400)
+    }
+
+    var content Array[u8]()
+    var stored patient_update(page, root, id, version_of(trim(req.header("if-match"))), &content)
+    if stored.status = CONFLICT
+        return send_error(res, "conflict", "Version conflict", 409)
+    if stored.status = NOT_FOUND
+    {
+        ; update as create: a PUT to an id that is not there creates it
+        stored := patient_create(page, root, id, true, &content)
+        if stored.status = STORED
+        {
+            res.set_status(201)
+            version_fields(res, trim(req.header("host")), id, stored.version_id, stored.seconds)
+            return send_stored(req, res, content.as_slice())
+        }
+    }
+    if stored.status <> STORED
+        return send_unavailable(res)
+    version_fields(res, "", id, stored.version_id, stored.seconds)
+    send_stored(req, res, content.as_slice())
+}
+
+; DELETE /fire/Patient/{id}
+procedure patient_remove(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let id req.param("id")
+    let status patient_delete(id)
+    if status = FAILED
+        return send_unavailable(res)
+    if status = NOT_FOUND
+        return not_found(res, id, "")
+    res.set_status(204)
+    res.send("", "")
+}
+
+; POST /fire/Patient/{id}
+procedure patient_post_instance(req: ref[Request], mutable res: ref[Response])
+    send_error(res, "invalid", "POST to instance endpoint is not allowed", 405)

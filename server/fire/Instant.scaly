@@ -1,0 +1,71 @@
+; A point in time, as the server stamps a resource with it: seconds since
+; the epoch and the microseconds within the second, UTC.
+
+; clock_gettime(2) with CLOCK_REALTIME (0): seconds and nanoseconds, two
+; 64-bit words on every LP64 system.
+procedure clock_gettime(clock: i32, mutable ts: pointer[void]) returns i32 extern
+
+define Instant (seconds: i64, micros: i64)
+
+procedure instant_now() returns Instant
+{
+    var ts i64[2]
+    ts[0] := 0
+    ts[1] := 0
+    clock_gettime(0, &ts[0] as pointer[void])
+    Instant(ts[0], ts[1] / 1000)
+}
+
+; v in `width` decimal digits.
+procedure put_digits(mutable out: ref[Array[u8]], v: i64, width: int)
+{
+    var divisor: i64 1
+    var w 1
+    while w < width
+    {
+        divisor := divisor * 10
+        w := w + 1
+    }
+    while divisor > 0
+    {
+        out.add((((v / divisor) % 10) + 48) as u8)
+        divisor := divisor / 10
+    }
+}
+
+; The date and the time of day, with `between` between them.
+procedure put_date_time(mutable out: ref[Array[u8]], t: Instant, between: u8)
+{
+    let days t.seconds / 86400
+    let sod t.seconds - days * 86400
+    let ymd civil_from_days(days)
+    put_digits(out, ymd / 10000, 4)
+    out.add(45 as u8)
+    put_digits(out, (ymd / 100) % 100, 2)
+    out.add(45 as u8)
+    put_digits(out, ymd % 100, 2)
+    out.add(between)
+    put_digits(out, sod / 3600, 2)
+    out.add(58 as u8)
+    put_digits(out, (sod / 60) % 60, 2)
+    out.add(58 as u8)
+    put_digits(out, sod % 60, 2)
+    out.add(46 as u8)
+}
+
+; meta.lastUpdated as upstream writes it: 2026-10-10T16:39:09.420+00:00
+; (milliseconds, cut off).
+procedure put_last_updated(mutable out: ref[Array[u8]], t: Instant)
+{
+    put_date_time(out, t, 84)
+    put_digits(out, t.micros / 1000, 3)
+    put_bytes(out, "+00:00")
+}
+
+; The same instant as a TIMESTAMPTZ parameter: 2026-10-10 16:39:09.420807+00
+procedure put_timestamp(mutable out: ref[Array[u8]], t: Instant)
+{
+    put_date_time(out, t, 32)
+    put_digits(out, t.micros, 6)
+    put_bytes(out, "+00")
+}

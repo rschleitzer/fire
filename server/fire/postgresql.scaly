@@ -1,0 +1,8 @@
+; The PostgreSQL side of the database layer.
+
+define postgresql
+{
+    module Schema
+    module DatabaseProvider
+    module PatientRepository
+}

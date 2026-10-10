@@ -1,0 +1,11 @@
+{
+  "resourceType": "Patient",
+  "meta": {"profile": ["http://example.org/p"], "versionId": "77"},
+  "text": {"status": "generated", "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Müller & Söhne's 1+1 `x` / \\ é 😀 😀 tab\there\u0001\u007f</div>"},
+  "active": false,
+  "name": [{"family": "Müller", "given": ["Jörg", "René"]}],
+  "gender": "female",
+  "birthDate": "1971-03-04",
+  "multipleBirthInteger": 2,
+  "extension": [{"url": "http://example.org/dec", "valueDecimal": 1.50}, {"url": "http://example.org/e", "valueDecimal": 1E+2}]
+}

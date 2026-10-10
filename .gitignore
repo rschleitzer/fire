@@ -1,3 +1,8 @@
 .DS_Store
 bin/
 obj/
+# the Scaly server's build output
+/server/build/
+
+# upstream's schema as a Scaly source, written by tools/schema.sh
+/server/fire/*/Schema.scaly

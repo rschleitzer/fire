@@ -1,0 +1,35 @@
+; What a handler answers with: a resource's bytes, or an OperationOutcome.
+
+use http.Response.Response
+
+; content as the body, with the fields every FHIR answer of upstream has.
+procedure send_resource(mutable res: ref[Response], content: Slice[u8])
+{
+    res.header("Vary", "Accept")
+    res.send("application/fhir+json", content)
+}
+
+; An OperationOutcome with one issue.
+procedure write_outcome(mutable out: ref[Array[u8]], severity: Slice[u8], code: Slice[u8], diagnostics: Slice[u8])
+{
+    put_bytes(out, "{\"resourceType\":\"OperationOutcome\",\"issue\":[{\"severity\":")
+    write_json_string(out, severity)
+    put_bytes(out, ",\"code\":")
+    write_json_string(out, code)
+    put_bytes(out, ",\"diagnostics\":")
+    write_json_string(out, diagnostics)
+    put_bytes(out, "}]}")
+}
+
+; The answer to a request that failed; nothing of the response may be out.
+procedure send_error(mutable res: ref[Response], code: Slice[u8], diagnostics: Slice[u8], status: int)
+{
+    var out Array[u8]()
+    write_outcome(&out, "error", code, diagnostics)
+    res.set_status(status)
+    send_resource(res, out.as_slice())
+}
+
+; The data store did not answer (upstream's 503).
+procedure send_unavailable(mutable res: ref[Response])
+    send_error(res, "transient", "The data store is currently unavailable. Please retry later.", 503)

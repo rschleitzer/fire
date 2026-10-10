@@ -1,0 +1,74 @@
+; fire -- a FHIR R5 server, the drop-in replacement of the generated C#
+; server under upstream/: the same URLs, the same settings, the same
+; database.
+;
+;   scaly build fire.scaly -o build/fire
+;
+; The settings come from the environment under the names upstream's
+; configuration has (see fire/Config.scaly). The database layer is cut as
+; upstream cuts it: one provider per database (fire/postgresql), behind
+; fire/Database.scaly.
+
+package scaly 0.1.0
+package http 0.1.0
+package json 0.1.0
+package pg 0.2.0
+
+use http.Router.Router
+
+define fire
+{
+    module Config
+    module Json
+    module Instant
+    module Uuid
+    module FhirResult
+    module Resource
+    module postgresql
+    module Database
+    module Metadata
+    module Patient
+}
+
+; What print wrote leaves the process now: the server ends by a signal, and
+; nothing flushes standard output then.
+procedure fflush(stream: pointer[void]) returns i32 extern
+
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
+{
+    let page Page.allocate_page()
+    let database_type setting_or("DatabaseType", "PostgreSql")
+    let connection_string setting_or("ConnectionString", "Host=localhost;Database=Fire;Username=postgres")
+    let port port_of(setting("Kestrel__Endpoints__MyHttpEndpoint__Url"), 5080)
+
+    if supported_database(database_type) = false
+    {
+        print "Unsupported database type: `String(database_type.data as pointer[const_char], database_type.length)`"
+        return 2
+    }
+    let db make_provider(page, database_type, connection_string)
+    if initialize(db) = false
+        return 3
+
+    var app Router.create(page)
+    app.get("/fire/metadata", &metadata)
+    app.post("/fire/Patient", &patient_post)
+    app.get("/fire/Patient/{id}", &patient_read)
+    app.get("/fire/Patient/{id}/_history/{vid}", &patient_vread)
+    app.put("/fire/Patient/{id}", &patient_put)
+    app.delete("/fire/Patient/{id}", &patient_remove)
+    app.post("/fire/Patient/{id}", &patient_post_instance)
+
+    var l TcpListener.listen(port)
+    if l.is_open() = false
+    {
+        print "Cannot listen on port `port`"
+        return 4
+    }
+    print "Now listening on: http://localhost:`port`"
+    fflush(null)
+    let server start(app, l)
+    server.wait()
+    l.close()
+    0
+}

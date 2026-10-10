@@ -1,0 +1,207 @@
+; The PostgreSQL provider: where the server is, and how a connection to it
+; is opened and asked.
+
+use pg.Conn.PgConn
+
+define PostgreSqlProvider
+(
+    host: String
+    port: int
+    user: String
+    password: String
+    database: String
+)
+{
+    ; From a connection string of the form upstream takes (Npgsql's):
+    ; Host=localhost;Port=5432;Database=Fire;Username=postgres;Password=...
+    ; The keywords are read without regard to case; the port defaults to
+    ; 5432, a part that is missing reads empty.
+    procedure parse(page: ref[Page], text: Slice[u8]) returns PostgreSqlProvider
+    {
+        var host text.slice_to(0)
+        var user text.slice_to(0)
+        var password text.slice_to(0)
+        var database text.slice_to(0)
+        var port 5432
+        var at: size_t 0
+        while at < text.length
+        {
+            var end at
+            while end < text.length and text[end] <> 59
+                end := end + 1
+            let part text.subslice(at, end)
+            var eq: size_t 0
+            while eq < part.length and part[eq] <> 61
+                eq := eq + 1
+            if eq < part.length
+            {
+                let key trimmed(part.slice_to(eq))
+                let value trimmed(part.slice_from(eq + 1))
+                if keyword_is(key, "host") or keyword_is(key, "server")
+                    host := value
+                if keyword_is(key, "port")
+                    port := digits_of(value)
+                if keyword_is(key, "database")
+                    database := value
+                if keyword_is(key, "username") or keyword_is(key, "user id")
+                    user := value
+                if keyword_is(key, "password")
+                    password := value
+            }
+            at := end + 1
+        }
+        PostgreSqlProvider(
+            String^page(host.data as pointer[const_char], host.length),
+            port,
+            String^page(user.data as pointer[const_char], user.length),
+            String^page(password.data as pointer[const_char], password.length),
+            String^page(database.data as pointer[const_char], database.length)
+        )
+    }
+
+    ; A connection of its own; the caller closes it. Null when the server
+    ; cannot be reached or refuses. (`mutable this`: a connection counts as
+    ; reaching the strings it was opened with, and its user writes it.)
+    procedure open_connection(mutable this) returns ref[PgConn]?
+    {
+        var h String(host)
+        PgConn.connect(h, port, user.as_slice(), password.as_slice(), database.as_slice())
+    }
+
+    ; The work at the server's start, as upstream's Database does it: the
+    ; database answers, and it has the schema -- created with upstream's
+    ; own text when the database is empty -- at a version this software
+    ; knows. Then every thread's pool is told where the server is. False
+    ; when any of it fails.
+    procedure initialize(mutable this, software_version: Slice[u8]) returns bool
+    {
+        let got this.open_connection()
+        if got = null
+        {
+            print "Cannot connect to PostgreSQL at `host`:`port`, database `database`"
+            return false
+        }
+        var c got as ref[PgConn]
+        let ok prepare_schema(c, software_version)
+        if ok = false
+        {
+            let m c.error_message()
+            print "PostgreSQL refused: `String(m.data as pointer[const_char], m.length)`"
+        }
+        c.close()
+        if ok
+            configure(host.as_slice(), port, user.as_slice(), password.as_slice(), database.as_slice())
+        ok
+    }
+}
+
+; The schema at software_version on connection c, created when the database
+; has none (upstream's Database.GetDatabaseVersion without the migration of
+; a legacy database).
+procedure prepare_schema(mutable c: ref[PgConn], software_version: Slice[u8]) returns bool
+{
+    if c.execute("SELECT value FROM \"fire_meta\".dbinfo WHERE name = 'version'") and c.next_row()
+    {
+        let version c.column(0)
+        if version_newer(version, software_version)
+        {
+            print "Database version `String(version.data as pointer[const_char], version.length)` is newer than software version `String(software_version.data as pointer[const_char], software_version.length)`"
+            return false
+        }
+        return true
+    }
+    if c.execute("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'fire_meta'") = false or c.next_row() = false
+        return false
+    let has_meta c.column_int(0) > 0
+    var version: Slice[u8] "0.0.0"
+    if has_meta = false
+    {
+        print "Creating database schema..."
+        if c.execute(postgresql_initial_schema()) = false
+            return false
+        version := software_version
+    }
+    if c.execute("CREATE SCHEMA IF NOT EXISTS \"fire_meta\"; CREATE TABLE IF NOT EXISTS \"fire_meta\".dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
+        return false
+    if c.prepare("fire_insert_version", "INSERT INTO \"fire_meta\".dbinfo (name, value) VALUES ('version', $1)") = false
+        return false
+    c.start("fire_insert_version")
+    c.param_text(version)
+    if c.run() = false
+        return false
+    print "Database initialized at version `String(version.data as pointer[const_char], version.length)`."
+    true
+}
+
+; Is version a.b.c newer than other?
+function version_newer(version: Slice[u8], other: Slice[u8]) returns bool
+{
+    var a version
+    var b other
+    var part 0
+    while part < 3
+    {
+        let x digits_of(a)
+        let y digits_of(b)
+        if x <> y
+            return x > y
+        a := after_dot(a)
+        b := after_dot(b)
+        part := part + 1
+    }
+    false
+}
+
+; What follows the first dot of s; empty when it has none.
+function after_dot(s: Slice[u8]) returns Slice[u8]
+{
+    var i: size_t 0
+    while i < s.length and s[i] <> 46
+        i := i + 1
+    if i < s.length
+        return s.slice_from(i + 1)
+    s.slice_to(0)
+}
+
+; s without the blanks around it.
+function trimmed(s: Slice[u8]) returns Slice[u8]
+{
+    var from: size_t 0
+    var to s.length
+    while from < to and s[from] = 32
+        from := from + 1
+    while to > from and s[to - 1] = 32
+        to := to - 1
+    s.subslice(from, to)
+}
+
+; Is key the keyword `lower` (given in lower case), whatever its case?
+function keyword_is(key: Slice[u8], lower: Slice[u8]) returns bool
+{
+    if key.length <> lower.length
+        return false
+    var i: size_t 0
+    while i < key.length
+    {
+        var c key[i]
+        if c >= 65 and c <= 90
+            c := c + 32
+        if c <> lower[i]
+            return false
+        i := i + 1
+    }
+    true
+}
+
+; The decimal number s begins with, 0 when it begins with none.
+function digits_of(s: Slice[u8]) returns int
+{
+    var n 0
+    var i: size_t 0
+    while i < s.length and s[i] >= 48 and s[i] <= 57
+    {
+        n := n * 10 + ((s[i] as int) - 48)
+        i := i + 1
+    }
+    n
+}

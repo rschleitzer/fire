@@ -1,0 +1,30 @@
+; The database layer's neutral side: the provider, one case per database,
+; and what the server does with it at its start.
+
+use fire.postgresql.DatabaseProvider.PostgreSqlProvider
+
+; The version of the schema this software is written for (upstream's
+; Database.SoftwareVersion).
+define SOFTWARE_VERSION: Slice[u8] "5.0.0"
+
+define DatabaseProvider union
+(
+    PostgreSql: PostgreSqlProvider
+)
+
+; Does a provider exist for this DatabaseType?
+function supported_database(database_type: Slice[u8]) returns bool
+    database_type.equals("PostgreSql")
+
+; The provider of a supported DatabaseType, its strings on page.
+procedure make_provider(page: ref[Page], database_type: Slice[u8], connection_string: Slice[u8]) returns DatabaseProvider
+    DatabaseProvider.PostgreSql(PostgreSqlProvider.parse(page, connection_string))
+
+; The work at the server's start: the database answers and has the schema.
+; False when it does not.
+procedure initialize(db: DatabaseProvider) returns bool
+{
+    choose db
+        when p: PostgreSql
+            return p.initialize(SOFTWARE_VERSION)
+}

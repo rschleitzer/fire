@@ -1,0 +1,33 @@
+; GET /fire/metadata: the CapabilityStatement.
+
+use http.Request.Request
+use http.Response.Response
+use json.Writer.JsonWriter
+
+procedure metadata(req: ref[Request], mutable res: ref[Response])
+{
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("CapabilityStatement")
+    w.key("status")
+    w.text("active")
+    w.key("kind")
+    w.text("instance")
+    w.key("fhirVersion")
+    w.text("5.0.0")
+    w.key("format")
+    w.begin_array()
+    w.text("json")
+    w.end_array()
+    w.key("rest")
+    w.begin_array()
+    w.begin_object()
+    w.key("mode")
+    w.text("server")
+    w.end_object()
+    w.end_array()
+    w.end_object()
+    res.header("Vary", "Accept")
+    res.send("application/fhir+json", w.bytes())
+}

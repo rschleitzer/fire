@@ -1,0 +1,28 @@
+; A random UUID (version 4) in the 36 characters upstream's Guid has:
+; lower case, with hyphens.
+
+procedure new_uuid(mutable out: Slice[u8]) returns bool
+{
+    var raw u8[16]
+    let bytes Slice[u8](16, &raw[0])
+    if random_bytes(bytes) = false
+        return false
+    raw[6] := (raw[6] & 15) | 64
+    raw[8] := (raw[8] & 63) | 128
+    let digits: Slice[u8] "0123456789abcdef"
+    var at: size_t 0
+    var i: size_t 0
+    while i < 16
+    {
+        if i = 4 or i = 6 or i = 8 or i = 10
+        {
+            out.put(at, 45)
+            at := at + 1
+        }
+        out.put(at, digits[(raw[i] >> 4) as size_t])
+        out.put(at + 1, digits[(raw[i] & 15) as size_t])
+        at := at + 2
+        i := i + 1
+    }
+    true
+}

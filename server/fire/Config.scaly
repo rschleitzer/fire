@@ -1,0 +1,46 @@
+; The settings, read from the environment under the names upstream's
+; configuration has, so that one deployment description serves either
+; server:
+;
+;   DatabaseType                              PostgreSql
+;   ConnectionString                          Host=...;Port=...;Database=...;Username=...;Password=...
+;   Kestrel__Endpoints__MyHttpEndpoint__Url   http://localhost:5080
+
+; The environment variable `name` as bytes, empty when it is not set.
+procedure setting(name: pointer[const_char]) returns Slice[u8]
+{
+    let v getenv(name)
+    if v = null
+        return Slice[u8](0, null)
+    Slice[u8](strlen(v), v as pointer[u8])
+}
+
+; The same, or `fallback` when it is not set or empty.
+procedure setting_or(name: pointer[const_char], fallback: Slice[u8]) returns Slice[u8]
+{
+    let v setting(name)
+    if v.length = 0
+        return fallback
+    v
+}
+
+; The port an endpoint URL names (http://localhost:5080), `fallback` when
+; it names none.
+function port_of(url: Slice[u8], fallback: int) returns int
+{
+    var i url.length
+    while i > 0 and url[i - 1] <> 58
+        i := i - 1
+    if i = 0
+        return fallback
+    var n 0
+    var k i
+    while k < url.length and url[k] >= 48 and url[k] <= 57
+    {
+        n := n * 10 + ((url[k] as int) - 48)
+        k := k + 1
+    }
+    if k = i
+        return fallback
+    n
+}

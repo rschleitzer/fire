@@ -1,0 +1,45 @@
+; What every resource gets before it is stored, as upstream's search
+; extractors give it (InjectMeta, ExtractInlineParams).
+
+use json.Value.JsonValue
+use fire.Instant.Instant
+
+define STORED: int 0
+define NOT_FOUND: int 1
+define CONFLICT: int 2
+define FAILED: int 3
+
+; How a write or a read ended (STORED, NOT_FOUND, CONFLICT -- the version
+; an If-Match named is not the current one --, FAILED: the database did not
+; answer), and the version it wrote or found with the second it is from.
+define PatientResult (status: int, version_id: i64, seconds: i64)
+
+; The resource `root` with its id, meta.versionId and meta.lastUpdated set
+; -- each in its place when the member is there, else as the last --,
+; written to content as it is stored.
+procedure write_resource(page: ref[Page], root: JsonValue, id: Slice[u8], version_id: i64, now: Instant, mutable content: ref[Array[u8]])
+{
+    var version Array[u8]()
+    put_decimal(&version, version_id)
+    var last_updated Array[u8]()
+    put_last_updated(&last_updated, now)
+    var meta root.get("meta")
+    if meta.is_object() = false
+        meta := json_object(page)
+    meta := with_member(page, meta, "versionId", json_text(version.as_slice()))
+    meta := with_member(page, meta, "lastUpdated", json_text(last_updated.as_slice()))
+    var resource with_member(page, root, "id", json_text(id))
+    resource := with_member(page, resource, "meta", meta)
+    write_json(content, resource)
+}
+
+; A boolean member as a column: 1, 0, or -1 when the resource has none.
+function inline_boolean(root: JsonValue, name: Slice[u8]) returns int
+{
+    let v root.get(name)
+    if v.is_bool() = false
+        return 0 - 1
+    if v.as_bool()
+        return 1
+    0
+}
