@@ -1,0 +1,505 @@
+; What upstream does with a resource before it stores it, read off the
+; generated model (fire/Model.scaly): the resource must fit its model
+; class (conforms -- what deserializing into the class refuses), and then
+; the rules of its Validate method hold or are reported, in its order and
+; its words (validate).
+
+use json.Value.JsonValue
+use json.Writer.JsonWriter
+
+; The line of text that starts at `at`.
+function line_from(text: Slice[u8], at: size_t) returns Slice[u8]
+{
+    var end at
+    while end < text.length and text[end] <> 10
+        end := end + 1
+    text.subslice(at, end)
+}
+
+; The k-th line after the one that ends before `at`.
+function line_after(text: Slice[u8], at: size_t, k: size_t) returns Slice[u8]
+{
+    var from at
+    var i: size_t 0
+    while i < k
+    {
+        from := from + line_from(text, from).length + 1
+        i := i + 1
+    }
+    line_from(text, from)
+}
+
+; --- the model class ---------------------------------------------------
+;
+; The resource is read as upstream's deserializer reads it: in the order of
+; the document, each member against what the model class declares, a
+; member the class does not have passed over. The document is written out
+; on the way in the text the deserializer reads (System.Text.Json's own),
+; because its refusal names the byte it stopped at.
+
+; The type a refusal names for a member of that kind.
+procedure put_clr(mutable out: ref[Array[u8]], kind: u8, clr: Slice[u8], in_list: bool)
+{
+    var name: Slice[u8] "System.Object"
+    match kind as int
+        case 116: name := "System.String"
+        case 98: name := "System.Boolean"
+        case 105: name := "System.Int32"
+        case 108: name := "System.Int64"
+        case 100: name := "System.Decimal"
+        case 111: name := clr
+    if in_list or kind = 116 or kind = 111
+        return out.add(name)
+    put_bytes(out, "System.Nullable\`1[")
+    out.add(name)
+    put_bytes(out, "]")
+}
+
+; The refusal: what the value could not be read as, where, and the byte
+; behind its first token in the document written so far.
+procedure refuse(mutable problem: ref[Array[u8]], kind: u8, clr: Slice[u8], list: bool, in_list: bool, value: JsonValue, path: Slice[u8], mutable w: ref[JsonWriter])
+{
+    if value.is_object()
+        w.begin_object()
+    else
+    {
+        if value.is_array()
+            w.begin_array()
+        else
+            w.value_dotnet(value)
+    }
+    put_bytes(problem, "The JSON value could not be converted to ")
+    if list
+    {
+        put_bytes(problem, "System.Collections.Generic.List\`1[")
+        put_clr(problem, kind, clr, true)
+        put_bytes(problem, "]")
+    }
+    else
+        put_clr(problem, kind, clr, in_list)
+    put_bytes(problem, ". Path: $")
+    problem.add(path)
+    put_bytes(problem, " | LineNumber: 0 | BytePositionInLine: ")
+    put_decimal(problem, w.bytes().length as i64)
+    put_bytes(problem, ".")
+}
+
+; Is value what a member of that kind takes? It is written to w.
+procedure conforms_kind(kind: u8, class: Slice[u8], clr: Slice[u8], in_list: bool, value: JsonValue, mutable path: ref[Array[u8]], mutable problem: ref[Array[u8]], mutable w: ref[JsonWriter]) returns bool
+{
+    if value.is_null()
+    {
+        w.null_value()
+        return true
+    }
+    var fits true
+    match kind as int
+        case 116: fits := value.is_text()
+        case 98: fits := value.is_bool()
+        case 105: fits := value.is_number() and value.is_integer() and value.as_i64() <= 2147483647 and value.as_i64() >= 0 - 2147483648
+        case 108: fits := value.is_number() and value.is_integer()
+        case 100: fits := value.is_number()
+        case 111
+        {
+            if clr.equals("-")
+                fits := true
+            else
+            {
+                if value.is_object()
+                    return conforms(class, value, path, problem, w)
+                fits := false
+            }
+        }
+    if fits
+    {
+        w.value_dotnet(value)
+        return true
+    }
+    refuse(problem, kind, clr, false, in_list, value, path.as_slice(), w)
+    false
+}
+
+; What the class of `type` declares for the member `name`: its line in the
+; model, empty when it has none. A resource has its common members too.
+function declared(type: Slice[u8], name: Slice[u8], resource: bool) returns Slice[u8]
+{
+    if resource
+    {
+        if name.equals("resourceType") or name.equals("id") or name.equals("implicitRules") or name.equals("language")
+            return "s - - - - - t - - 0"
+        if name.equals("meta")
+            return "s - - - - - o Meta Fire.Model.Meta 0"
+    }
+    let members model_type(type)
+    var at line_from(members, 0).length + 1
+    while at < members.length
+    {
+        let line line_from(members, at)
+        if line[0] <> 103 and entry(line, 32, 1).equals(name)
+            return line
+        at := at + line.length + 1
+    }
+    members.slice_to(0)
+}
+
+; Does the object `value` fit the model class of `type`? At the first
+; value that does not, `problem` says which.
+procedure conforms(type: Slice[u8], value: JsonValue, mutable path: ref[Array[u8]], mutable problem: ref[Array[u8]], mutable w: ref[JsonWriter]) returns bool
+{
+    let resource path.length = 0
+    w.begin_object()
+    var k: size_t 0
+    while k < value.length()
+    {
+        let name value.key_at(k)
+        let member value.value_at(k)
+        k := k + 1
+        w.key_dotnet(name)
+        let line declared(type, name, resource)
+        if line.length = 0
+        {
+            w.value_dotnet(member)
+            continue
+        }
+        let kind entry(line, 32, 6)[0]
+        let depth path.length
+        path.add(46 as u8)
+        path.add(name)
+        if line[0] = 99 and member.is_null() = false
+        {
+            if member.is_array() = false
+            {
+                refuse(problem, kind, entry(line, 32, 8), true, true, member, path.as_slice(), w)
+                return false
+            }
+            w.begin_array()
+            var i: size_t 0
+            while i < member.length()
+            {
+                let item_depth path.length
+                path.add(91 as u8)
+                put_decimal(path, i as i64)
+                path.add(93 as u8)
+                if conforms_kind(kind, entry(line, 32, 7), entry(line, 32, 8), true, member.item(i), path, problem, w) = false
+                    return false
+                path.length := item_depth
+                i := i + 1
+            }
+            w.end_array()
+        }
+        else
+        {
+            if conforms_kind(kind, entry(line, 32, 7), entry(line, 32, 8), false, member, path, problem, w) = false
+                return false
+        }
+        path.length := depth
+    }
+    w.end_object()
+    true
+}
+
+; --- the Validate method -------------------------------------------------
+
+procedure issue(mutable w: ref[JsonWriter], diagnostics: Slice[u8])
+{
+    w.begin_object()
+    w.key("severity")
+    w.text("error")
+    w.key("code")
+    w.text("structure")
+    w.key("diagnostics")
+    w.text_dotnet(diagnostics)
+    w.end_object()
+}
+
+function is_digit(c: u8) returns bool
+    c >= 48 and c <= 57
+
+; n digits at s[at]?
+function digits_at(s: Slice[u8], at: size_t, n: size_t) returns bool
+{
+    if at + n > s.length
+        return false
+    var i: size_t 0
+    while i < n
+    {
+        if is_digit(s[at + i]) = false
+            return false
+        i := i + 1
+    }
+    true
+}
+
+; hh:mm, then :ss with a fraction or not, then a zone (Z or +hh:mm) --
+; zone 0 none, 1 may, 2 must --, and the end of s.
+function time_at(s: Slice[u8], from: size_t, zone: int) returns bool
+{
+    var at from
+    if digits_at(s, at, 2) = false or at + 2 >= s.length or s[at + 2] <> 58 or digits_at(s, at + 3, 2) = false
+        return false
+    at := at + 5
+    if at < s.length and s[at] = 58
+    {
+        if digits_at(s, at + 1, 2) = false
+            return false
+        at := at + 3
+        if at < s.length and s[at] = 46
+        {
+            if digits_at(s, at + 1, 1) = false
+                return false
+            at := at + 1
+            while at < s.length and is_digit(s[at])
+                at := at + 1
+        }
+    }
+    if at = s.length
+        return zone < 2
+    if zone = 0
+        return false
+    if s[at] = 90
+        return at + 1 = s.length
+    if s[at] <> 43 and s[at] <> 45
+        return false
+    digits_at(s, at + 1, 2) and at + 3 < s.length and s[at + 3] = 58 and digits_at(s, at + 4, 2) and at + 6 = s.length
+}
+
+; yyyy, yyyy-mm or yyyy-mm-dd, and with a day and with_time not 0 a time
+; behind a T (1 may, 2 must, with its zone).
+function date_at(s: Slice[u8], with_time: int) returns bool
+{
+    if digits_at(s, 0, 4) = false
+        return false
+    if s.length = 4
+        return with_time < 2
+    if s[4] <> 45 or digits_at(s, 5, 2) = false
+        return false
+    if s.length = 7
+        return with_time < 2
+    if s[7] <> 45 or digits_at(s, 8, 2) = false
+        return false
+    if s.length = 10
+        return with_time < 2
+    if with_time = 0 or s[10] <> 84
+        return false
+    time_at(s, 11, with_time)
+}
+
+; Does text have the form of the primitive type? (upstream's patterns; a
+; line feed at the very end is not counted, as its `$` does not count it)
+function well_formed(type: Slice[u8], text: Slice[u8]) returns bool
+{
+    var s text
+    if s.length > 0 and s[s.length - 1] = 10
+        s := s.slice_to(s.length - 1)
+    if type.equals("date")
+        return date_at(s, 0)
+    if type.equals("dateTime")
+        return date_at(s, 1)
+    if type.equals("instant")
+        return s.length > 10 and date_at(s, 2)
+    if type.equals("time")
+        return time_at(s, 0, 0)
+    ; id
+    if s.length < 1 or s.length > 64
+        return false
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        if is_digit(c) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c = 45 or c = 46
+            i := i + 1
+        else
+            return false
+    }
+    true
+}
+
+; Is value one of the lines of codes?
+function in_codes(codes: Slice[u8], value: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    while at < codes.length
+    {
+        let line line_from(codes, at)
+        if line.equals(value)
+            return true
+        at := at + line.length + 1
+    }
+    false
+}
+
+function blank(s: Slice[u8]) returns bool
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] <> 32 and (s[i] < 9 or s[i] > 13)
+            return false
+        i := i + 1
+    }
+    true
+}
+
+function string_type(type: Slice[u8]) returns bool
+    type.equals("string") or type.equals("markdown") or type.equals("uri") or type.equals("url") or type.equals("canonical") or type.equals("oid") or type.equals("uuid") or type.equals("base64Binary")
+
+; One value against its type; the issues go to w, their number is the answer.
+procedure validate_value(type: Slice[u8], ref: Slice[u8], value: JsonValue, path: Slice[u8], mutable w: ref[JsonWriter]) returns int
+{
+    if type.equals("element")
+    {
+        if ref.equals("-") or value.is_object() = false
+            return 0
+        return validate(ref, value, w)
+    }
+    var message Array[u8]()
+    if type.equals("id") or type.equals("date") or type.equals("dateTime") or type.equals("instant") or type.equals("time")
+    {
+        if value.is_text() = false or well_formed(type, value.text())
+            return 0
+        put_bytes(&message, "Invalid ")
+        message.add(type)
+        put_bytes(&message, " format at ")
+    }
+    if type.equals("positiveInt")
+    {
+        if value.is_number() = false or value.as_i64() >= 1
+            return 0
+        put_bytes(&message, "Must be positive at ")
+    }
+    if type.equals("unsignedInt")
+    {
+        if value.is_number() = false or value.as_i64() >= 0
+            return 0
+        put_bytes(&message, "Must be non-negative at ")
+    }
+    if type.equals("code")
+    {
+        if ref.equals("-") or value.is_text() = false or in_codes(model_codes(ref), value.text())
+            return 0
+        put_bytes(&message, "Invalid code '")
+        message.add(value.text())
+        put_bytes(&message, "' for ")
+        message.add(path)
+        put_bytes(&message, ".")
+        issue(w, message.as_slice())
+        return 1
+    }
+    if message.length = 0
+        return 0
+    message.add(path)
+    issue(w, message.as_slice())
+    1
+}
+
+; The object `value` against the rules of `type`; the issues go to w as the
+; elements of the array it has open, their number is the answer.
+procedure validate(type: Slice[u8], value: JsonValue, mutable w: ref[JsonWriter]) returns int
+{
+    let members model_type(type)
+    var count 0
+    var at line_from(members, 0).length + 1
+    while at < members.length
+    {
+        let line line_from(members, at)
+        at := at + line.length + 1
+        if line[0] = 103
+        {
+            ; a choice: no two of its members, and each by its own type
+            let n digits_of(entry(line, 32, 1)) as size_t
+            var i: size_t 0
+            while i < n
+            {
+                let one line_after(members, at, i)
+                let chosen value.get(entry(one, 32, 1))
+                if chosen.is_null() = false
+                {
+                    var k: size_t 0
+                    while k < n
+                    {
+                        let other line_after(members, at, k)
+                        if k <> i and value.get(entry(other, 32, 1)).is_null() = false
+                        {
+                            var message Array[u8]()
+                            message.add(entry(other, 32, 2))
+                            put_bytes(&message, " must be null if ")
+                            message.add(entry(one, 32, 2))
+                            put_bytes(&message, " is not null.")
+                            issue(w, message.as_slice())
+                            count := count + 1
+                        }
+                        k := k + 1
+                    }
+                    count := count + validate_value(entry(one, 32, 4), entry(one, 32, 5), chosen, entry(one, 32, 3), w)
+                }
+                i := i + 1
+            }
+            at := at + (line_after(members, at, n).data as size_t) - (line_from(members, at).data as size_t)
+            continue
+        }
+        let member value.get(entry(line, 32, 1))
+        let type_name entry(line, 32, 4)
+        if line[0] = 99
+        {
+            if member.is_array()
+            {
+                var i: size_t 0
+                while i < member.length()
+                {
+                    if member.item(i).is_null() = false
+                        count := count + validate_value(type_name, entry(line, 32, 5), member.item(i), entry(line, 32, 3), w)
+                    i := i + 1
+                }
+            }
+            continue
+        }
+        var present member.is_null() = false
+        if string_type(type_name)
+            present := member.is_text() and blank(member.text()) = false
+        if present
+            count := count + validate_value(type_name, entry(line, 32, 5), member, entry(line, 32, 3), w)
+        else
+        {
+            if entry(line, 32, 9).equals("1")
+            {
+                var message Array[u8]()
+                message.add(entry(line, 32, 2))
+                if string_type(type_name)
+                    put_bytes(&message, " must not be null or whitespace.")
+                else
+                    put_bytes(&message, " must not be null.")
+                issue(w, message.as_slice())
+                count := count + 1
+            }
+        }
+    }
+    count
+}
+
+; Check the resource `root` of `type` as upstream does before it stores
+; one. True when it may be stored; else `outcome` holds the
+; OperationOutcome to answer with (status 400).
+procedure acceptable(type: Slice[u8], root: JsonValue, mutable outcome: ref[Array[u8]]) returns bool
+{
+    var path Array[u8]()
+    var problem Array[u8]()
+    var document JsonWriter()
+    if conforms(type, root, &path, &problem, &document) = false
+    {
+        write_outcome(outcome, "error", "invalid", problem.as_slice())
+        return false
+    }
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("OperationOutcome")
+    w.key("issue")
+    w.begin_array()
+    let issues validate(type, root, &w)
+    w.end_array()
+    w.end_object()
+    if issues = 0
+        return true
+    outcome.add(w.bytes())
+    false
+}

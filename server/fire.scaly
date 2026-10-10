@@ -24,6 +24,8 @@ define fire
     module Uuid
     module FhirResult
     module Resource
+    module Model
+    module Validator
     module postgresql
     module Database
     module Repository

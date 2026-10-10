@@ -1,0 +1,1 @@
+{"resourceType":"Patient","name":[{"use":"bogus","family":"A"},{"use":"official","period":{"start":"x","end":"2020-01-01T00:00:00Z"}}],"telecom":[{"system":"pager","rank":0},{"system":"carrier"}],"contact":[{"gender":"none","organization":{"reference":"Organization/1","identifier":{"use":"new"}}}],"communication":[{"preferred":true}],"identifier":[{"id":"has space","value":"1"}]}

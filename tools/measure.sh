@@ -75,7 +75,7 @@ if ! cmp -s "$PYRTEST/requirements.txt" "$VENV/requirements.txt"; then
 fi
 
 build_scaly() {
-  "$ROOT/tools/schema.sh" || die "no schema"
+  "$ROOT/tools/generate.sh" || die "the generated sources are not made"
   mkdir -p "$ROOT/server/build"
   if [ -n "${FIRE_SCALY_HOME:-}" ]; then
     echo "measure: scaly -- built with the checkout $FIRE_SCALY_HOME, not the installed toolchain"
@@ -229,6 +229,16 @@ others() {
   done
 }
 
+# What must not be stored: every file of tools/turns/refused/, named
+# <Type>.<case>.json, is POSTed and must be answered with 400.
+refusals() {
+  local f name
+  for f in "$ROOT"/tools/turns/refused/*.json; do
+    name=$(basename "$f" .json)
+    call "$1.refused.$name" 400 POST "${name%%.*}" "refused/$name.json"
+  done
+}
+
 # Everything the tables hold of a resource but its id, its times and its
 # bytes (their length instead), in the order it was written.
 other_rows() {
@@ -253,6 +263,7 @@ turns() {
   call s.create 201 POST Patient patient.json;           a=$(id_of s.create)
   call s.update 200 PUT "Patient/$a" patient-update.json
   others create s c
+  refusals s
   stop_server
 
   echo "turns: 2 csharp  -- reads A and its first version, updates A; creates, updates and deletes B"
@@ -264,6 +275,7 @@ turns() {
   call c.update 200 PUT "Patient/$b" patient-update.json
   call c.delete 204 DELETE "Patient/$b"
   others both c s
+  refusals c
   stop_server
 
   echo "turns: 3 scaly   -- reads A and its versions, deletes A; finds B deleted, reads its versions, creates it again"
@@ -287,6 +299,11 @@ turns() {
   call c.recreate 201 PUT "Patient/$a" patient.json
   stop_server
 
+  # what one refuses the other refuses, in the same words
+  local f
+  for f in "$ROOT"/tools/turns/refused/*.json; do
+    same "s.refused.$(basename "$f" .json)" "c.refused.$(basename "$f" .json)"
+  done
   # the same request, the same bytes
   alike s.create c.create
   alike s.update c.update
@@ -316,7 +333,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Observation, Practitioner and Provenance created, updated and read across (24 requests, 12 answers the same bytes, the rows of both servers equal)"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Observation, Practitioner and Provenance created, updated and read across (24 requests, 12 answers the same bytes, the rows of both servers equal); $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
   exit 0
 }
 

@@ -160,6 +160,13 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
     if resource_type.text().equals(type) = false
         return type_mismatch(res, type, resource_type.text())
 
+    var outcome Array[u8]()
+    if acceptable(type, root, &outcome) = false
+    {
+        res.set_status(400)
+        return send_resource(res, outcome.as_slice())
+    }
+
     var id_bytes u8[36]
     var id Slice[u8](36, &id_bytes[0])
     if new_uuid(id) = false
@@ -266,6 +273,13 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
         message.add(id)
         put_bytes(&message, ")")
         return send_error(res, "invalid", message.as_slice(), 400)
+    }
+
+    var outcome Array[u8]()
+    if acceptable(type, root, &outcome) = false
+    {
+        res.set_status(400)
+        return send_resource(res, outcome.as_slice())
     }
 
     var content Array[u8]()

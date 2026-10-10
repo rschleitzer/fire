@@ -2,7 +2,7 @@
 # tools/schema.sh -- the schema the Scaly server creates is upstream's, to the
 # byte: cut the InitialSchema of each provider out of the generated C# and
 # write it as a Scaly function into server/fire/<provider>/Schema.scaly
-# (generated, not in git). tools/measure.sh runs it before it builds.
+# (generated, not in git). tools/generate.sh runs it.
 set -eu
 cd "$(dirname "$0")/.."
 
