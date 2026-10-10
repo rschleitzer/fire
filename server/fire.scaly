@@ -26,6 +26,7 @@ define fire
     module Resource
     module Model
     module Validator
+    module Binary
     module postgresql
     module Database
     module Repository

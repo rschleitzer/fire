@@ -11,15 +11,17 @@ define STORED: int 0
 define NOT_FOUND: int 1
 define CONFLICT: int 2
 define FAILED: int 3
+define UNREADABLE: int 4
 
 ; How a write or a read ended (STORED, NOT_FOUND, CONFLICT -- the version
 ; an If-Match named is not the current one --, FAILED: the database did not
-; answer), and the version it wrote or found with the second it is from.
+; answer, UNREADABLE: the data of a type that keeps it apart is no
+; base64), and the version it wrote or found with the second it is from.
 define StoreResult (status: int, version_id: i64, seconds: i64)
 
 ; The resource types the server stores, separated by blanks.
 function resource_types() returns Slice[u8]
-    "Observation Patient Practitioner Provenance"
+    "Binary Observation Patient Practitioner Provenance"
 
 ; The columns a type keeps beside its content, in the table's order, as
 ; name:kind separated by commas -- b a boolean, t a text, d an instant.

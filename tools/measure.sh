@@ -164,16 +164,19 @@ measure() {
   echo "measure: $1 -- $(tail -1 "$WORK/$1.pytest.log" | sed 's/^=* *//; s/ *=*$//')"
 }
 
+# What a request of the turns accepts: FHIR, as pyrtest's do.
+ACCEPT=application/fhir+json
+
 # One request of the turns to the running server: its body is kept under
 # the label, its status must be the expected one.
 #   call <label> <status> <method> <path> [<fixture>]
 call() {
   local out="$WORK/turns.$1.body" status
   if [ $# -ge 5 ]; then
-    status=$(curl -s -o "$out" -w '%{http_code}' -X "$3" -H 'Content-Type: application/fhir+json' \
+    status=$(curl -s -o "$out" -w '%{http_code}' -X "$3" -H "Accept: $ACCEPT" -H 'Content-Type: application/fhir+json' \
       --data-binary @"$ROOT/tools/turns/$5" "$BASE/fire/$4")
   else
-    status=$(curl -s -o "$out" -w '%{http_code}' -X "$3" "$BASE/fire/$4")
+    status=$(curl -s -o "$out" -w '%{http_code}' -X "$3" -H "Accept: $ACCEPT" "$BASE/fire/$4")
   fi
   [ "$status" = "$2" ] && return
   echo "turns: FAIL -- $1: $3 $4 answered $status, not $2"; TURNS_FAILED=1
@@ -213,7 +216,7 @@ rows_of() {
 # versions and must answer the same bytes; and what the two wrote must be
 # alike, in the answers and in the rows.
 #   others <step> <server: s or c> <the other: c or s>
-OTHERS="Observation:observation Practitioner:practitioner Provenance:provenance"
+OTHERS="Binary:binary Observation:observation Practitioner:practitioner Provenance:provenance"
 others() {
   local t type file me="$2" other="$3"
   for t in $OTHERS; do
@@ -227,6 +230,19 @@ others() {
       call "$me.$type.update" 200 PUT "$type/$(id_of "$me.$type.create")" "$file-update.json"
     fi
   done
+}
+
+# Binary beyond the others: its data with white space in it is stored as
+# its bytes and answered encoded anew; asked without a wish for FHIR, the
+# bytes themselves are the answer, under their own content type.
+#   binary <server: s or c>
+binary() {
+  call "$1.Binary.spaced" 201 POST Binary binary-spaced.json
+  call "$1.Binary.spaced.read" 200 GET "Binary/$(id_of "$1.Binary.spaced")"
+  ACCEPT='*/*' call "$1.Binary.spaced.raw" 200 GET "Binary/$(id_of "$1.Binary.spaced")"
+  ACCEPT='*/*' call "$1.Binary.spaced.format" 200 GET "Binary/$(id_of "$1.Binary.spaced")?_format=json"
+  curl -s -o /dev/null -D "$WORK/turns.$1.Binary.spaced.raw.head" -H 'Accept: */*' "$BASE/fire/Binary/$(id_of "$1.Binary.spaced")"
+  docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "select version_id, encode(data, 'hex') from \"Binary\".resource_data where resource_id = '$(id_of "$1.Binary.spaced")'" > "$WORK/turns.$1.Binary.data"
 }
 
 # What must not be stored: every file of tools/turns/refused/, named
@@ -264,6 +280,7 @@ turns() {
   call s.update 200 PUT "Patient/$a" patient-update.json
   others create s c
   refusals s
+  binary s
   stop_server
 
   echo "turns: 2 csharp  -- reads A and its first version, updates A; creates, updates and deletes B"
@@ -276,6 +293,7 @@ turns() {
   call c.delete 204 DELETE "Patient/$b"
   others both c s
   refusals c
+  binary c
   stop_server
 
   echo "turns: 3 scaly   -- reads A and its versions, deletes A; finds B deleted, reads its versions, creates it again"
@@ -304,6 +322,16 @@ turns() {
   for f in "$ROOT"/tools/turns/refused/*.json; do
     same "s.refused.$(basename "$f" .json)" "c.refused.$(basename "$f" .json)"
   done
+  alike s.Binary.spaced c.Binary.spaced
+  alike s.Binary.spaced.read c.Binary.spaced.read
+  alike s.Binary.spaced.format c.Binary.spaced.format
+  same s.Binary.spaced.raw c.Binary.spaced.raw
+  [ "$(xxd -p "$WORK/turns.s.Binary.spaced.raw.body")" = 68656c6c6f3e3f3f3f20776f726c640001 ] \
+    || { echo "turns: FAIL -- the bytes of the Binary are not the ones its data encodes"; TURNS_FAILED=1; }
+  [ -s "$WORK/turns.s.Binary.data" ] && cmp -s "$WORK/turns.s.Binary.data" "$WORK/turns.c.Binary.data" \
+    || { echo "turns: FAIL -- the stored data of the Binary differs: $(cat "$WORK/turns.s.Binary.data") / $(cat "$WORK/turns.c.Binary.data")"; TURNS_FAILED=1; }
+  [ "$(grep -i '^content-type' "$WORK/turns.s.Binary.spaced.raw.head" | tr -d '\r')" = "$(grep -i '^content-type' "$WORK/turns.c.Binary.spaced.raw.head" | tr -d '\r')" ] \
+    || { echo "turns: FAIL -- the content type of the Binary's bytes differs"; TURNS_FAILED=1; }
   # the same request, the same bytes
   alike s.create c.create
   alike s.update c.update
@@ -333,7 +361,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Observation, Practitioner and Provenance created, updated and read across (24 requests, 12 answers the same bytes, the rows of both servers equal); $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
   exit 0
 }
 

@@ -5,6 +5,7 @@
 
 use pg.Conn.PgConn
 use json.Value.JsonValue
+use json.Writer.JsonWriter
 use fire.Instant.Instant
 use fire.Resource.StoreResult
 
@@ -76,6 +77,85 @@ procedure version_params(mutable c: ref[PgConn], type: Slice[u8], root: JsonValu
     }
 }
 
+; What a type that keeps its data apart stores of root: the bytes its data
+; encodes go to `data`, and the answer is root with "data": null in its
+; place. Root itself where there is nothing to take out. False when the
+; data is no base64.
+procedure take_data(type: Slice[u8], root: JsonValue, mutable data: ref[Array[u8]], mutable apart: ref[bool]) returns bool
+{
+    apart := false
+    if keeps_data_apart(type) = false or root.get("data").is_text() = false
+        return true
+    if base64_decode(root.get("data").text(), data) = false
+        return false
+    apart := true
+    true
+}
+
+; Store the data of version version_id of `id`.
+procedure insert_data(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], version_id: i64, data: Slice[u8]) returns bool
+{
+    var name Array[u8]()
+    statement_name(&name, type, "data_insert")
+    var sql Array[u8]()
+    put_bytes(&sql, "INSERT INTO ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".resource_data (resource_id, version_id, data) VALUES ($1, $2, $3)")
+    if c.prepare(name.as_slice(), sql.as_slice()) = false
+        return false
+    c.start(name.as_slice())
+    c.param_text(id)
+    c.param_int(version_id)
+    c.param_bytes(data)
+    c.run()
+}
+
+; Put the data of version version_id of `id` back into content, encoded
+; anew, when the table has it.
+procedure restore_data(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns bool
+{
+    var name Array[u8]()
+    statement_name(&name, type, "data_select")
+    var sql Array[u8]()
+    put_bytes(&sql, "SELECT data FROM ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".resource_data WHERE resource_id = $1 AND version_id = $2")
+    if c.prepare(name.as_slice(), sql.as_slice()) = false
+        return false
+    c.start(name.as_slice())
+    c.param_text(id)
+    c.param_int(version_id)
+    c.binary_column(0)
+    if c.run() = false
+        return false
+    if c.next_row() = false
+        return true
+    var encoded Array[u8]()
+    base64_encode(c.column(0), &encoded)
+    let parsed JsonValue.parse(content.as_slice())
+    if parsed.ok() = false
+        return false
+    var w JsonWriter()
+    w.value_dotnet(parsed.value.with_member("data", JsonValue.of_text(encoded.as_slice())))
+    content.length := 0
+    content.add(w.bytes())
+    true
+}
+
+; Write the version: what is stored into `stored` -- without its data when
+; the type keeps that apart --, and what is answered into content.
+procedure write_version(type: Slice[u8], root: JsonValue, apart: bool, id: Slice[u8], version_id: i64, now: Instant, mutable stored: ref[Array[u8]], mutable content: ref[Array[u8]])
+{
+    if apart
+    {
+        write_resource(root.with_member("data", JsonValue.Null), id, version_id, now, stored)
+        write_resource(root, id, version_id, now, content)
+        return
+    }
+    write_resource(root, id, version_id, now, stored)
+    content.add(stored.as_slice())
+}
+
 ; End the transaction on c and give c back: COMMIT when ok, else ROLLBACK.
 procedure end_transaction(mutable c: ref[PgConn], ok: bool) returns bool mutable pg_pool
 {
@@ -137,6 +217,11 @@ procedure keep_history(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], o
 ; history holds.
 procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
+    var data Array[u8]()
+    var apart false
+    if take_data(type, root, &data, &apart) = false
+        return StoreResult(UNREADABLE, 0, 0)
+    var stored Array[u8]()
     let got acquire()
     if got = null
         return StoreResult(FAILED, 0, 0)
@@ -164,7 +249,7 @@ procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], aft
     let now instant_now()
     if ok
     {
-        write_resource(root, id, version_id, now, content)
+        write_version(type, root, apart, id, version_id, now, &stored, content)
         var name Array[u8]()
         statement_name(&name, type, "insert")
         var sql Array[u8]()
@@ -187,9 +272,11 @@ procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], aft
         {
             c.start(name.as_slice())
             c.param_text(id)
-            version_params(c, type, root, version_id, now, content.as_slice())
+            version_params(c, type, root, version_id, now, stored.as_slice())
             ok := c.run()
         }
+        if ok and apart
+            ok := insert_data(c, type, id, version_id, data.as_slice())
     }
     if end_transaction(c, ok) = false
         return StoreResult(FAILED, 0, 0)
@@ -200,6 +287,11 @@ procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], aft
 ; expects, 0 for none.
 procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
+    var data Array[u8]()
+    var apart false
+    if take_data(type, root, &data, &apart) = false
+        return StoreResult(UNREADABLE, 0, 0)
+    var stored Array[u8]()
     let got acquire()
     if got = null
         return StoreResult(FAILED, 0, 0)
@@ -223,7 +315,7 @@ procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_
     let now instant_now()
     if ok
     {
-        write_resource(root, id, current + 1, now, content)
+        write_version(type, root, apart, id, current + 1, now, &stored, content)
         var name Array[u8]()
         statement_name(&name, type, "update")
         var sql Array[u8]()
@@ -246,9 +338,11 @@ procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_
         {
             c.start(name.as_slice())
             c.param_text(id)
-            version_params(c, type, root, current + 1, now, content.as_slice())
+            version_params(c, type, root, current + 1, now, stored.as_slice())
             ok := c.run()
         }
+        if ok and apart
+            ok := insert_data(c, type, id, current + 1, data.as_slice())
     }
     if end_transaction(c, ok) = false
         return StoreResult(FAILED, 0, 0)
@@ -367,6 +461,8 @@ procedure postgresql_select(type: Slice[u8], id: Slice[u8], version_id: i64, mut
         if result.status = NOT_FOUND
             result := select_row(c, type, "history", true, id, version_id, content)
     }
+    if result.status = STORED and keeps_data_apart(type) and restore_data(c, type, id, result.version_id, content) = false
+        result := StoreResult(FAILED, 0, 0)
     release(c)
     result
 }
