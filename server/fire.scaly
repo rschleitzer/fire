@@ -33,6 +33,7 @@ define fire
     module Database
     module Repository
     module Chains
+    module Composite
     module Metadata
     module Handlers
 }

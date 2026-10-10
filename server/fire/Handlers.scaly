@@ -408,7 +408,38 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
     var found Array[u8]()
     var rows Array[i64]()
     var problem Array[u8]()
-    let result resource_search(type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
+    var result StoreResult(FAILED, 0, 0)
+    if has_composites(text, cells)
+    {
+        ; the code parts are searched for, the answer is filtered here and
+        ; the page taken from what is left
+        var code_text Array[u8]()
+        var code_cells Array[i64]()
+        composite_pairs(text, cells, plain_text.as_slice(), plain_cells.as_slice(), &code_text, &code_cells)
+        var all Array[u8]()
+        var all_rows Array[i64]()
+        result := resource_search(type, code_text.as_slice(), code_cells.as_slice(), 10000, 0, &all, &all_rows, &problem)
+        var matching: i64 0
+        var r: size_t 0
+        while result.status = STORED and r * 4 < all_rows.length
+        {
+            let content all.as_slice().subslice(all_rows[r * 4 + 2] as size_t, (all_rows[r * 4 + 2] + all_rows[r * 4 + 3]) as size_t)
+            if matches_composites(content, text, cells)
+            {
+                if matching >= offset and matching < offset + count
+                {
+                    cell(&found, &rows, all.as_slice().subslice(all_rows[r * 4] as size_t, (all_rows[r * 4] + all_rows[r * 4 + 1]) as size_t))
+                    cell(&found, &rows, content)
+                }
+                matching := matching + 1
+            }
+            r := r + 1
+        }
+        if result.status = STORED
+            result := StoreResult(STORED, matching, 0)
+    }
+    else
+        result := resource_search(type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
     if result.status = REFUSED
         return send_error(res, "invalid", problem.as_slice(), 400)
     if result.status = BROKEN

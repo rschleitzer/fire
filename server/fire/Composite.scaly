@@ -1,0 +1,286 @@
+; The composite parameters, as upstream's CompositeSearchHelper answers
+; them: the code part is searched for like a parameter of its own, and what
+; comes back is filtered here by code and value together.
+
+use json.Value.JsonValue
+
+function composite(key: Slice[u8]) returns bool
+    key.equals("code-value-quantity") or key.equals("code-value-concept") or key.equals("component-code-value-quantity") or key.equals("component-code-value-concept")
+
+; Where the `$` between the parts of a composite value stands; the value's
+; length when it has none.
+function dollar(value: Slice[u8]) returns size_t
+{
+    var i: size_t 0
+    while i < value.length and value[i] <> 36
+        i := i + 1
+    i
+}
+
+; Does one coding of the concept have the token (system|code, |code, code)?
+function matches_token(concept: JsonValue, token: Slice[u8]) returns bool
+{
+    let codings concept.get("coding")
+    if codings.is_array() = false
+        return false
+    var bar: size_t 0
+    while bar < token.length and token[bar] <> 124
+        bar := bar + 1
+    var i: size_t 0
+    while i < codings.length()
+    {
+        let coding codings.item(i)
+        i := i + 1
+        if bar < token.length
+        {
+            let system_fits bar = 0 or (coding.get("system").is_text() and coding.get("system").text().equals(token.slice_to(bar)))
+            if system_fits and coding.get("code").is_text() and coding.get("code").text().equals(token.slice_from(bar + 1))
+                return true
+        }
+        else
+        {
+            if coding.get("code").is_text() and coding.get("code").text().equals(token)
+                return true
+        }
+    }
+    false
+}
+
+; A decimal number as its sign, its digits before the point without
+; leading zeros, and its digits after it without trailing ones; false for
+; text that is no such number (an exponent is none here).
+function plain_decimal(s: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    if at < s.length and (s[at] = 45 or s[at] = 43)
+        at := at + 1
+    var digits 0
+    var points 0
+    while at < s.length
+    {
+        if s[at] = 46
+            points := points + 1
+        else
+        {
+            if s[at] < 48 or s[at] > 57
+                return false
+            digits := digits + 1
+        }
+        at := at + 1
+    }
+    digits > 0 and points <= 1
+}
+
+; The digit of a plain decimal at the power of ten `power` (0 the ones,
+; -1 the tenths).
+function digit_at(s: Slice[u8], power: i64) returns int
+{
+    var from: size_t 0
+    if s.length > 0 and (s[0] = 45 or s[0] = 43)
+        from := 1
+    var point from
+    while point < s.length and s[point] <> 46
+        point := point + 1
+    var at (point as i64) - 1 - power
+    if power < 0
+        at := (point as i64) - power
+    if at < (from as i64) or at >= (s.length as i64)
+        return 0
+    (s[at as size_t] as int) - 48
+}
+
+; -1, 0 or 1 as the plain decimal a is less than, equal to or greater than b.
+function compare_decimals(a: Slice[u8], b: Slice[u8]) returns int
+{
+    var result 0
+    var power: i64 40
+    while power >= 0 - 40 and result = 0
+    {
+        let x digit_at(a, power)
+        let y digit_at(b, power)
+        if x <> y
+        {
+            if x > y
+                result := 1
+            else
+                result := 0 - 1
+        }
+        power := power - 1
+    }
+    let a_negative a.length > 0 and a[0] = 45
+    let b_negative b.length > 0 and b[0] = 45
+    ; the magnitudes are compared; the signs decide the rest
+    var a_zero true
+    var b_zero true
+    var i: size_t 0
+    while i < a.length
+    {
+        if a[i] >= 49 and a[i] <= 57
+            a_zero := false
+        i := i + 1
+    }
+    i := 0
+    while i < b.length
+    {
+        if b[i] >= 49 and b[i] <= 57
+            b_zero := false
+        i := i + 1
+    }
+    let a_sign_negative a_negative and a_zero = false
+    let b_sign_negative b_negative and b_zero = false
+    if a_sign_negative and b_sign_negative
+        return 0 - result
+    if a_sign_negative
+        return 0 - 1
+    if b_sign_negative
+        return 1
+    result
+}
+
+; Does the quantity have a value the comparison holds for (gt5.4, 5.4)?
+function matches_quantity(quantity: JsonValue, wanted: Slice[u8]) returns bool
+{
+    let value quantity.get("value")
+    if value.is_number() = false or plain_decimal(value.number_text()) = false
+        return false
+    var prefix: Slice[u8] "eq"
+    var number wanted
+    if wanted.length > 2 and is_letter(wanted[0]) and is_letter(wanted[1])
+    {
+        prefix := wanted.slice_to(2)
+        number := wanted.slice_from(2)
+    }
+    if plain_decimal(number) = false
+        return false
+    let order compare_decimals(value.number_text(), number)
+    if prefix.equals("eq")
+        return order = 0
+    if prefix.equals("ne")
+        return order <> 0
+    if prefix.equals("gt")
+        return order > 0
+    if prefix.equals("lt")
+        return order < 0
+    if prefix.equals("ge")
+        return order >= 0
+    if prefix.equals("le")
+        return order <= 0
+    false
+}
+
+; Does the resource match the composite parameter key with that value?
+function matches_composite(resource: JsonValue, key: Slice[u8], value: Slice[u8]) returns bool
+{
+    let at dollar(value)
+    if at = value.length
+        return true
+    let code value.slice_to(at)
+    let wanted value.slice_from(at + 1)
+    if key.equals("code-value-quantity")
+        return matches_token(resource.get("code"), code) and matches_quantity(resource.get("valueQuantity"), wanted)
+    if key.equals("code-value-concept")
+        return matches_token(resource.get("code"), code) and matches_token(resource.get("valueCodeableConcept"), wanted)
+    let components resource.get("component")
+    var i: size_t 0
+    while i < components.length()
+    {
+        let component components.item(i)
+        i := i + 1
+        if matches_token(component.get("code"), code) = false
+            continue
+        if key.equals("component-code-value-quantity") and matches_quantity(component.get("valueQuantity"), wanted)
+            return true
+        if key.equals("component-code-value-concept") and matches_token(component.get("valueCodeableConcept"), wanted)
+            return true
+    }
+    false
+}
+
+; Are there composite parameters among the pairs?
+function has_composites(text: Slice[u8], cells: Slice[i64]) returns bool
+{
+    var i: size_t 0
+    while i < pair_count(cells)
+    {
+        if composite(pair_key(text, cells, i))
+            return true
+        i := i + 1
+    }
+    false
+}
+
+; The parameter a composite's code part is searched by.
+function code_parameter(key: Slice[u8]) returns Slice[u8]
+{
+    if key.length > 10 and key.slice_to(10).equals("component-")
+        return "component-code"
+    "code"
+}
+
+; The pairs to search by in place of the composites: `plain` (the request's
+; pairs after its chains) without them, and the code part of each composite
+; of the request (asked) as a parameter of its own -- the last of a name
+; standing for all of that name, as upstream's dictionary has it.
+procedure composite_pairs(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]])
+{
+    var code: Slice[u8] ""
+    var component_code: Slice[u8] ""
+    var has_code false
+    var has_component_code false
+    var i: size_t 0
+    while i < pair_count(asked_cells)
+    {
+        let key pair_key(asked_text, asked_cells, i)
+        let value pair_value(asked_text, asked_cells, i)
+        i := i + 1
+        if composite(key) = false or dollar(value) = value.length
+            continue
+        if code_parameter(key).equals("code")
+        {
+            code := value.slice_to(dollar(value))
+            has_code := true
+        }
+        else
+        {
+            component_code := value.slice_to(dollar(value))
+            has_component_code := true
+        }
+    }
+    i := 0
+    while i < pair_count(cells)
+    {
+        let key pair_key(text, cells, i)
+        i := i + 1
+        if composite(key) or (has_code and key.equals("code")) or (has_component_code and key.equals("component-code"))
+            continue
+        cell(out_text, out_cells, key)
+        cell(out_text, out_cells, pair_value(text, cells, i - 1))
+    }
+    if has_code
+    {
+        cell(out_text, out_cells, "code")
+        cell(out_text, out_cells, code)
+    }
+    if has_component_code
+    {
+        cell(out_text, out_cells, "component-code")
+        cell(out_text, out_cells, component_code)
+    }
+}
+
+; Does the resource in content match every composite of the request?
+procedure matches_composites(content: Slice[u8], asked_text: Slice[u8], asked_cells: Slice[i64]) returns bool
+{
+    let parsed JsonValue.parse(content)
+    if parsed.ok() = false
+        return false
+    var i: size_t 0
+    while i < pair_count(asked_cells)
+    {
+        let key pair_key(asked_text, asked_cells, i)
+        if composite(key) and matches_composite(parsed.value, key, pair_value(asked_text, asked_cells, i)) = false
+            return false
+        i := i + 1
+    }
+    true
+}
