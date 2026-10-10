@@ -1,0 +1,203 @@
+<!ELEMENT fhir (upgrades?, resources, elements, codesets)>
+<!ELEMENT upgrades (upgrade+)>
+<!ELEMENT upgrade  ((newsearch|dropsearch|newresource|dropresource|recreatestorage|addhistory|applybundle|datamigration)*)>
+<!ATTLIST upgrade
+  to CDATA #REQUIRED
+>
+<!ELEMENT applybundle EMPTY>
+<!ATTLIST applybundle
+  file CDATA #REQUIRED
+>
+<!-- Data-only upgrade: run a hand-written migration class that rewrites existing data.
+     run selects the path the class is called from:
+       both     (default) versioned upgrade step and one-time V1 data migration
+       upgrade  only the versioned upgrade step
+       v1       only the V1 data migration (fixups that are meaningless for a database
+                that never was a V1 database)
+     Expected static entry points: RunAsync(IDatabaseProvider, IServiceProvider) for the
+     upgrade step, RunAsync(NpgsqlDataSource, IServiceProvider) for the V1 migration. -->
+<!ELEMENT datamigration EMPTY>
+<!ATTLIST datamigration
+  class CDATA #REQUIRED
+  run   (both|upgrade|v1) "both"
+>
+<!ELEMENT newsearch EMPTY>
+<!ATTLIST newsearch
+  ref IDREF #REQUIRED
+>
+<!-- The search element is gone from the model when it is dropped, so the action carries the
+     resource and search name itself instead of an IDREF (see upgrade-dropsearch-sql). -->
+<!ELEMENT dropsearch EMPTY>
+<!ATTLIST dropsearch
+  resource CDATA #REQUIRED
+  name     CDATA #REQUIRED
+>
+<!ELEMENT newresource EMPTY>
+<!ATTLIST newresource
+  ref IDREF #REQUIRED
+>
+<!ELEMENT dropresource EMPTY>
+<!ATTLIST dropresource
+  resource CDATA #REQUIRED
+>
+<!ELEMENT recreatestorage EMPTY>
+<!-- Enable history for a resource that was created with history="false": adds the
+     resource_history table and its indexes. -->
+<!ELEMENT addhistory EMPTY>
+<!ATTLIST addhistory
+  ref IDREF #REQUIRED
+>
+<!ATTLIST fhir
+  name        CDATA     #REQUIRED
+  version     CDATA     #REQUIRED
+  reasoning   (true|false) "false"
+  simplified  (true|false) "false"
+  seed-path   CDATA     #IMPLIED
+>
+
+<!ELEMENT resources (resource+)>
+<!ELEMENT resource (description, properties, elements, codesets, searches, uniques?, operations?, profiles?)>
+<!ATTLIST resource
+  id          ID        #REQUIRED
+  name        CDATA     #REQUIRED
+  active      (true|false|model) "false"
+  history     (true|false) "true"
+  meta        (true|false) "true"
+  idtype      (string|int|identity|composite) "string"
+  idcolumn    CDATA     #IMPLIED
+  iddbtype    CDATA     #IMPLIED
+  idlength    CDATA     #IMPLIED
+  idproperties IDREFS   #IMPLIED
+>
+
+<!ELEMENT description     (#PCDATA)>
+
+<!ELEMENT elements (element*)>
+<!ELEMENT element (description, properties, elements, codesets)>
+<!ATTLIST element
+  id          ID        #REQUIRED
+  name        CDATA     #REQUIRED
+  explicit    CDATA     #IMPLIED
+  backbone    (true|false) "false"
+>
+
+<!ELEMENT properties (property*)>
+<!ELEMENT property (description, (variants|targets?))>
+<!ATTLIST property
+  id            ID        #REQUIRED
+  name          CDATA     #REQUIRED
+  type          (element|code|variant|date|dateTime|string|integer|integer64|oid|canonical|uri|uuid|url|instant|boolean|base64Binary|unsignedInt|markdown|xhtml|id|versionid|time|positiveInt|decimal) "string"
+  ref           IDREF     #IMPLIED
+  iscollection  (true|false) "false"
+  notnull       (true|false) "false"
+  summary       (true|false) "false"
+  modifier      (true|false) "false"
+  length        CDATA     #IMPLIED
+  precision     CDATA     #IMPLIED
+  scale         CDATA     #IMPLIED
+  default       CDATA     #IMPLIED
+  column        CDATA     #IMPLIED
+  dbtype        CDATA     #IMPLIED
+  integrity     (soft|hard) "soft"
+  ondelete      (restrict|cascade|setnull) "restrict"
+>
+
+<!ELEMENT uniques (unique+)>
+<!ELEMENT unique EMPTY>
+<!ATTLIST unique
+  name          CDATA     #IMPLIED
+  properties    IDREFS    #REQUIRED
+>
+
+<!ELEMENT variants (variant+)>
+<!ELEMENT variant (targets?)>
+<!ATTLIST variant
+  type          (element|code|date|dateTime|string|integer|integer64|oid|canonical|uri|uuid|url|instant|boolean|base64Binary|unsignedInt|markdown|xhtml|id|versionid|time|positiveInt|decimal) "string"
+  ref           IDREF     #IMPLIED
+>
+
+<!ELEMENT targets (target*)>
+<!ELEMENT target EMPTY>
+<!ATTLIST target
+  resource      CDATA     #REQUIRED
+>
+
+<!ELEMENT codesets     (codeset*)>
+<!ELEMENT codeset      (description, codes)>
+<!ATTLIST codeset
+  name        CDATA     #REQUIRED
+  id          ID        #REQUIRED
+>
+
+<!ELEMENT codes    (code+)>
+<!ELEMENT code     (description)>
+<!ATTLIST code
+    name        CDATA     #REQUIRED
+    value       CDATA     #REQUIRED
+>
+
+<!ELEMENT searches (search*)>
+<!ELEMENT search (paths)>
+<!ATTLIST search
+  name          CDATA     #REQUIRED
+  query         CDATA     #REQUIRED
+  type          (token|reference|quantity|string|uri|date|number|composite|special) "string"
+  customsort    (true|false) "false"
+  id            ID        #IMPLIED
+>
+
+<!ELEMENT paths (path+)>
+<!ELEMENT path (parts, casts?, targets?, components?)>
+
+<!ELEMENT parts (part*)>
+<!ELEMENT part EMPTY>
+<!ATTLIST part
+  ref           IDREF     #REQUIRED
+  resolve       CDATA     #IMPLIED
+  property      CDATA     #IMPLIED
+  type          CDATA     #IMPLIED
+  first         (true|false) "false"
+  notnull       (true|false) "false"
+  variant       CDATA     #IMPLIED
+  op            CDATA     #IMPLIED
+  value         CDATA     #IMPLIED
+>
+
+<!ELEMENT casts (cast*)>
+<!ELEMENT cast EMPTY>
+<!ATTLIST cast
+  to            CDATA     #REQUIRED
+>
+
+<!ELEMENT components (component+)>
+<!ELEMENT component (casts?)>
+<!ATTLIST component
+  ref           IDREF     #REQUIRED
+>
+
+<!ELEMENT operations (operation*)>
+<!ELEMENT operation  (description, input?, output?)>
+<!ATTLIST operation
+  name          CDATA     #REQUIRED
+  implemented   (true|false) "false"
+>
+
+<!ELEMENT input      (parameter*)>
+<!ELEMENT output     (parameter*)>
+
+<!ELEMENT parameter (description?)>
+<!ATTLIST parameter
+  name          CDATA     #REQUIRED
+  type          (resource|code|variant|date|dateTime|string|integer|integer64|oid|canonical|uri|uuid|url|instant|boolean|base64Binary|unsignedInt|markdown|xhtml|id|versionid|time|positiveInt|decimal) "string"
+  ref           IDREF     #IMPLIED
+  iscollection  (true|false) "false"
+  notnull       (true|false) "false"
+  implemented   (true|false) "false"
+>
+
+<!ELEMENT profiles (profile+)>
+<!ELEMENT profile  EMPTY>
+<!ATTLIST profile
+  name          CDATA     #REQUIRED
+  method        CDATA     #REQUIRED
+>

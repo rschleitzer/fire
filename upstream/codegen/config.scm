@@ -1,0 +1,18 @@
+(define generate-boilerplate #t)
+(define generate-models #t)
+(define generate-repositories #t)
+(define generate-handlers #t)
+(define generate-js #t)
+(define generate-html #t)
+(define generate-datamigration #t)
+(define generate-fhir-model #t)
+(define generate-fhir-validator #t)
+(define generate-fhir-client #t)
+
+(define (project-name) (fhir-name))
+(define (database-name) (fhir-name))
+(define (route-prefix) (downcase-string (fhir-name)))
+(define (model-dir) "model")
+(define (model-ref) ($ "../" (model-dir)))
+
+(define target-databases '(PostgreSql SqlServer Sqlite))
