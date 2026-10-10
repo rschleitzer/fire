@@ -1,0 +1,7 @@
+{
+  "resourceType": "Practitioner",
+  "active": true,
+  "name": [{"family": "Größe", "given": ["Zoë"], "prefix": ["Dr."]}],
+  "gender": "female",
+  "birthDate": "1980-05-06"
+}

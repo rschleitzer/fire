@@ -7,6 +7,15 @@ use fire.postgresql.DatabaseProvider.PostgreSqlProvider
 ; Database.SoftwareVersion).
 define SOFTWARE_VERSION: Slice[u8] "5.0.0"
 
+; Which provider the server runs on, for the threads that serve requests:
+; stored once at the start, before they exist, and only through
+; scaly_atomic_* (an ordinary global would be thread-local).
+define DATABASE_POSTGRESQL: u64 1
+shared atomic database_kind: u64 0
+
+procedure database_in_use() returns u64
+    scaly_atomic_load_u64(&database_kind)
+
 define DatabaseProvider union
 (
     PostgreSql: PostgreSqlProvider
@@ -26,5 +35,8 @@ procedure initialize(db: DatabaseProvider) returns bool
 {
     choose db
         when p: PostgreSql
+        {
+            scaly_atomic_store_u64(&database_kind, DATABASE_POSTGRESQL)
             return p.initialize(SOFTWARE_VERSION)
+        }
 }

@@ -208,6 +208,37 @@ rows_of() {
     order by 1"
 }
 
+# The other types, in three steps over the first three turns: each server
+# creates and updates one resource of the type; the other reads both
+# versions and must answer the same bytes; and what the two wrote must be
+# alike, in the answers and in the rows.
+#   others <step> <server: s or c> <the other: c or s>
+OTHERS="Observation:observation Practitioner:practitioner Provenance:provenance"
+others() {
+  local t type file me="$2" other="$3"
+  for t in $OTHERS; do
+    type=${t%%:*}; file=${t##*:}
+    if [ "$1" != create ]; then
+      call "$me.$type.read" 200 GET "$type/$(id_of "$other.$type.create")";            same "$me.$type.read" "$other.$type.update"
+      call "$me.$type.vread" 200 GET "$type/$(id_of "$other.$type.create")/_history/1"; same "$me.$type.vread" "$other.$type.create"
+    fi
+    if [ "$1" != read ]; then
+      call "$me.$type.create" 201 POST "$type" "$file.json"
+      call "$me.$type.update" 200 PUT "$type/$(id_of "$me.$type.create")" "$file-update.json"
+    fi
+  done
+}
+
+# Everything the tables hold of a resource but its id, its times and its
+# bytes (their length instead), in the order it was written.
+other_rows() {
+  docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "
+    select to_jsonb(h) - 'id' - 'last_updated' - 'content' - 'history_timestamp', length(content)
+      from \"$1\".resource_history h where id = '$2'
+    union all
+    select to_jsonb(r) - 'id' - 'last_updated' - 'content', length(content) from \"$1\" r where id = '$2'"
+}
+
 turns() {
   TURNS_FAILED=
   echo "measure: turns -- build"
@@ -221,6 +252,7 @@ turns() {
   start_server scaly
   call s.create 201 POST Patient patient.json;           a=$(id_of s.create)
   call s.update 200 PUT "Patient/$a" patient-update.json
+  others create s c
   stop_server
 
   echo "turns: 2 csharp  -- reads A and its first version, updates A; creates, updates and deletes B"
@@ -231,6 +263,7 @@ turns() {
   call c.create 201 POST Patient patient.json;           b=$(id_of c.create)
   call c.update 200 PUT "Patient/$b" patient-update.json
   call c.delete 204 DELETE "Patient/$b"
+  others both c s
   stop_server
 
   echo "turns: 3 scaly   -- reads A and its versions, deletes A; finds B deleted, reads its versions, creates it again"
@@ -243,6 +276,7 @@ turns() {
   call s.vread-b1 200 GET "Patient/$b/_history/1";       same s.vread-b1 c.create
   call s.vread-b2 200 GET "Patient/$b/_history/2";       same s.vread-b2 c.update
   call s.recreate 201 PUT "Patient/$b" patient.json
+  others read s c
   stop_server
 
   echo "turns: 4 csharp  -- finds A deleted, reads its last version; reads B as created again; creates A again"
@@ -256,6 +290,17 @@ turns() {
   # the same request, the same bytes
   alike s.create c.create
   alike s.update c.update
+  local t type
+  for t in $OTHERS; do
+    type=${t%%:*}
+    alike "s.$type.create" "c.$type.create"
+    alike "s.$type.update" "c.$type.update"
+    other_rows "$type" "$(id_of "s.$type.create")" > "$WORK/turns.rows.s.$type"
+    other_rows "$type" "$(id_of "c.$type.create")" > "$WORK/turns.rows.c.$type"
+    if [ -s "$WORK/turns.rows.s.$type" ] && cmp -s "$WORK/turns.rows.s.$type" "$WORK/turns.rows.c.$type"; then continue; fi
+    echo "turns: FAIL -- the rows of $type differ between the servers:"
+    diff "$WORK/turns.rows.s.$type" "$WORK/turns.rows.c.$type"; TURNS_FAILED=1
+  done
   rows_of "$a" > "$WORK/turns.rows.a"
   rows_of "$b" > "$WORK/turns.rows.b"
   stop_database
@@ -271,7 +316,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- 20 requests, 9 answers the same bytes across the servers, 2 pairs alike but for id and time, 7 rows as expected"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Observation, Practitioner and Provenance created, updated and read across (24 requests, 12 answers the same bytes, the rows of both servers equal)"
   exit 0
 }
 

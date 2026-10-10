@@ -1,0 +1,40 @@
+; The repository the handlers speak to: each operation goes to the
+; provider the server was started with (Database.database_kind).
+
+use json.Value.JsonValue
+use fire.Resource.StoreResult
+
+procedure resource_create(type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_create(type, root, id, after_delete, content)
+    StoreResult(FAILED, 0, 0)
+}
+
+procedure resource_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_update(type, root, id, if_match, content)
+    StoreResult(FAILED, 0, 0)
+}
+
+procedure resource_delete(type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_delete(type, id)
+    FAILED
+}
+
+procedure resource_is_deleted(type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_is_deleted(type, id)
+    false
+}
+
+procedure resource_select(type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_select(type, id, version_id, content)
+    StoreResult(FAILED, 0, 0)
+}

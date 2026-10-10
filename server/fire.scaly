@@ -26,8 +26,9 @@ define fire
     module Resource
     module postgresql
     module Database
+    module Repository
     module Metadata
-    module Patient
+    module Handlers
 }
 
 procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
@@ -48,12 +49,7 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
 
     var app Router.create(page)
     app.get("/fire/metadata", &metadata)
-    app.post("/fire/Patient", &patient_post)
-    app.get("/fire/Patient/{id}", &patient_read)
-    app.get("/fire/Patient/{id}/_history/{vid}", &patient_vread)
-    app.put("/fire/Patient/{id}", &patient_put)
-    app.delete("/fire/Patient/{id}", &patient_remove)
-    app.post("/fire/Patient/{id}", &patient_post_instance)
+    add_resource_routes(app, page)
 
     var l TcpListener.listen(port)
     if l.is_open() = false

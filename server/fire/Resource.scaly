@@ -1,5 +1,7 @@
-; What every resource gets before it is stored, as upstream's search
-; extractors give it (InjectMeta, ExtractInlineParams).
+; What is common to every stored resource: which types the server has and
+; what columns each keeps beside its content, how a write or a read ends,
+; and the bytes a version is stored as (upstream's InjectMeta and
+; ExtractInlineParams).
 
 use json.Value.JsonValue
 use json.Writer.JsonWriter
@@ -13,7 +15,48 @@ define FAILED: int 3
 ; How a write or a read ended (STORED, NOT_FOUND, CONFLICT -- the version
 ; an If-Match named is not the current one --, FAILED: the database did not
 ; answer), and the version it wrote or found with the second it is from.
-define PatientResult (status: int, version_id: i64, seconds: i64)
+define StoreResult (status: int, version_id: i64, seconds: i64)
+
+; The resource types the server stores, separated by blanks.
+function resource_types() returns Slice[u8]
+    "Observation Patient Practitioner Provenance"
+
+; The columns a type keeps beside its content, in the table's order, as
+; name:kind separated by commas -- b a boolean, t a text, d an instant.
+function inline_columns(type: Slice[u8]) returns Slice[u8]
+{
+    if type.equals("Observation")
+        return "status:t"
+    if type.equals("Patient")
+        return "active:b,gender:t"
+    if type.equals("Practitioner")
+        return "gender:t,active:b"
+    if type.equals("Provenance")
+        return "recorded:d"
+    ""
+}
+
+; The i-th entry of a list separated by `separator`; empty past its end.
+function entry(list: Slice[u8], separator: u8, i: size_t) returns Slice[u8]
+{
+    var at: size_t 0
+    var k: size_t 0
+    while at <= list.length
+    {
+        var end at
+        while end < list.length and list[end] <> separator
+            end := end + 1
+        if k = i
+            return list.subslice(at, end)
+        k := k + 1
+        at := end + 1
+    }
+    list.slice_to(0)
+}
+
+; The name of the column entry name:kind.
+function column_name(column: Slice[u8]) returns Slice[u8]
+    column.slice_to(column.length - 2)
 
 ; The resource `root` with its id, meta.versionId and meta.lastUpdated set
 ; -- each in its place when the member is there, else as the last --,
@@ -34,15 +77,4 @@ procedure write_resource(root: JsonValue, id: Slice[u8], version_id: i64, now: I
     var w JsonWriter()
     w.value_dotnet(resource)
     content.add(w.bytes())
-}
-
-; A boolean member as a column: 1, 0, or -1 when the resource has none.
-function inline_boolean(root: JsonValue, name: Slice[u8]) returns int
-{
-    let v root.get(name)
-    if v.is_bool() = false
-        return 0 - 1
-    if v.as_bool()
-        return 1
-    0
 }

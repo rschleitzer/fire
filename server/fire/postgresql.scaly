@@ -4,5 +4,5 @@ define postgresql
 {
     module Schema
     module DatabaseProvider
-    module PatientRepository
+    module ResourceRepository
 }

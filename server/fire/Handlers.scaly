@@ -1,14 +1,73 @@
-; The Patient handlers, as upstream's PatientHandlers answer: create, read,
-; version read, update, delete.
+; The handlers of a resource type, as upstream's answer for each of its
+; types: create, read, version read, update, delete. The type is the path's
+; segment after /fire/; the routes exist for the types the server stores.
 
 use http.Request.Request
 use http.Response.Response
+use http.Router.Router
 use json.Value.JsonValue
-use fire.Resource.PatientResult
+use fire.Resource.StoreResult
 
-; Location (with a host), ETag and Last-Modified for version `version_id`
-; of Patient `id`.
-procedure version_fields(mutable res: ref[Response], host: Slice[u8], id: Slice[u8], version_id: i64, seconds: i64)
+; The routes of every resource type; the patterns lie on page.
+procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
+{
+    let types resource_types()
+    var i: size_t 0
+    while entry(types, 32, i).length > 0
+    {
+        let type entry(types, 32, i)
+        app.post(pattern(page, type, ""), &resource_post)
+        app.get(pattern(page, type, "/{id}"), &resource_read)
+        app.get(pattern(page, type, "/{id}/_history/{vid}"), &resource_vread)
+        app.put(pattern(page, type, "/{id}"), &resource_put)
+        app.delete(pattern(page, type, "/{id}"), &resource_remove)
+        app.post(pattern(page, type, "/{id}"), &resource_post_instance)
+        i := i + 1
+    }
+}
+
+; /fire/<type><rest>, on page.
+procedure pattern(page: ref[Page], type: Slice[u8], rest: Slice[u8]) returns Slice[u8]
+{
+    let prefix: Slice[u8] "/fire/"
+    var p allocate_slice[u8]^page(page, prefix.length + type.length + rest.length)
+    var at: size_t 0
+    var i: size_t 0
+    while i < prefix.length
+    {
+        p.put(at, prefix[i])
+        at := at + 1
+        i := i + 1
+    }
+    i := 0
+    while i < type.length
+    {
+        p.put(at, type[i])
+        at := at + 1
+        i := i + 1
+    }
+    i := 0
+    while i < rest.length
+    {
+        p.put(at, rest[i])
+        at := at + 1
+        i := i + 1
+    }
+    p
+}
+
+; The resource type a request's path names: /fire/<type>...
+function type_of(req: ref[Request]) returns Slice[u8]
+{
+    let path req.path
+    var end: size_t 6
+    while end < path.length and path[end] <> 47
+        end := end + 1
+    path.subslice(6, end)
+}
+
+; Location (with a host), ETag and Last-Modified for a version.
+procedure version_fields(mutable res: ref[Response], host: Slice[u8], type: Slice[u8], id: Slice[u8], version_id: i64, seconds: i64)
 {
     var version Array[u8]()
     put_decimal(&version, version_id)
@@ -17,7 +76,9 @@ procedure version_fields(mutable res: ref[Response], host: Slice[u8], id: Slice[
         var location Array[u8]()
         put_bytes(&location, "http://")
         location.add(host)
-        put_bytes(&location, "/fire/Patient/")
+        put_bytes(&location, "/fire/")
+        location.add(type)
+        put_bytes(&location, "/")
         location.add(id)
         put_bytes(&location, "/_history/")
         location.add(version.as_slice())
@@ -60,10 +121,11 @@ function version_of(field: Slice[u8]) returns i64
     digits_of(field.slice_from(at))
 }
 
-procedure not_found(mutable res: ref[Response], id: Slice[u8], version: Slice[u8])
+procedure not_found(mutable res: ref[Response], type: Slice[u8], id: Slice[u8], version: Slice[u8])
 {
     var message Array[u8]()
-    put_bytes(&message, "Patient/")
+    message.add(type)
+    put_bytes(&message, "/")
     message.add(id)
     if version.length > 0
     {
@@ -74,17 +136,20 @@ procedure not_found(mutable res: ref[Response], id: Slice[u8], version: Slice[u8
     send_error(res, "not-found", message.as_slice(), 404)
 }
 
-procedure type_mismatch(mutable res: ref[Response], got: Slice[u8])
+procedure type_mismatch(mutable res: ref[Response], type: Slice[u8], got: Slice[u8])
 {
     var message Array[u8]()
-    put_bytes(&message, "Resource type mismatch: expected Patient, got ")
+    put_bytes(&message, "Resource type mismatch: expected ")
+    message.add(type)
+    put_bytes(&message, ", got ")
     message.add(got)
     send_error(res, "invalid", message.as_slice(), 400)
 }
 
-; POST /fire/Patient
-procedure patient_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; POST /fire/<type>
+procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
+    let type type_of(req)
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
         return send_error(res, "invalid", "Invalid JSON", 400)
@@ -92,35 +157,36 @@ procedure patient_post(req: ref[Request], mutable res: ref[Response]) mutable pg
     let resource_type root.get("resourceType")
     if resource_type.is_text() = false
         return send_error(res, "invalid", "Missing required field: resourceType", 400)
-    if resource_type.text().equals("Patient") = false
-        return type_mismatch(res, resource_type.text())
+    if resource_type.text().equals(type) = false
+        return type_mismatch(res, type, resource_type.text())
 
     var id_bytes u8[36]
     var id Slice[u8](36, &id_bytes[0])
     if new_uuid(id) = false
         return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     var content Array[u8]()
-    let stored patient_create(root, id, false, &content)
+    let stored resource_create(type, root, id, false, &content)
     if stored.status <> STORED
         return send_unavailable(res)
     res.set_status(201)
-    version_fields(res, trim(req.header("host")), id, stored.version_id, stored.seconds)
+    version_fields(res, trim(req.header("host")), type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
 }
 
-; GET /fire/Patient/{id}
-procedure patient_read(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; GET /fire/<type>/{id}
+procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
+    let type type_of(req)
     let id req.param("id")
     var content Array[u8]()
-    let row patient_select(id, 0, &content)
+    let row resource_select(type, id, 0, &content)
     if row.status = FAILED
         return send_unavailable(res)
     if row.status = NOT_FOUND
     {
-        if patient_is_deleted(id)
+        if resource_is_deleted(type, id)
             return send_error(res, "deleted", "Resource has been deleted", 410)
-        return not_found(res, id, "")
+        return not_found(res, type, id, "")
     }
     let if_none_match trim(req.header("if-none-match"))
     if if_none_match.length > 0 and version_of(if_none_match) = row.version_id
@@ -128,13 +194,14 @@ procedure patient_read(req: ref[Request], mutable res: ref[Response]) mutable pg
         res.set_status(304)
         return res.send("", "")
     }
-    version_fields(res, "", id, row.version_id, row.seconds)
+    version_fields(res, "", type, id, row.version_id, row.seconds)
     send_resource(res, content.as_slice())
 }
 
-; GET /fire/Patient/{id}/_history/{vid}
-procedure patient_vread(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; GET /fire/<type>/{id}/_history/{vid}
+procedure resource_vread(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
+    let type type_of(req)
     let id req.param("id")
     let vid req.param("vid")
     var all_digits vid.length > 0 and vid.length < 10
@@ -148,14 +215,14 @@ procedure patient_vread(req: ref[Request], mutable res: ref[Response]) mutable p
     if all_digits = false
         return send_error(res, "invalid", "Invalid version id", 400)
     var content Array[u8]()
-    var row PatientResult(NOT_FOUND, 0, 0)
+    var row StoreResult(NOT_FOUND, 0, 0)
     if digits_of(vid) > 0
-        row := patient_select(id, digits_of(vid), &content)
+        row := resource_select(type, id, digits_of(vid), &content)
     if row.status = FAILED
         return send_unavailable(res)
     if row.status = NOT_FOUND
-        return not_found(res, id, vid)
-    version_fields(res, "", id, row.version_id, row.seconds)
+        return not_found(res, type, id, vid)
+    version_fields(res, "", type, id, row.version_id, row.seconds)
     send_resource(res, content.as_slice())
 }
 
@@ -176,9 +243,10 @@ function valid_id(id: Slice[u8]) returns bool
     true
 }
 
-; PUT /fire/Patient/{id}
-procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; PUT /fire/<type>/{id}
+procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
+    let type type_of(req)
     let id req.param("id")
     if valid_id(id) = false
         return send_error(res, "invalid", "Invalid resource ID format", 400)
@@ -186,8 +254,8 @@ procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_
     if parsed.ok() = false or parsed.value.is_object() = false
         return send_error(res, "invalid", "Invalid JSON", 400)
     let root parsed.value
-    if root.get("resourceType").text().equals("Patient") = false
-        return type_mismatch(res, root.get("resourceType").text())
+    if root.get("resourceType").text().equals(type) = false
+        return type_mismatch(res, type, root.get("resourceType").text())
     let body_id root.get("id")
     if body_id.is_text() and body_id.text().equals(id) = false
     {
@@ -201,39 +269,40 @@ procedure patient_put(req: ref[Request], mutable res: ref[Response]) mutable pg_
     }
 
     var content Array[u8]()
-    var stored patient_update(root, id, version_of(trim(req.header("if-match"))), &content)
+    var stored resource_update(type, root, id, version_of(trim(req.header("if-match"))), &content)
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
     if stored.status = NOT_FOUND
     {
         ; update as create: a PUT to an id that is not there creates it
-        stored := patient_create(root, id, true, &content)
+        stored := resource_create(type, root, id, true, &content)
         if stored.status = STORED
         {
             res.set_status(201)
-            version_fields(res, trim(req.header("host")), id, stored.version_id, stored.seconds)
+            version_fields(res, trim(req.header("host")), type, id, stored.version_id, stored.seconds)
             return send_stored(req, res, content.as_slice())
         }
     }
     if stored.status <> STORED
         return send_unavailable(res)
-    version_fields(res, "", id, stored.version_id, stored.seconds)
+    version_fields(res, "", type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
 }
 
-; DELETE /fire/Patient/{id}
-procedure patient_remove(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+; DELETE /fire/<type>/{id}
+procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
+    let type type_of(req)
     let id req.param("id")
-    let status patient_delete(id)
+    let status resource_delete(type, id)
     if status = FAILED
         return send_unavailable(res)
     if status = NOT_FOUND
-        return not_found(res, id, "")
+        return not_found(res, type, id, "")
     res.set_status(204)
     res.send("", "")
 }
 
-; POST /fire/Patient/{id}
-procedure patient_post_instance(req: ref[Request], mutable res: ref[Response])
+; POST /fire/<type>/{id}
+procedure resource_post_instance(req: ref[Request], mutable res: ref[Response])
     send_error(res, "invalid", "POST to instance endpoint is not allowed", 405)

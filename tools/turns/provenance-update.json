@@ -1,0 +1,6 @@
+{
+  "resourceType": "Provenance",
+  "target": [{"reference": "Patient/turns"}],
+  "recorded": "2026-02-03T04:05:06Z",
+  "agent": [{"who": {"reference": "Practitioner/turns"}}]
+}

@@ -1,0 +1,8 @@
+{
+  "resourceType": "Observation",
+  "status": "final",
+  "code": {"coding": [{"system": "http://loinc.org", "code": "29463-7", "display": "Körpergewicht"}]},
+  "subject": {"reference": "Patient/turns"},
+  "effectiveDateTime": "2026-01-02T03:04:05+01:00",
+  "valueQuantity": {"value": 73.0, "unit": "kg", "system": "http://unitsofmeasure.org", "code": "kg"}
+}
