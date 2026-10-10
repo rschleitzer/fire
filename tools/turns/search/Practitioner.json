@@ -1,0 +1,7 @@
+{"resourceType":"Practitioner","identifier":[{"system":"urn:lanr","value":"987"}],"active":true,
+ "name":[{"text":"Zoë Größe","family":"Größe","given":["Zoë"],"prefix":["Prof.","Dr."]}],
+ "telecom":[{"system":"phone","value":"030"},{"system":"email","value":"z@example.org"},{"system":"url","value":"https://example.org"}],
+ "gender":"female","birthDate":"1980-05-06","deceasedBoolean":true,
+ "address":[{"use":"work","line":["Klinikweg 3"],"city":"München","postalCode":"80331","country":"DE"}],
+ "qualification":[{"code":{"text":"no period"}},{"code":{"text":"end only"},"period":{"end":"2001"}},{"code":{"text":"MD"},"period":{"start":"1999-10","end":"2005"}},{"code":{"text":"later"},"period":{"start":"2010-01-02"}}],
+ "communication":[{"language":{"coding":[{"system":"urn:ietf:bcp:47","code":"de"}]}},{"language":{"coding":[{"system":"urn:ietf:bcp:47","code":"fr"}]}}]}

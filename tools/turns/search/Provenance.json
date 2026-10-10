@@ -1,0 +1,5 @@
+{"resourceType":"Provenance","target":[{"reference":"Patient/turns"},{"reference":"Observation/o1/_history/3"}],"occurredDateTime":"2026-01-02","recorded":"2026-01-02T03:04:05.678+01:00",
+ "location":{"reference":"Location/l1"},"activity":{"coding":[{"system":"urn:act","code":"create"},{"code":"second"}]},
+ "basedOn":[{"reference":"ServiceRequest/sr1"}],"patient":{"reference":"Patient/turns"},"encounter":{"reference":"Encounter/e1"},
+ "agent":[{"type":{"coding":[{"system":"urn:agent","code":"author"}]},"who":{"reference":"Practitioner/p1"}},{"who":{"reference":"Organization/o1"}},{"type":{"text":"no coding"},"who":{"display":"no reference"}}],
+ "entity":[{"role":"source","what":{"reference":"DocumentReference/dr1"}},{"role":"revision","what":{"reference":"Patient/old"}}]}

@@ -1,0 +1,9 @@
+{"resourceType":"Patient","identifier":[{"system":"urn:mrn","value":"12345"},{"value":"no-system"},{"system":"urn:only-system"}],"active":true,
+ "name":[{"use":"official","text":"Dr. Jörg Müller-Lüdenscheidt Jr.","family":"Müller-Lüdenscheidt","given":["Jörg","Maria"],"prefix":["Dr."],"suffix":["Jr."]},{"use":"nickname","given":["Jo"]},{"family":"Meier"}],
+ "telecom":[{"system":"phone","value":"+49 30 1234","use":"home"},{"system":"email","value":"j@example.org"},{"value":"no-system"},{"system":"fax"}],
+ "gender":"male","birthDate":"1970-05","deceasedDateTime":"2020-02-29T10:00:00+01:00",
+ "address":[{"use":"home","line":["Hauptstraße 1","Hinterhaus"],"city":"Köln","state":"NRW","postalCode":"50667","country":"DE"},{"use":"old"},{"city":"Bonn"}],
+ "communication":[{"language":{"coding":[{"system":"urn:ietf:bcp:47","code":"de"},{"code":"en"}],"text":"Deutsch"}},{"language":{"text":"no coding"}}],
+ "generalPractitioner":[{"reference":"Practitioner/p1"},{"reference":"urn:uuid:7f96e63d-fbf6-4c45-9972-7afbed72c1c5"},{"display":"no reference"}],
+ "managingOrganization":{"reference":"Organization/o1/_history/2"},
+ "link":[{"other":{"reference":"Patient/other"},"type":"refer"},{"other":{"display":"x"},"type":"seealso"}]}

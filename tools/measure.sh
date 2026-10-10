@@ -245,6 +245,35 @@ binary() {
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "select version_id, encode(data, 'hex') from \"Binary\".resource_data where resource_id = '$(id_of "$1.Binary.spaced")'" > "$WORK/turns.$1.Binary.data"
 }
 
+# Every row the search tables of a type hold for a resource, without the
+# resource's id.
+search_dump() {
+  local tables sql= t
+  tables=$(docker exec "$PG_NAME" psql -U postgres -d Fire -Atc \
+    "select table_name from information_schema.tables where table_schema = '$1' and table_name like 'search\\_%' order by 1")
+  for t in $tables; do
+    sql="$sql${sql:+ union all }select '$t' as t, id, (to_jsonb(x) - 'resource_id' - 'id')::text from \"$1\".$t x where resource_id = '$2'"
+  done
+  [ -z "$sql" ] || docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "$sql order by 1, 2"
+}
+
+# The search tables: every file of tools/turns/search/ named <Type>.json is
+# POSTed and then replaced by <Type>.update.json, every other file there is
+# POSTed alone; what the tables hold of each afterwards is kept.
+#   searches <server: s or c>
+searches() {
+  local f name type
+  for f in "$ROOT"/tools/turns/search/*.json; do
+    name=$(basename "$f" .json); type=${name%%.*}
+    case "$name" in *.update) continue ;; esac
+    call "$1.search.$name" 201 POST "$type" "search/$name.json"
+    search_dump "$type" "$(id_of "$1.search.$name")" > "$WORK/turns.$1.search.$name.rows"
+    [ -f "$ROOT/tools/turns/search/$type.update.json" ] && [ "$name" = "$type" ] || continue
+    call "$1.search.$name.update" 200 PUT "$type/$(id_of "$1.search.$name")" "search/$type.update.json"
+    search_dump "$type" "$(id_of "$1.search.$name")" > "$WORK/turns.$1.search.$name.update.rows"
+  done
+}
+
 # What must not be stored: every file of tools/turns/refused/, named
 # <Type>.<case>.json, is POSTed and must be answered with 400.
 refusals() {
@@ -281,6 +310,7 @@ turns() {
   others create s c
   refusals s
   binary s
+  searches s
   stop_server
 
   echo "turns: 2 csharp  -- reads A and its first version, updates A; creates, updates and deletes B"
@@ -294,6 +324,7 @@ turns() {
   others both c s
   refusals c
   binary c
+  searches c
   stop_server
 
   echo "turns: 3 scaly   -- reads A and its versions, deletes A; finds B deleted, reads its versions, creates it again"
@@ -322,6 +353,14 @@ turns() {
   for f in "$ROOT"/tools/turns/refused/*.json; do
     same "s.refused.$(basename "$f" .json)" "c.refused.$(basename "$f" .json)"
   done
+  # the search tables hold the same rows for the same resource
+  SEARCH_ROWS=0
+  for f in "$WORK"/turns.s.search.*.rows; do
+    cmp -s "$f" "${f/turns.s./turns.c.}" \
+      || { echo "turns: FAIL -- the search rows differ: diff $f ${f/turns.s./turns.c.}"; diff "$f" "${f/turns.s./turns.c.}" | head -12; TURNS_FAILED=1; }
+    SEARCH_ROWS=$((SEARCH_ROWS + $(wc -l < "$f")))
+  done
+  [ "$SEARCH_ROWS" -gt 0 ] || { echo "turns: FAIL -- no search rows at all"; TURNS_FAILED=1; }
   alike s.Binary.spaced c.Binary.spaced
   alike s.Binary.spaced.read c.Binary.spaced.read
   alike s.Binary.spaced.format c.Binary.spaced.format
@@ -361,7 +400,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words"
   exit 0
 }
 

@@ -1,0 +1,502 @@
+; What a resource puts into its search tables: for one table's line of the
+; model (codegen/search.scm names the shapes) the rows upstream's extractor
+; for that table finds, in its order.
+;
+; The rows are cells in a row: each cell a piece of `text`, written into
+; `cells` as its offset and its length, -1 for NULL. A string or number
+; table has one cell a row, a token table two (system, value), a date
+; table two (low, high, as timestamps), a reference table two (type, id),
+; a quantity table four (value, system, code, unit).
+
+use json.Value.JsonValue
+
+procedure cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], value: Slice[u8])
+{
+    cells.add(text.length as i64)
+    cells.add(value.length as i64)
+    text.add(value)
+}
+
+; A cell written piece by piece: what is added to text between the two
+; calls is its content.
+procedure open_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]])
+    cells.add(text.length as i64)
+
+procedure close_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]])
+{
+    let start cells[cells.length - 1]
+    cells.add((text.length as i64) - start)
+}
+
+procedure null_cell(mutable cells: ref[Array[i64]])
+{
+    cells.add(0 as i64)
+    cells.add((0 as i64) - 1)
+}
+
+; A cell of the value's text when it is a string, else NULL.
+procedure text_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], value: JsonValue)
+{
+    if value.is_text()
+        cell(text, cells, value.text())
+    else
+        null_cell(cells)
+}
+
+; The member of value at the path a.b.c; Null where the way ends.
+function at_path(value: JsonValue, path: Slice[u8]) returns JsonValue
+{
+    var v value
+    var i: size_t 0
+    while entry(path, 46, i).length > 0
+    {
+        v := v.get(entry(path, 46, i))
+        i := i + 1
+    }
+    v
+}
+
+; A value row: the string alone, or NULL beside it for a token.
+procedure value_row(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], token: bool, value: Slice[u8])
+{
+    if token
+        null_cell(cells)
+    cell(text, cells, value)
+}
+
+; A value row of the value's text when it is a string.
+procedure text_row(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], token: bool, value: JsonValue)
+{
+    if value.is_text()
+        value_row(text, cells, token, value.text())
+}
+
+; Every string of the array `list`.
+procedure string_rows(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], token: bool, list: JsonValue)
+{
+    var i: size_t 0
+    while i < list.length()
+    {
+        text_row(text, cells, token, list.item(i))
+        i := i + 1
+    }
+}
+
+; system and code of every coding of the array `codings`.
+procedure coding_rows(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], codings: JsonValue)
+{
+    var i: size_t 0
+    while i < codings.length()
+    {
+        let coding codings.item(i)
+        if coding.is_null() = false
+        {
+            text_cell(text, cells, coding.get("system"))
+            text_cell(text, cells, coding.get("code"))
+        }
+        i := i + 1
+    }
+}
+
+; The reference of `node` as type and id: at its first slash, or all of it
+; as the id.
+procedure reference_row(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], node: JsonValue)
+{
+    if node.get("reference").is_text()
+        reference_cells(text, cells, node.get("reference"))
+}
+
+procedure reference_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], reference: JsonValue)
+{
+    let length reference.text().length
+    var slash: size_t 0
+    while slash < length and (reference.text()[slash] <> 47)
+        slash := slash + 1
+    if slash < length
+    {
+        cell(text, cells, reference.text().slice_to(slash))
+        cell(text, cells, reference.text().slice_from(slash + 1))
+        return
+    }
+    null_cell(cells)
+    cell(text, cells, reference.text())
+}
+
+function leap(year: i64) returns bool
+    (year % 4 = 0 and year % 100 <> 0) or year % 400 = 0
+
+function days_in(year: i64, month: i64) returns i64
+{
+    if month = 2
+    {
+        if leap(year)
+            return 29
+        return 28
+    }
+    if month = 4 or month = 6 or month = 9 or month = 11
+        return 30
+    31
+}
+
+; The span a FHIR date covers, as upstream's ParseFhirDateRange gives it:
+; one instant for a value with a time (UTC where it names no zone), else
+; the whole year, month or day up to its last millisecond.
+procedure range_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], date: Slice[u8], low: bool, high: bool)
+{
+    var timed false
+    var i: size_t 0
+    while i < date.length
+    {
+        if date[i] = 84
+            timed := true
+        i := i + 1
+    }
+    if timed
+    {
+        let n date.length
+        let zoned date[n - 1] = 90 or (n > 6 and (date[n - 6] = 43 or date[n - 6] = 45) and date[n - 3] = 58)
+        var times 0
+        if low
+            times := times + 1
+        if high
+            times := times + 1
+        while times > 0
+        {
+            open_cell(text, cells)
+            text.add(date)
+            if zoned = false
+                put_bytes(text, "+00")
+            close_cell(text, cells)
+            times := times - 1
+        }
+        return
+    }
+    let year entry(date, 45, 0)
+    var month: Slice[u8] "01"
+    var last_month: Slice[u8] "12"
+    if entry(date, 45, 1).length > 0
+    {
+        month := entry(date, 45, 1)
+        last_month := month
+    }
+    var day: Slice[u8] "01"
+    var last_day days_in(digits_of(year), digits_of(last_month))
+    if entry(date, 45, 2).length > 0
+    {
+        day := entry(date, 45, 2)
+        last_day := digits_of(day)
+    }
+    if low
+    {
+        open_cell(text, cells)
+        text.add(year)
+        put_bytes(text, "-")
+        text.add(month)
+        put_bytes(text, "-")
+        text.add(day)
+        put_bytes(text, " 00:00:00+00")
+        close_cell(text, cells)
+    }
+    if high
+    {
+        open_cell(text, cells)
+        text.add(year)
+        put_bytes(text, "-")
+        text.add(last_month)
+        put_bytes(text, "-")
+        if last_day < 10
+            put_bytes(text, "0")
+        put_decimal(text, last_day)
+        put_bytes(text, " 23:59:59.999+00")
+        close_cell(text, cells)
+    }
+}
+
+; The span of the date `value` when it is a string; false when it is none.
+procedure date_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], value: JsonValue, low: bool, high: bool) returns bool
+{
+    if value.is_text() = false
+        return false
+    range_cells(text, cells, value.text(), low, high)
+    true
+}
+
+; Every quantity the rest of `path` (from its part `at`) reaches below node.
+procedure quantity_rows(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], node: JsonValue, path: Slice[u8], at: size_t)
+{
+    if node.is_array()
+    {
+        var i: size_t 0
+        while i < node.length()
+        {
+            quantity_rows(text, cells, node.item(i), path, at)
+            i := i + 1
+        }
+        return
+    }
+    if node.is_object() = false
+        return
+    if entry(path, 46, at).length > 0
+        return quantity_rows(text, cells, node.get(entry(path, 46, at)), path, at + 1)
+    if node.get("value").is_number() = false
+        return
+    cell(text, cells, node.get("value").number_text())
+    text_cell(text, cells, node.get("system"))
+    text_cell(text, cells, node.get("code"))
+    text_cell(text, cells, node.get("unit"))
+}
+
+; The text upstream's ToString gives a value of a choice.
+procedure choice_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], value: JsonValue)
+{
+    if value.is_text()
+        return cell(text, cells, value.text())
+    if value.is_number()
+        return cell(text, cells, value.number_text())
+    if value.is_bool()
+    {
+        if value.as_bool()
+            return cell(text, cells, "true")
+        return cell(text, cells, "false")
+    }
+    null_cell(cells)
+}
+
+; One part of an address joined to those before it: 1 when the value is a
+; string, else 0.
+procedure address_part(mutable text: ref[Array[u8]], part: JsonValue, before: int) returns int
+{
+    if part.is_text() = false
+        return 0
+    if before > 0
+        put_bytes(text, " ")
+    text.add(part.text())
+    1
+}
+
+; The rows of one table: `line` is its line of the model, root the resource.
+procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]])
+{
+    let kind line[0]
+    let token kind = 116
+    let shape entry(line, 32, 2)
+    let field entry(line, 32, 3)
+    let second entry(line, 32, 4)
+    let third entry(line, 32, 5)
+    let first root.get(field)
+
+    if shape.equals("value")
+    {
+        return text_row(text, cells, token, first)
+    }
+    if shape.equals("list")
+        return string_rows(text, cells, token, first)
+    if shape.equals("cc")
+        return coding_rows(text, cells, first.get("coding"))
+    if shape.equals("ccpath")
+        return coding_rows(text, cells, first.get(second))
+    if shape.equals("date")
+    {
+        date_cells(text, cells, first, true, true)
+        return
+    }
+    if shape.equals("period")
+    {
+        let start first.get("start")
+        let end first.get("end")
+        if start.is_text() = false and end.is_text() = false
+            return
+        if date_cells(text, cells, start, true, false) = false
+            cell(text, cells, "-infinity")
+        if date_cells(text, cells, end, false, true) = false
+            cell(text, cells, "infinity")
+        return
+    }
+    if shape.equals("path")
+    {
+        date_cells(text, cells, first.get(second), true, true)
+        return
+    }
+    if shape.equals("pathperiod")
+    {
+        date_cells(text, cells, first.get(second).get("start"), true, true)
+        return
+    }
+    if shape.equals("variant")
+    {
+        var k: size_t 3
+        while entry(line, 32, k).length > 0
+        {
+            let choice entry(line, 32, k)
+            k := k + 1
+            let mode choice[choice.length - 1]
+            let value root.get(choice.slice_to(choice.length - 2))
+            if value.is_null()
+                continue
+            if kind = 100
+            {
+                ; a date: the value itself, or the start of a period
+                var date value
+                if mode = 112
+                    date := value.get("start")
+                if date_cells(text, cells, date, true, true)
+                    return
+                continue
+            }
+            null_cell(cells)
+            if mode = 116
+                return cell(text, cells, "true")
+            return choice_cell(text, cells, value)
+        }
+        return
+    }
+    if shape.equals("ref")
+    {
+        if first.is_array()
+        {
+            var i: size_t 0
+            while i < first.length()
+            {
+                reference_row(text, cells, first.item(i))
+                i := i + 1
+            }
+            return
+        }
+        return reference_row(text, cells, first)
+    }
+    if shape.equals("number")
+    {
+        if first.is_array()
+        {
+            var i: size_t 0
+            while i < first.length()
+            {
+                if first.item(i).is_number()
+                    cell(text, cells, first.item(i).number_text())
+                else
+                    null_cell(cells)
+                i := i + 1
+            }
+            return
+        }
+        if first.is_number()
+            cell(text, cells, first.number_text())
+        return
+    }
+    if shape.equals("quantity")
+    {
+        var k: size_t 3
+        while entry(line, 32, k).length > 0
+        {
+            quantity_rows(text, cells, root, entry(line, 32, k), 0)
+            k := k + 1
+        }
+        return
+    }
+
+    ; the shapes over the items of the array `field`
+    var i: size_t 0
+    while i < first.length()
+    {
+        let item first.item(i)
+        i := i + 1
+        if item.is_null()
+            continue
+        if shape.equals("names")
+        {
+            text_row(text, cells, token, item.get("text"))
+            text_row(text, cells, token, item.get("family"))
+            string_rows(text, cells, token, item.get("given"))
+            string_rows(text, cells, token, item.get("prefix"))
+            string_rows(text, cells, token, item.get("suffix"))
+        }
+        if shape.equals("each")
+            text_row(text, cells, token, at_path(item, second))
+        if shape.equals("each2")
+        {
+            let subs item.get(second)
+            var s: size_t 0
+            while s < subs.length()
+            {
+                text_row(text, cells, token, subs.item(s).get(third))
+                s := s + 1
+            }
+        }
+        if shape.equals("eachlist")
+            string_rows(text, cells, token, item.get(second))
+        if shape.equals("address")
+        {
+            ; the cell is taken back when the address has no part
+            let before_text text.length
+            let before_cells cells.length
+            open_cell(text, cells)
+            var parts 0
+            let lines item.get("line")
+            var l: size_t 0
+            while l < lines.length()
+            {
+                parts := parts + address_part(text, lines.item(l), parts)
+                l := l + 1
+            }
+            let rest: Slice[u8] "city state postalCode country"
+            var r: size_t 0
+            while entry(rest, 32, r).length > 0
+            {
+                parts := parts + address_part(text, item.get(entry(rest, 32, r)), parts)
+                r := r + 1
+            }
+            if parts > 0
+                close_cell(text, cells)
+            else
+            {
+                text.length := before_text
+                cells.length := before_cells
+            }
+        }
+        if shape.equals("identifier")
+        {
+            text_cell(text, cells, item.get("system"))
+            text_cell(text, cells, item.get("value"))
+        }
+        if shape.equals("telecom")
+        {
+            let system item.get("system")
+            if second.equals("-") or (system.is_text() and system.text().equals(second))
+            {
+                text_cell(text, cells, system)
+                text_cell(text, cells, item.get("value"))
+            }
+        }
+        if shape.equals("cclist")
+            coding_rows(text, cells, item.get("coding"))
+        if shape.equals("ccin")
+            coding_rows(text, cells, item.get(second).get("coding"))
+        if shape.equals("refin") and item.get(second).is_null() = false
+            reference_row(text, cells, item.get(second))
+        if shape.equals("refin2")
+        {
+            let subs item.get(second)
+            var s: size_t 0
+            while s < subs.length()
+            {
+                if subs.item(s).get(third).is_null() = false
+                    reference_row(text, cells, subs.item(s).get(third))
+                s := s + 1
+            }
+        }
+        if shape.equals("first") and date_cells(text, cells, item.get(second), true, true)
+            return
+        if shape.equals("firstperiod") and date_cells(text, cells, item.get(second).get("start"), true, true)
+            return
+    }
+}
+
+; The cells a row of a table of that kind has.
+function row_width(kind: u8) returns size_t
+{
+    if kind = 115 or kind = 110
+        return 1
+    if kind = 113
+        return 4
+    2
+}

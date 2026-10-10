@@ -134,4 +134,13 @@ function model_codes(id: Slice[u8]) returns Slice[u8]
             (for (select-elements (descendants root) "codeset") scaly-codeset)
 "    \"\"
 }
+
+; The search tables of the resource type `name`, one per line
+; (codegen/search.scm says what a line holds).
+function model_searches(name: Slice[u8]) returns Slice[u8]
+{
+"
+            (for (node-list-filter active? (children (select-children "resources" root))) scaly-searches)
+"    \"\"
+}
 "))))

@@ -156,6 +156,106 @@ procedure write_version(type: Slice[u8], root: JsonValue, apart: bool, id: Slice
     content.add(stored.as_slice())
 }
 
+; The columns of a search table of that kind, after id and resource_id.
+function search_columns(kind: u8) returns Slice[u8]
+{
+    match kind as int
+        case 116: return "system, value"
+        case 100: return "value_low, value_high"
+        case 114: return "target_type, target_id"
+        case 113: return "value, system, code, unit"
+    "value"
+}
+
+; Fill the search tables of `id` from root, as upstream's
+; InsertSearchIndexesAsync does: a row for every value its extractors find.
+procedure insert_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], root: JsonValue) returns bool
+{
+    let tables model_searches(type)
+    var at: size_t 0
+    while at < tables.length
+    {
+        let line line_from(tables, at)
+        at := at + line.length + 1
+        var text Array[u8]()
+        var cells Array[i64]()
+        search_rows(line, root, &text, &cells)
+        let width row_width(line[0])
+        if cells.length = 0
+            continue
+        var name Array[u8]()
+        statement_name(&name, type, entry(line, 32, 1))
+        var sql Array[u8]()
+        put_bytes(&sql, "INSERT INTO ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        sql.add(entry(line, 32, 1))
+        put_bytes(&sql, " (id, resource_id, ")
+        put_bytes(&sql, search_columns(line[0]))
+        put_bytes(&sql, ") VALUES ($1, $2")
+        var p: size_t 0
+        while p < width
+        {
+            put_bytes(&sql, ", $")
+            put_decimal(&sql, (p + 3) as i64)
+            p := p + 1
+        }
+        put_bytes(&sql, ")")
+        if c.prepare(name.as_slice(), sql.as_slice()) = false
+            return false
+        var row: size_t 0
+        while row * width * 2 < cells.length
+        {
+            c.start(name.as_slice())
+            c.param_int(row as i64)
+            c.param_text(id)
+            var k: size_t 0
+            while k < width
+            {
+                let offset cells[(row * width + k) * 2]
+                let length cells[(row * width + k) * 2 + 1]
+                if length < 0
+                    c.param_null()
+                else
+                    c.param_text(text.as_slice().subslice(offset as size_t, (offset + length) as size_t))
+                k := k + 1
+            }
+            if c.run() = false
+                return false
+            row := row + 1
+        }
+    }
+    true
+}
+
+; Empty the search tables of `id`.
+procedure delete_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]) returns bool
+{
+    let tables model_searches(type)
+    var at: size_t 0
+    while at < tables.length
+    {
+        let line line_from(tables, at)
+        at := at + line.length + 1
+        var name Array[u8]()
+        statement_name(&name, type, entry(line, 32, 1))
+        put_bytes(&name, "_clear")
+        var sql Array[u8]()
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        sql.add(entry(line, 32, 1))
+        put_bytes(&sql, " WHERE resource_id = $1")
+        if c.prepare(name.as_slice(), sql.as_slice()) = false
+            return false
+        c.start(name.as_slice())
+        c.param_text(id)
+        if c.run() = false
+            return false
+    }
+    true
+}
+
 ; End the transaction on c and give c back: COMMIT when ok, else ROLLBACK.
 procedure end_transaction(mutable c: ref[PgConn], ok: bool) returns bool mutable pg_pool
 {
@@ -277,6 +377,8 @@ procedure postgresql_create(type: Slice[u8], root: JsonValue, id: Slice[u8], aft
         }
         if ok and apart
             ok := insert_data(c, type, id, version_id, data.as_slice())
+        if ok
+            ok := insert_searches(c, type, id, root)
     }
     if end_transaction(c, ok) = false
         return StoreResult(FAILED, 0, 0)
@@ -343,6 +445,8 @@ procedure postgresql_update(type: Slice[u8], root: JsonValue, id: Slice[u8], if_
         }
         if ok and apart
             ok := insert_data(c, type, id, current + 1, data.as_slice())
+        if ok
+            ok := delete_searches(c, type, id) and insert_searches(c, type, id, root)
     }
     if end_transaction(c, ok) = false
         return StoreResult(FAILED, 0, 0)

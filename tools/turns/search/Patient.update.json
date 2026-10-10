@@ -1,0 +1,1 @@
+{"resourceType":"Patient","identifier":[{"system":"urn:mrn","value":"99"}],"active":false,"name":[{"family":"Neu","given":["A"]}],"gender":"other","birthDate":"1972","deceasedBoolean":false,"address":[{"line":["Weg 2"],"country":"AT"}]}
