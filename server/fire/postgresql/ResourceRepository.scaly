@@ -681,3 +681,95 @@ procedure postgresql_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64],
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, total, 0)
 }
+
+; The versions of the resource `id` -- or, with an empty id, of every
+; resource of the type --, newest first, as upstream's history lists them:
+; the current row, every row of the history, and for every deletion a
+; TOMBSTONE beside its row. At most `count` from `offset` on, each as four
+; cells in rows (id, the time it is from, what it is, content); the answer's
+; version_id is how many there are in all.
+procedure postgresql_history(type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+{
+    let one id.length > 0
+    var of_id: Slice[u8] ""
+    var and_id: Slice[u8] ""
+    if one
+    {
+        of_id := " WHERE id = $1"
+        and_id := " AND id = $1"
+    }
+    var counting Array[u8]()
+    put_bytes(&counting, "SELECT (SELECT COUNT(*) FROM ")
+    put_table(&counting, type)
+    put_bytes(&counting, of_id)
+    put_bytes(&counting, ") + (SELECT COUNT(*) FROM ")
+    put_table(&counting, type)
+    put_bytes(&counting, ".resource_history")
+    put_bytes(&counting, of_id)
+    put_bytes(&counting, ") + (SELECT COUNT(*) FROM ")
+    put_table(&counting, type)
+    put_bytes(&counting, ".resource_history WHERE history_operation = 'DELETE'")
+    put_bytes(&counting, and_id)
+    put_bytes(&counting, ")")
+    var listing Array[u8]()
+    put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content FROM ((SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")
+    put_table(&listing, type)
+    put_bytes(&listing, of_id)
+    put_bytes(&listing, ") UNION ALL (SELECT id, version_id, last_updated, content, history_operation FROM ")
+    put_table(&listing, type)
+    put_bytes(&listing, ".resource_history")
+    put_bytes(&listing, of_id)
+    put_bytes(&listing, ") UNION ALL (SELECT id, version_id, last_updated, content, 'TOMBSTONE' AS history_operation FROM ")
+    put_table(&listing, type)
+    put_bytes(&listing, ".resource_history WHERE history_operation = 'DELETE'")
+    put_bytes(&listing, and_id)
+    if one
+        put_bytes(&listing, ")) h ORDER BY h.version_id DESC, h.history_operation DESC LIMIT $2 OFFSET $3")
+    else
+        put_bytes(&listing, ")) h ORDER BY h.last_updated DESC, h.history_operation DESC LIMIT $1 OFFSET $2")
+
+    let got acquire()
+    if got = null
+        return StoreResult(FAILED, 0, 0)
+    var c got as ref[PgConn]
+    var name Array[u8]()
+    put_statement_name(&name, counting.as_slice())
+    var total: i64 0
+    var ok c.prepare(name.as_slice(), counting.as_slice())
+    if ok
+    {
+        c.start(name.as_slice())
+        if one
+            c.param_text(id)
+        ok := c.run() and c.next_row()
+        if ok
+            total := c.column_int(0)
+    }
+    if ok
+    {
+        var list_name Array[u8]()
+        put_statement_name(&list_name, listing.as_slice())
+        ok := c.prepare(list_name.as_slice(), listing.as_slice())
+        if ok
+        {
+            c.start(list_name.as_slice())
+            if one
+                c.param_text(id)
+            c.param_int(count)
+            c.param_int(offset)
+            c.binary_column(3)
+            ok := c.run()
+            while ok and c.next_row()
+            {
+                cell(found, rows, c.column(0))
+                cell(found, rows, c.column(1))
+                cell(found, rows, c.column(2))
+                cell(found, rows, c.column(3))
+            }
+        }
+    }
+    release(c)
+    if ok = false
+        return StoreResult(FAILED, 0, 0)
+    StoreResult(STORED, total, 0)
+}

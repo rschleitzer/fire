@@ -46,3 +46,11 @@ procedure resource_search(type: Slice[u8], text: Slice[u8], cells: Slice[i64], c
         return postgresql_search(type, text, cells, count, offset, found, rows, problem)
     StoreResult(FAILED, 0, 0)
 }
+
+; The versions of a resource or of a type (see postgresql_history).
+procedure resource_history(type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_history(type, id, count, offset, found, rows)
+    StoreResult(FAILED, 0, 0)
+}

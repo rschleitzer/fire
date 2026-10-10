@@ -22,6 +22,8 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.post(pattern(page, type, ""), &resource_post)
         app.get(pattern(page, type, "/{id}"), &resource_read)
         app.get(pattern(page, type, "/{id}/_history/{vid}"), &resource_vread)
+        app.get(pattern(page, type, "/{id}/_history"), &resource_history_get)
+        app.get(pattern(page, type, "/_history"), &resource_history_get)
         app.put(pattern(page, type, "/{id}"), &resource_put)
         app.delete(pattern(page, type, "/{id}"), &resource_remove)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
@@ -368,6 +370,149 @@ procedure bundle_link(mutable w: ref[JsonWriter], relation: Slice[u8], url: Slic
     w.end_object()
 }
 
+; The links of a bundle that is one page of `total`: itself (the address
+; and the query as it came), the next page when there is one, the one
+; before when this is not the first.
+procedure page_links(mutable w: ref[JsonWriter], address: Slice[u8], asked: Slice[u8], text: Slice[u8], cells: Slice[i64], total: i64, count: i64, offset: i64)
+{
+    var url Array[u8]()
+    put_bytes(&url, address)
+    if asked.length > 0
+    {
+        put_bytes(&url, "?")
+        put_bytes(&url, asked)
+    }
+    w.begin_array()
+    bundle_link(w, "self", url.as_slice())
+    if offset + count < total
+    {
+        var next Array[u8]()
+        put_bytes(&next, address)
+        put_bytes(&next, "?")
+        put_page_query(&next, text, cells, offset + count, count)
+        bundle_link(w, "next", next.as_slice())
+    }
+    if offset > 0
+    {
+        var previous Array[u8]()
+        put_bytes(&previous, address)
+        put_bytes(&previous, "?")
+        var back offset - count
+        if back < 0
+            back := 0
+        put_page_query(&previous, text, cells, back, count)
+        bundle_link(w, "previous", previous.as_slice())
+    }
+    w.end_array()
+}
+
+; GET /fire/<type>/{id}/_history and GET /fire/<type>/_history: the
+; versions as a history Bundle.
+procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    let id req.param("id")
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var count: i64 20
+    var offset: i64 0
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_count"))
+    {
+        count := whole_value(first_value(text.as_slice(), cells.as_slice(), "_count"))
+        if count > 1000
+            count := 1000
+    }
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+        offset := whole_value(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+    if count < 0 or offset < 0
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    var found Array[u8]()
+    var rows Array[i64]()
+    let result resource_history(type, id, count, offset, &found, &rows)
+    if result.status <> STORED
+        return send_unavailable(res)
+    if id.length > 0 and rows.length = 0
+        return not_found(res, type, id, "")
+
+    var base Array[u8]()
+    put_bytes(&base, "http://")
+    put_bytes(&base, trim(req.header("host")))
+    put_bytes(&base, "/fire/")
+    put_bytes(&base, type)
+    var address Array[u8]()
+    put_bytes(&address, base.as_slice())
+    if id.length > 0
+    {
+        put_bytes(&address, "/")
+        put_bytes(&address, id)
+    }
+    put_bytes(&address, "/_history")
+
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("Bundle")
+    w.key("type")
+    w.text("history")
+    w.key("total")
+    w.integer(result.version_id)
+    w.key("link")
+    page_links(&w, address.as_slice(), req.query, text.as_slice(), cells.as_slice(), result.version_id, count, offset)
+    if rows.length > 0
+    {
+        w.key("entry")
+        w.begin_array()
+        var i: size_t 0
+        while i * 8 < rows.length
+        {
+            let row_id found.as_slice().subslice(rows[i * 8] as size_t, (rows[i * 8] + rows[i * 8 + 1]) as size_t)
+            let tombstone found.as_slice().subslice(rows[i * 8 + 4] as size_t, (rows[i * 8 + 4] + rows[i * 8 + 5]) as size_t).equals("TOMBSTONE")
+            var full Array[u8]()
+            put_bytes(&full, base.as_slice())
+            put_bytes(&full, "/")
+            put_bytes(&full, row_id)
+            var relative Array[u8]()
+            put_bytes(&relative, type)
+            put_bytes(&relative, "/")
+            put_bytes(&relative, row_id)
+            w.begin_object()
+            w.key("fullUrl")
+            w.text_dotnet(full.as_slice())
+            if tombstone = false
+            {
+                w.key("resource")
+                w.raw(found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
+            }
+            w.key("request")
+            w.begin_object()
+            w.key("method")
+            if tombstone
+                w.text("DELETE")
+            else
+                w.text("PUT")
+            w.key("url")
+            w.text_dotnet(relative.as_slice())
+            w.end_object()
+            w.key("response")
+            w.begin_object()
+            w.key("status")
+            if tombstone
+                w.text("204")
+            else
+                w.text("200")
+            w.key("lastModified")
+            w.text_dotnet(found.as_slice().subslice(rows[i * 8 + 2] as size_t, (rows[i * 8 + 2] + rows[i * 8 + 3]) as size_t))
+            w.end_object()
+            w.end_object()
+            i := i + 1
+        }
+        w.end_array()
+    }
+    w.end_object()
+    send_resource(res, w.bytes())
+}
+
 ; The search of a type by the pairs in text and cells, answered as a
 ; searchset Bundle the way upstream's handler builds it. `asked` is the
 ; query string as it came.
@@ -478,28 +623,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], asked: Slice[u8]
     w.key("type")
     w.text("searchset")
     w.key("link")
-    w.begin_array()
-    bundle_link(&w, "self", url.as_slice())
-    if offset + count < total
-    {
-        var next Array[u8]()
-        next.add(base.as_slice())
-        put_bytes(&next, "?")
-        put_page_query(&next, text, cells, offset + count, count)
-        bundle_link(&w, "next", next.as_slice())
-    }
-    if offset > 0
-    {
-        var previous Array[u8]()
-        previous.add(base.as_slice())
-        put_bytes(&previous, "?")
-        var back offset - count
-        if back < 0
-            back := 0
-        put_page_query(&previous, text, cells, back, count)
-        bundle_link(&w, "previous", previous.as_slice())
-    }
-    w.end_array()
+    page_links(&w, base.as_slice(), asked, text, cells, total, count, offset)
     if first_value(text, cells, "_total").equals("none") = false
     {
         w.key("total")
