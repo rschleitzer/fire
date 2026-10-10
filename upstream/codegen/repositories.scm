@@ -448,20 +448,22 @@ public interface I"rn"Repository
            (inlines (inline-searches resource))
            (inline-list (node-list->list inlines))
            (raw-table-search-list (node-list->list (table-searches resource)))
-           ; Filter to supported types only (excludes quantity, composite, uri)
+           ; Filter to supported types only (excludes composite, uri)
            (all-table-search-list (filter (lambda (s)
                (let ((t (% "type" s)))
                    (or (string=? "string" t)
                        (string=? "token" t)
                        (string=? "date" t)
                        (string=? "reference" t)
-                       (string=? "number" t)))) raw-table-search-list))
+                       (string=? "number" t)
+                       (string=? "quantity" t)))) raw-table-search-list))
            (string-searches (filter (lambda (s) (string=? "string"(% "type" s))) all-table-search-list))
            (token-searches (filter (lambda (s) (and (string=? "token"(% "type" s)) (not (search-is-inline? s)))) all-table-search-list))
            (date-searches (filter (lambda (s) (and (string=? "date"(% "type" s)) (not (search-is-inline-instant? s)))) all-table-search-list))
            (instant-searches (filter (lambda (s) (search-is-inline-instant? s)) all-table-search-list))
            (ref-searches (filter (lambda (s) (string=? "reference"(% "type" s))) all-table-search-list))
            (number-searches (filter (lambda (s) (string=? "number"(% "type" s))) all-table-search-list))
+           (quantity-searches (filter (lambda (s) (string=? "quantity"(% "type" s))) all-table-search-list))
            (hn-all (filter (lambda (s)
                (and (search-is-humanname? s) (equal? "all"(search-humanname-field s))))
                string-searches)))
@@ -492,9 +494,10 @@ public interface I"rn"Repository
                         (repo-drop-search schema all-table-search-list db)
                         (repo-purge rn schema has-history db)
                         (repo-read-resource-helper rn inline-list has-history db)
-                        (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches hn-all db)
+                        (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches hn-all db)
                         (repo-delete-search-indexes schema all-table-search-list db)
                         (repo-insert-helpers schema db)
+                        (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
                         (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
                         (repo-db-class-helpers db)
                         "}
@@ -1785,6 +1788,7 @@ public class "rn"Repository : I"rn"Repository
                ((string=? "date" type)"AddDateSearchOr")
                ((string=? "reference" type)"AddReferenceSearchOr")
                ((string=? "number" type)"AddNumberSearchOr")
+               ((string=? "quantity" type)"AddQuantitySearchOr")
                (else #f))))
         (if helper
             (if (or is-string is-token)
@@ -2161,6 +2165,7 @@ public class "rn"Repository : I"rn"Repository
            (("date") ($"value_low " (db-timestamp-type db) ", value_high " (db-timestamp-type db)))
            (("reference") ($"target_type " (db-search-text-type db) ", target_id " (db-search-text-type db) ", target_version " (db-search-display-type db)))
            (("number") ($"value " (db-type "decimal" db)))
+           (("quantity") ($"value " (db-type "decimal" db) ", system " (db-search-text-type db) ", code " (db-search-text-type db) ", unit " (db-search-text-type db)))
            (else ""))
        ", PRIMARY KEY (id, resource_id))"))
 
@@ -2176,7 +2181,7 @@ public class "rn"Repository : I"rn"Repository
         (("date") ($"; " ci "ix_" schema "_" tn "_value_low ON " (tbl schema tn db) " (value_low)"
                     "; " ci "ix_" schema "_" tn "_value_high ON " (tbl schema tn db) " (value_high)"))
         (("reference") ($"; " ci "ix_" schema "_" tn "_reference ON " (tbl schema tn db) " (target_id, target_type)"))
-        (("number") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"))
+        (("number" "quantity") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"))
         (else ""))))
 
 ; Re-index call for a search parameter
@@ -2222,6 +2227,9 @@ public class "rn"Repository : I"rn"Repository
 "))))
         (("number")
             ($"                    await InsertNumberIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
+"))
+        (("quantity")
+            ($"                    await InsertQuantityIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
 "))
         (else ""))))
 
@@ -2490,7 +2498,7 @@ public class "rn"Repository : I"rn"Repository
 ; Section: InsertSearchIndexesAsync
 ; ===================================================================
 
-(define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches hn-all db)
+(define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches hn-all db)
     ($
 "    private async Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
     {
@@ -2527,7 +2535,41 @@ public class "rn"Repository : I"rn"Repository
         // Number indexes
 "
             (apply $ (map (lambda (s) (repo-number-index-line rn s)) number-searches))))
+        ; Quantity indexes
+        (if (null? quantity-searches)""
+            ($"
+        // Quantity indexes
+"
+            (apply $ (map (lambda (s) (repo-quantity-index-line rn s)) quantity-searches))))
 "    }
+
+"))
+
+; Quantity index line for InsertSearchIndexesAsync
+(define (repo-quantity-index-line rn search)
+    (let* ((sn (% "name" search))
+           (tn (search-table-name search)))
+        ($"        await InsertQuantityIndexAsync(conn, tx, \"" tn "\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
+")))
+
+; The insert helper of a quantity table: emitted for a repository that has one.
+(define (repo-insert-quantity-helper schema db)
+    ($
+"    private static async Task InsertQuantityIndexAsync(ConnType conn, TxType tx, string table, string resourceId, List<""(decimal value, string? system, string? code, string? unit)> values)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            await using var cmd = new CmdType(
+                $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value, system, code, unit) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)}, {P(5)}, {P(6)})\", conn, tx);
+            cmd.Parameters.Add(NewParam(1, i));
+            cmd.Parameters.Add(NewParam(2, resourceId));
+            cmd.Parameters.Add(NewParam(3, values[i].value));
+            cmd.Parameters.Add(NewParam(4, (object?)values[i].system ?? DBNull.Value));
+            cmd.Parameters.Add(NewParam(5, (object?)values[i].code ?? DBNull.Value));
+            cmd.Parameters.Add(NewParam(6, (object?)values[i].unit ?? DBNull.Value));
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
 
 "))
 
@@ -2966,6 +3008,7 @@ internal static class SearchQueryBuilder
     (sqb-add-inline-instant-search db)
     (sqb-add-inline-number-searches db)
     (sqb-add-number-search-or db)
+    (if (any-quantity-table-search?) (sqb-add-quantity-search-or db) "")
     (sqb-add-reference-search-or db)))
 
 (define (sqb-schema-table db)
@@ -3369,6 +3412,99 @@ internal static class SearchQueryBuilder
             orParts.Add($\"{alias}.value {op} {P(paramIndex)}\");
             parameters.Add(NewParam(paramIndex, parsed));
             paramIndex++;
+        }
+
+        if (orParts.Count > 0)
+            wheres.Add(orParts.Count == 1 ? orParts[0] : $\"({string.Join(\" OR \", orParts)})\");
+    }
+
+"))
+
+; Does any active resource of the model have a quantity search? The query
+; helper is emitted only then.
+(define (any-quantity-table-search?)
+    (let loop ((rs (node-list->list (select-elements (descendants (tree-root (current-node))) "resource"))))
+        (cond ((null? rs) #f)
+              ((and (active? (car rs)) (not (node-list-empty? (quantity-table-searches (car rs))))) #t)
+              (else (loop (cdr rs))))))
+
+; Quantity search: [prefix]number, or [prefix]number|system|code.
+; Prefixes eq (default), ne, gt, lt, ge, le as for a number, and ap: within
+; a tenth of the value. With a system, system and code must both match; with
+; a code alone (number||code) the code or the unit may.
+(define (sqb-add-quantity-search-or db)
+    ($
+"    internal static void AddQuantitySearchOr(string schema, List<""string> joins, List<""string> wheres, List<""ParamType> parameters,
+        ref int paramIndex, ref int aliasIndex, string table, string[] values)
+    {
+        var alias = NextAlias(ref aliasIndex);
+        joins.Add($\"JOIN {SchemaTable(schema, table)} {alias} ON {alias}.resource_id = r.id\");
+
+        var orParts = new List<""string>();
+        foreach (var value in values)
+        {
+            var pieces = value.Split('|');
+            if (pieces.Length != 1 && pieces.Length != 3)
+                throw new ArgumentException($\"Invalid value '{value}' for quantity search parameter: number or number|system|code\");
+
+            var prefix = \"eq\";
+            var numStr = pieces[0];
+
+            if (numStr.Length >= 2 && char.IsLetter(numStr[0]) && char.IsLetter(numStr[1])
+                && (numStr.Length == 2 || !char.IsLetter(numStr[2])))
+            {
+                prefix = numStr[..2];
+                numStr = numStr[2..];
+            }
+
+            if (!decimal.TryParse(numStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal parsed))
+                throw new ArgumentException($\"Invalid value '{value}' for quantity search parameter\");
+
+            string condition;
+            if (prefix == \"ap\")
+            {
+                var margin = Math.Abs(parsed) * 0.1m;
+                condition = $\"{alias}.value >= {P(paramIndex)} AND {alias}.value <""= {P(paramIndex + 1)}\";
+                parameters.Add(NewParam(paramIndex, parsed - margin));
+                parameters.Add(NewParam(paramIndex + 1, parsed + margin));
+                paramIndex += 2;
+            }
+            else
+            {
+                var op = prefix switch
+                {
+                    \"eq\" => \"=\",
+                    \"ne\" => \"<"">\",
+                    \"gt\" => \">\",
+                    \"lt\" => \"<""\",
+                    \"ge\" => \">=\",
+                    \"le\" => \"<""=\",
+                    _ => throw new ArgumentException($\"Unsupported prefix '{prefix}' for quantity search parameter\")
+                };
+                condition = $\"{alias}.value {op} {P(paramIndex)}\";
+                parameters.Add(NewParam(paramIndex, parsed));
+                paramIndex++;
+            }
+
+            if (pieces.Length == 3 && pieces[2].Length > 0)
+            {
+                if (pieces[1].Length > 0)
+                {
+                    condition += $\" AND {alias}.system = {P(paramIndex)} AND {alias}.code = {P(paramIndex + 1)}\";
+                    parameters.Add(NewParam(paramIndex, pieces[1]));
+                    parameters.Add(NewParam(paramIndex + 1, pieces[2]));
+                    paramIndex += 2;
+                }
+                else
+                {
+                    condition += $\" AND ({alias}.code = {P(paramIndex)} OR {alias}.unit = {P(paramIndex + 1)})\";
+                    parameters.Add(NewParam(paramIndex, pieces[2]));
+                    parameters.Add(NewParam(paramIndex + 1, pieces[2]));
+                    paramIndex += 2;
+                }
+            }
+
+            orParts.Add($\"({condition})\");
         }
 
         if (orParts.Count > 0)

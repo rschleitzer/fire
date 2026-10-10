@@ -162,7 +162,8 @@ namespace " (project-name) ".Search;
            (token-searches (filter (lambda (s) (and (string=? "token" (% "type" s)) (not (search-is-inline? s)))) table-search-list))
            (date-searches (filter (lambda (s) (and (string=? "date" (% "type" s)) (not (search-is-inline-instant? s)))) table-search-list))
            (ref-searches (filter (lambda (s) (string=? "reference" (% "type" s))) table-search-list))
-           (number-searches (filter (lambda (s) (string=? "number" (% "type" s))) table-search-list)))
+           (number-searches (filter (lambda (s) (string=? "number" (% "type" s))) table-search-list))
+           (quantity-searches (filter (lambda (s) (string=? "quantity" (% "type" s))) table-search-list)))
         ($"public static class " rn "SearchExtractor
 {
 " (model-inject-meta rn has-history)
@@ -172,6 +173,7 @@ namespace " (project-name) ".Search;
     (model-date-section rn date-searches)
     (model-ref-section rn ref-searches)
     (model-number-section rn number-searches)
+    (model-quantity-section rn quantity-searches)
     (model-helpers rn)
 "}
 ")))
@@ -1224,6 +1226,90 @@ namespace " (project-name) ".Search;
     public static List<""decimal?> " method-name "(JsonNode content) => new List<""decimal?>();
 
 "))
+
+; -------------------------------------------------------------------
+; Quantity search params: every Quantity a path of the search reaches,
+; as (value, system, code, unit). A path may run through backbone arrays
+; (Observation.component.value[x]); the walk flattens them. A choice
+; property is read under its JSON name for the Quantity variant
+; (value[x] -> valueQuantity).
+; -------------------------------------------------------------------
+
+; The JSON keys of one path element, first to last.
+(define (quantity-path-keys path)
+    (let* ((parts-node (select-children "parts" path))
+           (parts (if (node-list-empty? parts-node) '()
+                      (node-list->list (select-children "part" (node-list-first parts-node))))))
+        (let loop ((ps parts))
+            (if (null? ps) '()
+                (let* ((ref (% "ref" (car ps)))
+                       (prop (if ref (element-with-id ref) #f))
+                       (nm (if prop (% "name" prop) "")))
+                    (cons (if (and (null? (cdr ps)) prop (property-has-variants? prop)) ($ nm "Quantity") nm)
+                          (loop (cdr ps))))))))
+
+; One path as a C# string array literal.
+(define (quantity-path-literal keys)
+    ($ "new[] { "
+       (let loop ((ks keys) (first #t))
+           (if (null? ks) ""
+               ($ (if first "" ", ") "\"" (car ks) "\"" (loop (cdr ks) #f))))
+       " }"))
+
+; The paths of a search as literals, each once (the model repeats a path
+; for every type a choice property may take).
+(define (quantity-path-literals search)
+    (let* ((paths-node (select-children "paths" search))
+           (paths (if (node-list-empty? paths-node) '()
+                      (node-list->list (select-children "path" (node-list-first paths-node))))))
+        (let loop ((ps paths) (seen '()))
+            (if (null? ps) (reverse seen)
+                (let ((lit (quantity-path-literal (quantity-path-keys (car ps)))))
+                    (loop (cdr ps) (if (member lit seen) seen (cons lit seen))))))))
+
+(define (model-quantity-section rn searches)
+    (if (null? searches) ""
+        ($"    // -- Quantity search params --
+
+"
+            (apply $ (map (lambda (s)
+                (let* ((sn (% "name" s))
+                       (method-name ($ "Extract" (kebab-to-pascal sn))))
+                    ($"    public static List<""(decimal value, string? system, string? code, string? unit)> " method-name "(JsonNode content)
+    {
+        var results = new List<""(decimal value, string? system, string? code, string? unit)>();
+"
+                        (apply $ (map (lambda (lit)
+                            ($"        CollectQuantities(content, " lit ", 0, results);
+")) (quantity-path-literals s)))
+"        return results;
+    }
+
+")))
+                searches))
+"    private static void CollectQuantities(JsonNode? node, string[] path, int at, List<""(decimal value, string? system, string? code, string? unit)> results)
+    {
+        if (node == null) return;
+        if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+                CollectQuantities(item, path, at, results);
+            return;
+        }
+        if (node is not JsonObject obj) return;
+        if (at < path.Length)
+        {
+            CollectQuantities(obj[path[at]], path, at + 1, results);
+            return;
+        }
+        if (obj[\"value\"] is not JsonValue number || !number.TryGetValue(out decimal value)) return;
+        results.Add((value, QuantityText(obj[\"system\"]), QuantityText(obj[\"code\"]), QuantityText(obj[\"unit\"])));
+    }
+
+    private static string? QuantityText(JsonNode? node) =>
+        node is JsonValue text && text.TryGetValue(out string? s) ? s : null;
+
+")))
 
 ; ===================================================================
 ; HELPERS (always emitted)

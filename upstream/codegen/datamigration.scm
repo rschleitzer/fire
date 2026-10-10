@@ -219,14 +219,14 @@ WHERE s.version = r.current_version AND r.current_version > 0;\");
 ; expression the copy uses.
 
 ; The parameters the repository can actually rebuild. It emits its CreateSearchAsync cases from
-; the table searches of type string, token, date, reference and number only (see
-; repo-create-search), so anything else - a quantity parameter, say - would be answered with
+; the table searches of type string, token, date, reference, number and quantity only (see
+; repo-create-search), so anything else - a uri parameter, say - would be answered with
 ; "Unknown search parameter" and take the migration down. The same filter has to be applied here.
 (define (dm-reindex-searches resource)
     (node-list-filter
         (lambda (s) (let ((t (% "type" s)))
             (or (string=? "string" t) (string=? "token" t) (string=? "date" t)
-                (string=? "reference" t) (string=? "number" t))))
+                (string=? "reference" t) (string=? "number" t) (string=? "quantity" t))))
         (table-searches resource)))
 
 ; Drop and recreate, rather than emptying and refilling: DropSearchAsync is a DROP TABLE IF

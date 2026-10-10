@@ -81,6 +81,9 @@
 (define (number-table-searches resource)
     (node-list-filter (lambda (s) (and (string=? "number" (% "type" s)) (not (search-is-inline? s)))) (table-searches resource)))
 
+(define (quantity-table-searches resource)
+    (node-list-filter (lambda (s) (string=? "quantity" (% "type" s))) (table-searches resource)))
+
 ; Table name with schema prefix: "patient.resource" (PG/MSSQL) or "patient_resource" (SQLite)
 (define (migration-table schema table db)
     ($ (db-schema-prefix schema db) table))
@@ -109,6 +112,7 @@
                     (migration-instant-tables rn schema resource db)
                     (migration-reference-tables rn schema resource db)
                     (migration-number-tables rn schema resource db)
+                    (migration-quantity-tables rn schema resource db)
                 ))))))
 
 ; --- Header ---
@@ -363,6 +367,33 @@
 
 " (loop (cdr items))))))))))
 
+; --- Quantity search tables ---
+
+(define (migration-quantity-tables rn schema resource db)
+    (let ((searches (node-list->list (quantity-table-searches resource))))
+        (if (null? searches) ""
+            ($"-- =============================================================================
+-- Quantity search tables (value DECIMAL, system, code, unit)
+-- =============================================================================
+
+" (let loop ((items searches))
+    (if (null? items) ""
+        (let* ((tn (search-table-name (car items)))
+               (tbl (migration-table schema tn db))
+               (res-tbl (db-public-table rn db)))
+            ($"" (db-create-table db) tbl " (
+    id INT NOT NULL,
+    resource_id " (db-id-type db) " NOT NULL REFERENCES " res-tbl "(id) ON DELETE CASCADE,
+    value " (db-type "decimal" db) ",
+    system " (db-search-text-type db) ",
+    code " (db-search-text-type db) ",
+    unit " (db-search-text-type db) ",
+    PRIMARY KEY (id, resource_id)
+);
+" (db-create-index db) "ix_" schema "_" tn "_value ON " tbl " (value);
+
+" (loop (cdr items))))))))))
+
 ; --- Index management SQL ---
 
 ; Helper to get DROP INDEX prefix with schema for a given db
@@ -486,6 +517,7 @@
             (for (instant-table-searches resource) del-search)
             (for (reference-table-searches resource) del-search)
             (for (number-table-searches resource) del-search)
+            (for (quantity-table-searches resource) del-search)
             (if (binary-data-table? rn db) (del (migration-table schema "resource_data" db)) "")
             (if (history? resource) (del (migration-table schema "resource_history" db)) "")
             (del (db-public-table rn db)))))
