@@ -425,7 +425,7 @@ class Program
         var dictCodeSystems = codeSystems.ToDictionary(cs => cs.Url);
 
         Console.WriteLine("Building model...");
-        var model = new FhirModel { Name = "FHIR", Version = "5.0.0" };
+        var model = new FhirModel { Name = "Fire", Version = "5.0.0" };
 
         var dictElements = new Dictionary<string, List<Element>>();
         var dictProperties = new Dictionary<string, List<Property>>();
@@ -502,20 +502,20 @@ class Program
 
     static string FindBasePath()
     {
-        // Walk up from current directory looking for fhir.xml
+        // Walk up from current directory looking for fire.dtd
         var dir = Directory.GetCurrentDirectory();
         while (dir != null)
         {
-            if (File.Exists(Path.Combine(dir, "fhir.xml")))
+            if (File.Exists(Path.Combine(dir, "fire.dtd")))
                 return dir;
             dir = Directory.GetParent(dir)?.FullName;
         }
         // Fallback: try two levels up from the tool location
         var toolDir = AppContext.BaseDirectory;
         var candidate = Path.GetFullPath(Path.Combine(toolDir, "..", "..", "..", "..", ".."));
-        if (File.Exists(Path.Combine(candidate, "fhir.xml")))
+        if (File.Exists(Path.Combine(candidate, "fire.dtd")))
             return candidate;
-        throw new Exception("Cannot find project root (looking for fhir.xml)");
+        throw new Exception("Cannot find project root (looking for fire.dtd)");
     }
 
     // ========================================================================
@@ -574,7 +574,7 @@ class Program
 
     static bool IsResource(string name) => ResourceNames.Contains(name);
 
-    static bool IsActive(string name) => name is "Observation" or "Patient" or "Practitioner";
+    static bool IsActive(string name) => name is "Binary" or "Observation" or "Patient" or "Practitioner" or "Provenance";
 
     static bool IsModel(string name) => name is "Resource" or "Bundle" or "CapabilityStatement"
         or "CompartmentDefinition" or "ConceptMap" or "OperationDefinition"
@@ -1589,7 +1589,7 @@ class Program
     {
         var sb = new System.Text.StringBuilder(8 * 1024 * 1024); // 8MB initial
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
-        sb.AppendLine("<!DOCTYPE fhir SYSTEM \"fhirspec.dtd\">");
+        sb.AppendLine("<!DOCTYPE fhir SYSTEM \"fire.dtd\">");
         sb.Append($"<fhir name=\"{Esc(model.Name)}\" version=\"{Esc(model.Version)}\">");
         sb.AppendLine();
 

@@ -1,0 +1,10 @@
+# everything the generator and the converter write
+/server/
+/model/
+/client/
+/fhir.xml
+# HL7's definitions, fetched by tools/fetch-definitions.sh
+/fhir-r5/
+bin/
+obj/
+*.db

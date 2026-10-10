@@ -1,7 +1,11 @@
 <![CDATA[
-(define (documentation-root) "server/wwwroot/")
+; The pages lie in the server's wwwroot: the directories are made by the
+; directory flow object, as everywhere in this generator, and a page's
+; system-id is its file name alone.
+(define (documentation-root) "")
 
 (element book
+    (make directory path: (project-dir) (make directory path: "wwwroot"
     (make sequence
          (make entity
             system-id: ($ (documentation-root)"index.html")
@@ -28,7 +32,7 @@
 
         )
         (process-node-list (select-children "part" (current-node)))
-    )
+    )))
 )
 ]]>
 

@@ -5,18 +5,29 @@ to Scaly and dazzle. Private while it is being set up.
 
 ## upstream/
 
-The starting point, unchanged, as a reference for the port:
+The C# side, whole and by itself: everything that is C# or makes C# lies
+here and nowhere else.
 
 - `fire.dtd` — the DTD of the XML model the generator reads.
-- `codegen/` — the DSSSL generator that writes the C# server from that model
-  (taken at commit ced8f5ce of its repository; the two generators for the
-  admin interface's TypeScript are not part of it).
-- `tools/fhir-to-xml/` — the C# tool that turns HL7's FHIR definitions into
-  the XML model (from the archived first version of this repository, commit
-  63fd799). It predates the current DTD and has to be brought up to it.
+- `codegen/` — the DSSSL generator that writes the C# server, its model and
+  its client from that model (taken at commit ced8f5ce of the repository it
+  was developed in; the two generators for an admin interface's TypeScript
+  are not part of it).
+- `tools/fhir-to-xml/` — the C# tool that turns HL7's FHIR R5 definitions
+  into the XML model.
+- `documentation/` — the server's documentation in DocBook; the generator
+  writes its pages into the server's `wwwroot`.
+- `test/`, `fire.sln`, `Dockerfile`, `docker_build`, `sql/` — the test
+  project and what builds and ships the server.
 
-Nothing under `upstream/` is edited here. The server product these files
-come from, its configuration and any data are not in this repository.
+`upstream/fire.sh` runs all of it: it fetches the definitions, writes
+`fhir.xml`, and generates `server/`, `model/` and `client/` — 322 files,
+none of them kept in git (`upstream/.gitignore`). The directories are made
+by the generator's directory flow objects; `dotnet build fire.sln` builds
+what it wrote. It needs dotnet 10 and dazzle (`DAZZLE` names one that is not
+on the PATH).
 
-The licence of `upstream/` is being settled; until it is, this repository
-stays private.
+Licence of `upstream/`: MIT, `upstream/LICENSE`.
+
+The server product this generator was developed for, its configuration and
+any data are not in this repository.

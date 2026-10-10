@@ -1,0 +1,1062 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook V5.0/EN" "docbook.dtd" >
+
+<book><title>Fire FHIR Server</title>
+
+    <preface>
+
+        <para>Fire is an open-source FHIR R5 server framework that generates a complete, FHIR-compliant server
+        from a curated XML model using DSSSL code generation.</para>
+
+    </preface>
+
+    <part xml:id="designdevelopment"><title>Design and Development</title>
+
+        <partintro>
+            <para>This part provides an overall view of the <link linkend="design">design of Fire</link>
+            and introduces you to <link linkend="development">key development procedures</link>.</para>
+        </partintro>
+
+        <chapter xml:id="design"><title>Design</title>
+
+            <para>Understanding the design of Fire is crucial for being successful in </para>
+
+            <itemizedlist>
+                <listitem><para><link linkend="deployment">deploying</link>,</para></listitem>
+                <listitem><para><link linkend="maintenance">supporting</link>,</para>
+                <para>and</para></listitem>
+                <listitem><para><link linkend="working">using</link> it in projects, </para></listitem>
+            </itemizedlist>
+
+            <para>as well as for <link linkend="development">developing it further</link>. In the following sections, the
+            <link linkend="components">components of Fire</link> and the
+            <link linkend="designprinciples">design principles</link> are documented.</para>
+
+
+            <sect1 xml:id="components"><title>Components</title>
+
+                <para>Fire consists of a FHIR server and the code generation infrastructure that produces it.</para>
+
+                <sect2 xml:id="fhirserver"><title>FHIR Server</title>
+
+                    <para>The <olink targetdoc="https://hl7.org/fhir">FHIR server</olink> is the core of Fire. It provides
+                    a <olink targetdoc="https://hl7.org/fhir">standard way</olink> to access medical data. It stores data as
+                    <olink targetdoc="resourcelist.html">FHIR resources</olink> and allows you to</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>query them with <olink targetdoc="https://hl7.org/fhir/search.html">FHIR searches</olink>
+                        using the <olink targetdoc="https://hl7.org/fhir/http.html">FHIR RESTful API</olink>,</para></listitem>
+
+                        <listitem><para>use <olink targetdoc="https://hl7.org/fhir/operations.html">batch and transaction bundles</olink>
+                        to perform multiple operations atomically,</para>
+                        <para>and</para>
+                        </listitem>
+
+                        <listitem><para>browse, edit, and manage resources through the built-in HTML interface.</para>
+                        </listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+                <sect2 xml:id="codegencomponent"><title>Code Generator</title>
+
+                    <para>The code generator produces the entire FHIR server from a curated XML model using
+                    <link linkend="codegen">DSSSL</link>. This includes C# source code, SQL DDL, JavaScript,
+                    and project files.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="designprinciples"><title>Design Principles</title>
+
+                <para>The following sections describe some details of the FHIR server design such as
+                <link linkend="datamodel">the general data layout</link>, <link linkend="repository">data access layer</link>,
+                and <link linkend="contentformat">content storage</link>.</para>
+
+                <sect2 xml:id="datamodel"><title>Data Model</title>
+
+                    <para>For each resource type, a resource table with the resource name (e.g. <database class="table">Patient</database>)
+                    exists in the <literal>public</literal> schema. A per-resource schema with the same name contains the
+                    history and search tables:</para>
+
+                    <variablelist>
+
+                        <varlistentry>
+
+                            <term><database class="table">{Resource}</database> (in <literal>public</literal>)</term>
+
+                                <listitem><para>The main resource table. It contains one record per resource. Its fields store the
+                                ID, the current version number, and inline search parameters for non-multiple top-level properties.</para></listitem>
+
+                        </varlistentry>
+
+                        <varlistentry>
+
+                            <term><database class="table">{Resource}.resource_history</database></term>
+
+                                <listitem><para>This table is present only for resources with history enabled. It contains
+                                previous versions of the resource content.</para></listitem>
+
+                        </varlistentry>
+
+                        <varlistentry>
+
+                            <term><database class="table">{Resource}.search_[name]</database></term>
+
+                                <listitem><para>Each of these tables contain search information in respect to the search parameter [name].</para></listitem>
+
+                        </varlistentry>
+
+                    </variablelist>
+
+                    <para>The resource content is stored as raw UTF-8 JSON bytes. For JSON responses, these bytes are written
+                    directly to the HTTP response with zero parsing and zero serialization overhead.</para>
+
+                </sect2>
+
+                <sect2 xml:id="repository"><title>Repository Layer</title>
+
+                    <para>The repository layer uses the <link linkend="datamodel">tables in the data model</link> implementing
+                    an API for</para>
+
+                    <orderedlist>
+                        <listitem><para>storing and loading resources,</para></listitem>
+                        <listitem><para>searching for resources using the search parameters defined for them,</para>
+                        <para>and</para></listitem>
+                        <listitem><para>supporting functionality such as schema maintenance.</para></listitem>
+                    </orderedlist>
+
+                    <para>Currently, the repository layer supports</para>
+
+                    <itemizedlist>
+
+                        <listitem><para><olink targetdoc="https://www.postgresql.org">PostgreSQL</olink>,</para></listitem>
+
+                        <listitem><para><olink targetdoc="https://www.microsoft.com/en-us/sql-server">SQL Server</olink>,</para>
+
+                        <para>and</para>
+
+                        </listitem>
+
+                        <listitem><para><olink targetdoc="https://www.sqlite.org">SQLite</olink>.</para></listitem>
+
+                    </itemizedlist>
+
+                    <para>Most of the search parameters defined in the <olink targetdoc="https://hl7.org/fhir">FHIR</olink> standard are supported.</para>
+
+                    <para>For a given search request, a single SQL statement is built and executed, which is used for retrieving the ID/version
+                    pairs, a count value, or, in the case of autocomplete, the desired values.</para>
+
+                    <para>If the number of search results exceeds the desired number of resources as expressed in the <parameter>_count</parameter> parameter
+                    (which defaults to 20 and is limited to 100), the ID/version pairs are stored in the <database class="table">snapshot</database> table
+                    which supports paging through the search results.</para>
+
+                </sect2>
+
+                <sect2 xml:id="contentformat"><title>Content Storage</title>
+
+                    <para>Resource content is stored as raw UTF-8 JSON bytes (BYTEA in PostgreSQL, VARBINARY in SQL Server, BLOB in SQLite).
+                    For JSON responses, the bytes are written directly to the HTTP response without any parsing or serialization.
+                    Parsing to JsonNode only happens when needed for XML or HTML format conversion, bundle construction,
+                    search extraction, or composite filtering.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="development"><title>Development</title>
+
+            <para>This chapter describes working with <link linkend="generating">code generation</link>, <link linkend="building">how to build code</link>,
+            and <link linkend="producing">producing this documentation</link>.</para>
+
+            <sect1 xml:id="generating"><title>Generating Code</title>
+
+                <para>The entire code of the FHIR server is generated from an XML model which is, in turn, obtained from the
+                <olink targetdoc="https://hl7.org/fhir/downloads.html">FHIR specification</olink>. The following sections provide an overview of this
+                process.</para>
+
+                <sect2 xml:id="generatingdesign"><title>Design</title>
+
+                    <para>The FHIR server is built by performing the following steps:</para>
+
+                    <orderedlist>
+
+                        <listitem><para>Processing the <olink targetdoc="https://hl7.org/fhir/definitions.json.zip">JSON files</olink>
+                        from the <olink targetdoc="https://hl7.org/fhir/downloads.html">Downloads page</olink> of the FHIR specification using the
+                        <link linkend="modeler">Modeler</link>,</para></listitem>
+
+                        <listitem><para><link linkend="fhirspec">Editing</link> the obtained <filename>fhir.xml</filename> by commenting out
+                        unsupported parts and adding non-standard features.</para></listitem>
+
+                        <listitem><para><link linkend="codegen">Generating code</link> from <filename>fhir.xml</filename>.</para></listitem>
+
+                    </orderedlist>
+
+                </sect2>
+
+                <sect2 xml:id="modeler"><title>The Modeler</title>
+
+                    <para>The <olink targetdoc="https://hl7.org/fhir">FHIR</olink> specification is formulated in a set of resources like
+                    <classname>StructureDefinition</classname>, <classname>OperationDefinition</classname>, <classname>CodeSystem</classname>,
+                    <classname>ValueSet</classname>, and <classname>SearchParameter</classname>.</para>
+
+                    <para>These following JSON files from the <olink targetdoc="https://hl7.org/fhir/definitions.json.zip">zip file</olink>
+                    are read and processed:</para>
+
+                    <variablelist>
+
+                        <varlistentry>
+
+                            <term><filename>profiles-resources.json</filename></term>
+
+                                <listitem><para>The resources.</para></listitem>
+
+                        </varlistentry>
+
+                        <varlistentry>
+
+                            <term><filename>profiles-types.json</filename></term>
+
+                                <listitem><para>The data types.</para></listitem>
+
+                        </varlistentry>
+
+                        <varlistentry>
+
+                            <term><filename>valuesets.json</filename></term>
+
+                                <listitem><para>The value sets and code systems.</para></listitem>
+
+                        </varlistentry>
+
+                        <varlistentry>
+
+                            <term><filename>search-parameters.json</filename></term>
+
+                                <listitem><para>The search parameters.</para></listitem>
+
+                        </varlistentry>
+
+                    </variablelist>
+
+                    <para>The Modeler reads all information required for code generation from these files, fixes some
+                    structural problems and inconsistencies, and consolidates it into one XML file <filename>fhir.xml</filename>.</para>
+
+                </sect2>
+
+                <sect2 xml:id="fhirspec"><title>Editing the XML Model</title>
+
+                    <para>The <filename>fhir.xml</filename> output of the <link linkend="modeler">Modeler</link>
+                    contains all resources and search parameters from the FHIR specification. Resources are activated
+                    for code generation by setting their <property>active</property> attribute to <code>true</code>.</para>
+
+                    <para>The following elements and attributes are defined in the <filename>fhirspec.dtd</filename>
+                    (with the obvious plural elements and the <property>id</property> and <property>name</property>
+                    attributes omitted):</para>
+
+                    <variablelist>
+
+                        <varlistentry><term><classname>resource</classname></term>
+                            <listitem><para>A resource definition. The <property>active</property> attribute
+                            shows whether the FHIR server shall support the resource. The <property>history</property> attribute
+                            controls whether versioning is enabled for the resource.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>description</classname></term>
+                            <listitem><para>A description of a <classname>resource</classname>,
+                            <classname>element</classname>, <classname>property</classname>, <classname>codeset</classname>,
+                            <classname>codeset</classname>, <classname>code</classname>, <classname>operation</classname>,
+                            or <classname>parameter</classname> to be used as inline code documentation comments
+                            or for producing reference documentation content.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>element</classname></term>
+                            <listitem><para>The definition of a data type, either global or in the scope of a resource.
+                            The <property>backbone</property> attribute is <code>true</code> if the element is a
+                            <classname>BackboneType</classname>, i.e, if it contains the <code>modifierExtension</code> property.
+                            </para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>property</classname></term>
+                            <listitem><para>A property of a resource or an element. The <property>iscollection</property> attribute
+                            is <code>true</code> if the multiplicity of the property can be greater than 1.
+                            The <property>notnull</property> attribute is <code>true</code> if its multiplicity must be at least 1.
+                            The <property>summary</property> attribute is <code>true</code> if the property is included in
+                            resource summaries.The <property>summary</property> attribute is <code>true</code> if the property is
+                            a modifier.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>variant</classname></term>
+                            <listitem><para>A possible data type of a property.
+                            The <property>type</property> attribute refers to its data type. The default is <code>string</code>.
+                            The <property>ref</property> attribute links to an element if the type is <code>element</code>.
+                            If the type is <code>code</code> and the <property>ref</property> attribute is present, then it links
+                            to a <classname>codeset</classname> element which contains the possible codes for a code property with the
+                            <olink targetdoc="https://hl7.org/fhir/terminologies.html#required">Required
+                            binding strength</olink>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>target</classname></term>
+                            <listitem><para>A possible target resource type of a <code>reference</code> variant.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>codeset</classname></term>
+                            <listitem><para>A set of possible codes.
+                            The <property>type</property> attribute refers to its data type. The default is <code>string</code>.
+                            The <property>ref</property> attribute links to an element if the type is <code>element</code>.
+                            If the type is <code>code</code> and the <property>ref</property> attribute is present, then it links
+                            to a <classname>codeset</classname> element which contains the possible codes.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>code</classname></term>
+                            <listitem><para>A possible code with the <property>value</property> attribute
+                            as its value.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>search</classname></term>
+                            <listitem><para>A description of a search parameter. The <property>query</property> attribute is
+                            an alternative name of the search parameter to be used in programming languages like C.
+                            The <property>type</property> attribute is the <olink targetdoc="https://hl7.org/fhir/search.html#ptypes">search parameter type</olink>.
+                            The <property>customsort</property> attribute is <code>true</code> for a search parameter
+                            with custom sorting behavior.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>path</classname></term>
+                            <listitem><para>A possible path for a search parameter.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>part</classname></term>
+                            <listitem><para>A part of a search path. The <property>ref</property> attribute links to the
+                            property that represents this search path part. The <property>resolve</property> attribute links to a variant
+                            of the property which is to be used for this part. The <property>property</property> and
+                            <property>type</property> attributes may impose a condition on this part. The <property>first</property>
+                            attribute means that only the first element of this part is considered for matching.
+                            The <property>notnull</property> attribute means that the part must not be null for being considered for matching.
+                            The <property>variant</property>, <property>op</property>, and <property>value</property>  attributes
+                            select names a variant, an operation, and a value to be used as matching criterion.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>cast</classname></term>
+                            <listitem><para>A possible variant of a search path. The <property>to</property> attribute of this element
+                            links to a possible variant of a search path or a component of a
+                            <olink targetdoc="https://hl7.org/fhir/search.html#composite">composite search parameter</olink> .</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>component</classname></term>
+                            <listitem><para>A component of a <olink targetdoc="https://hl7.org/fhir/search.html#composite">composite search parameter</olink>.
+                            The <property>ref</property> attribute of this element links to the property for this component.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                </sect2>
+
+                <sect2 xml:id="codegen"><title>The Code Generator</title>
+
+                    <para>The entire FHIR server is generated from <link linkend="fhirspec">fhir.xml</link> using
+                    <olink targetdoc="https://github.com/nickreserworked/dazzle">Dazzle</olink>, a DSSSL processor. DSSSL is the
+                    <olink targetdoc="ftp://ftp.jclark.com/pub/dsssl/dsssl96b.pdf.gz">Document Style Semantics and Specification Language</olink>.
+                    Much valuable information about DSSSL processors can be found on the home page of
+                    <olink targetdoc="http://www.jclark.com/jade/">Jade</olink>. Generating both the code and the
+                    documentation of the FHIR server relies heavily on the non-standard
+                    <olink targetdoc="http://www.jclark.com/jade/transform.htm">SGML Transformation</olink> backend.
+                    </para>
+
+                    <para>Code is generated by running the <filename>fire.sh</filename> script in the
+                    git repository root. This script runs Dazzle with <filename>codegen/map.dsl</filename>
+                    as the main stylesheet.</para>
+
+                    <para>The code generation is controlled by on/off switches in <filename>codegen/config.scm</filename>
+                    and produces the following output:</para>
+
+                    <variablelist>
+
+                        <varlistentry><term>C# project and infrastructure files</term>
+                            <listitem><para>Generated by <filename>codegen/boilerplate.scm</filename>: the project file,
+                            Program.cs, Database.cs, and cross-resource helpers like SearchHelper, BundleHandler,
+                            and FhirXmlSerializer.</para></listitem></varlistentry>
+
+                        <varlistentry><term>SQL DDL</term>
+                            <listitem><para>Generated by <filename>codegen/migration.scm</filename>: database schemas,
+                            resource tables, history tables, and search index tables for all three database backends.</para></listitem></varlistentry>
+
+                        <varlistentry><term>C# model classes</term>
+                            <listitem><para>Generated by <filename>codegen/models.scm</filename>: per-resource model classes
+                            with search extraction methods.</para></listitem></varlistentry>
+
+                        <varlistentry><term>C# repository classes</term>
+                            <listitem><para>Generated by <filename>codegen/repositories.scm</filename>: per-resource
+                            CRUD and search with parameterized SQL.</para></listitem></varlistentry>
+
+                        <varlistentry><term>C# handler classes</term>
+                            <listitem><para>Generated by <filename>codegen/handlers.scm</filename>: per-resource
+                            minimal API handlers with enum validation and FHIR HTTP semantics.</para></listitem></varlistentry>
+
+                        <varlistentry><term>JavaScript</term>
+                            <listitem><para>Generated by <filename>codegen/js.scm</filename>: per-resource
+                            browser-based resource editing UI.</para></listitem></varlistentry>
+
+                        <varlistentry><term>HTML documentation</term>
+                            <listitem><para>Generated by <filename>codegen/html.scm</filename>: per-resource
+                            reference documentation pages and the resource list page.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="building"><title>Building Code</title>
+
+                <para>Building Fire can be done with any editor or simply by performing the following commands:</para>
+
+                <orderedlist>
+
+                    <listitem><para>Generate the code:</para>
+                    <para><command>./fire.sh</command></para></listitem>
+
+                    <listitem><para>Build the project:</para>
+                    <para><command>dotnet build Fire/Fire.csproj</command></para></listitem>
+
+                    <listitem><para>Run the server:</para>
+                    <para><command>dotnet run --project Fire/Fire.csproj</command></para></listitem>
+
+                </orderedlist>
+
+                <para>The full nuke test regenerates everything from scratch:</para>
+                <para><command>rm -rf Fire/ sql/ &amp;&amp; ./fire.sh &amp;&amp; dotnet build Fire/Fire.csproj</command></para>
+
+            </sect1>
+
+            <sect1 xml:id="producing"><title>Producing Documentation</title>
+
+                <para>The Fire documentation is accessible via the <olink targetdoc="index.html">index.html</olink>
+                page of the FHIR server. This section describes how to <link linkend="writing">write the documentation source</link>,
+                and how to <link linkend="generatingdoc">generate the documentation HTML files</link>.
+                </para>
+
+                <sect2 xml:id="writing"><title>Writing</title>
+
+                    <para>The prose parts of the documentation are written in
+                    <olink targetdoc="https://tdg.docbook.org/tdg/5.0/docbook">DocBook</olink>, an XML documentation schema
+                    especially well suited for describing hardware and software. Currently, one single source file
+                    <filename>documentation/fire.xml</filename> contains the complete prose contents of the documentation.</para>
+
+                    <para>The reference parts like the reference pages of the individual resources are <link linkend="codegen">generated</link>
+                    from <link linkend="fhirspec"><filename>fhir.xml</filename></link> along with the code of the FHIR server.</para>
+
+                    <para>The file <filename>fire.xml</filename> can be edited using any text editor. Working on this
+                    file with an XML editor should be more convenient. Visual Studio Code with a good XML extension
+                    can aid you with the writing by proposing or closing elements and indicating XML structure errors.</para>
+
+                </sect2>
+
+                <sect2 xml:id="generatingdoc"><title>Generating Documentation</title>
+
+                    <para>You generate the prose parts of the documentation by running the <filename>docu.sh</filename>
+                    script in the git repository root. This command runs <link linkend="codegen">Dazzle</link>
+                    which uses <filename>codegen/documentation.dsl</filename> for transforming the DocBook contents
+                    of <filename>fire.xml</filename> into HTML.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+    <part xml:id="planningdeployment"><title>Planning, Deployment, and Maintenance</title>
+
+        <partintro>
+            <para>This part gives an overview over <link linkend="planning">planning a Fire installation</link>,
+            <link linkend="deployment">deploying it</link>, and <link linkend="maintenance">maintenance tasks</link>
+            like <link linkend="schemas">creating and dropping schemas</link>, and <link linkend="browsing">browsing, deleting</link>,
+            and <link linkend="editing">editing data</link>.</para>
+        </partintro>
+
+        <chapter xml:id="planning"><title>Planning</title>
+
+            <para>Planning for a Fire installation involves making decisions about</para>
+
+            <itemizedlist>
+
+                <listitem><para>the <link linkend="operatingsystem">operating system</link>,</para></listitem>
+
+                <listitem><para>the <link linkend="database">database technology</link>,</para>
+
+                <para>and</para></listitem>
+
+                <listitem><para>the <link linkend="processor">processor architecture</link>.</para></listitem>
+
+            </itemizedlist>
+
+            <sect1 xml:id="operatingsystem"><title>Operating System</title>
+
+                <para>Since Fire runs on <olink targetdoc="https://dotnet.microsoft.com/en-us/">.NET</olink>, it can in principle
+                run on any operating system supported by the .NET platform. Popular choices are</para>
+
+                <itemizedlist>
+
+                    <listitem><para><link linkend="linux">Linux</link>,</para></listitem>
+
+                    <listitem><para><link linkend="windows">Windows</link>,</para>
+
+                        <para>and</para></listitem>
+
+                    <listitem><para><link linkend="macos">macOS</link>.</para></listitem>
+
+                </itemizedlist>
+
+                <sect2 xml:id="linux"><title>Linux</title>
+
+                    <para>Running Fire on Linux in a <olink targetdoc="https://www.docker.com">Docker</olink>
+                    based installation is recommended for its ease of installation and maintenance.</para>
+
+                    <para>Since Docker completely isolates the server from the hosting operating system
+                    (which can be itself be virtualized), you can run Fire either on premises or in cloud-based
+                    services like <olink targetdoc="https://aws.amazon.com">Amazon Web Services</olink> or
+                    <olink targetdoc="https://azure.microsoft.com">Microsoft Azure</olink>.</para>
+
+                </sect2>
+
+                <sect2 xml:id="windows"><title>Windows</title>
+
+                    <para>Running Fire on <olink targetdoc="https://www.microsoft.com/en-us/windows-server">Windows</olink>
+                    can be useful</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>for local deployment during development,</para>
+
+                        <para>or</para></listitem>
+
+                        <listitem><para>for on-premises or cloud-based installations for organizations
+                        with limited experience with Linux or Docker.</para></listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+                <sect2 xml:id="macos"><title>Mac OS</title>
+
+                    <para>For local development, you can use any editor or IDE to develop Fire.</para>
+
+                    <para>For offline work if internet access is not available, you can use
+                    <olink targetdoc="https://www.docker.com/products/docker-desktop">Docker Desktop</olink>
+                    to run <olink targetdoc="https://www.postgresql.org">PostgreSQL</olink>
+                    as a local database server. Alternatively, SQLite can be used without any external
+                    database server.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="processor"><title>Processor Architecture</title>
+
+                <para>For many years, processors with the
+                <olink targetdoc="https://www.intel.com/content/www/us/en/architecture-and-technology/microarchitecture/intel-64-architecture-general.html">Intel
+                64 bit architecture</olink>, made by <olink targetdoc="https://www.intel.com/content/www/us/en/homepage.html">Intel</olink> or
+                <olink targetdoc="https://www.amd.com/en.html">AMD</olink>, were the <link linkend="intel">obvious choice</link> for running server software in general.</para>
+
+                <para>In the last years, processors with ARM architecture have become available with the major cloud providers, and are
+                now used in desktop and laptop computers as well.</para>
+
+                <sect2 xml:id="intel"><title>Intel</title>
+
+                    <para>For decades, using processors with the
+                    <olink targetdoc="https://www.intel.com/content/www/us/en/architecture-and-technology/microarchitecture/intel-64-architecture-general.html">Intel
+                     64 bit architecture</olink> was a no-brainer because of their maturity and ubiquitous availability.</para>
+
+                    <para>The design of these processors, however, carries a heavy burden of a complex instruction set that dates back to the seventies of the
+                    last century, when it was originally designed for a 16-bit processor. The instruction set has then been extended for 32-bit and finally 64-bit processors.
+                    The basic structure of the instruction set, however, remained unchanged. Modern processors of this type have to translate the instructions
+                    internally to execute them which causes massive overhead in terms of power consumption for a certain workload.</para>
+
+                    <para>Therefore, you should consider running and even developing Fire on an <link linkend="arm">ARM</link> based platform.</para>
+
+                </sect2>
+
+                <sect2 xml:id="arm"><title>ARM</title>
+
+                    <para>The big advantage of the ARM architecture is a much lower power consumption which helps reducing your energy costs and your carbon footprint.
+                    In cloud environments, this should directly relate to lower prices for the same workload.</para>
+
+                    <para>You can run Fire on ARM based cloud instances like <olink targetdoc="https://aws.amazon.com/ec2/graviton/">AWS Graviton EC2 instances</olink>.</para>
+
+                    <para>It makes even sense to do Fire development on an ARM based MacBook because compiling on such a machine
+                    drains the battery much slower.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="database"><title>Database</title>
+
+
+                <para>Fire stores <olink targetdoc="resourcelist.html">FHIR resources</olink>
+                in a relational database which can be</para>
+
+                <itemizedlist>
+
+                    <listitem><para><olink targetdoc="https://www.postgresql.org">PostgreSQL</olink>,</para></listitem>
+
+                    <listitem><para><olink targetdoc="https://www.microsoft.com/en-us/sql-server">SQL Server</olink>,</para>
+
+                    <para>or</para>
+
+                    </listitem>
+
+                    <listitem><para><olink targetdoc="https://www.sqlite.org">SQLite</olink>.</para></listitem>
+
+                </itemizedlist>
+
+                <para>The decision for one or the other technology depends on the requirements of the deployment environment
+                and the availability of database administration know-how in the organization.</para>
+
+                <sect2 xml:id="postgresql"><title>PostgreSQL</title>
+
+                    <para>Using <olink targetdoc="https://www.postgresql.org">PostgreSQL</olink> is the primary option for storing
+                    the FHIR resources. It is the most thoroughly tested database backend.</para>
+
+                    <para>Even though PostgreSQL requires very little database administration work, it is important to perform
+                    <olink targetdoc="https://www.postgresql.org/docs/current/backup.html">database backups</olink> on a regular basis.</para>
+
+                </sect2>
+
+                <sect2 xml:id="mssqlserver"><title>MS SQL Server</title>
+
+                    <para>If your organization has specialized SQL Server administration know-how, you may consider using
+                    SQL Server for storing the FHIR resources. SQL Server is a very mature database platform with many monitoring
+                    and optimization options.</para>
+
+                </sect2>
+
+                <sect2 xml:id="sqlite"><title>SQLite</title>
+
+                    <para>SQLite is useful for development, testing, and small-scale deployments where running a separate
+                    database server is not desired. It requires no installation or configuration.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="deployment"><title>Deployment</title>
+
+            <para>Deploying Fire is possible as a <link linkend="docker">Docker container</link> or,
+            on Windows, as a <link linkend="deploymentwin">Windows service</link>.</para>
+            <para>Deploying includes <link linkend="configuring">configuring</link> the server.</para>
+
+            <sect1 xml:id="docker"><title>Docker</title>
+
+                <para>Fire can be deployed as a Docker container.</para>
+                <para>Adjust the <link linkend="configuring">settings</link> in the
+                <filename>appsettings.json</filename> file.</para>
+
+            </sect1>
+
+            <sect1 xml:id="deploymentwin"><title>Windows</title>
+
+                <para>Fire can be deployed as a Windows service.</para>
+
+                <para>To install Fire as a Windows service, perform the following steps:</para>
+
+                <orderedlist>
+
+                    <listitem><para>Build the project with</para>
+                    <para><command>dotnet publish -c Release</command></para></listitem>
+
+                    <listitem><para>Copy the binaries from the <filename>bin\Release\net10.0\publish</filename>
+                    directory to a directory on your computer.</para></listitem>
+
+                    <listitem><para>Log into a command prompt with Administrator rights.</para></listitem>
+
+                    <listitem><para>Run the <command>sc create</command> for the service to be created. An example:</para>
+                    <para><command>sc create "Fire FHIR Server" binPath= "C:\stage\fire\Fire.exe --service"</command></para>
+                    <para>The space after the <command>binPath=</command> is important. If you omit it, the command will not work.</para></listitem>
+
+                    <listitem><para>Adjust the <link linkend="configuring">settings</link> in the <filename>appsettings.json</filename> file in the
+                    directory of the service.</para></listitem>
+
+                </orderedlist>
+
+            </sect1>
+
+            <sect1 xml:id="configuring"><title>Configuring</title>
+
+                <para>The <filename>appsettings.json</filename> file contains the following parameters which have to be configured
+                for your installation:</para>
+
+                <variablelist>
+
+                    <varlistentry>
+                        <term><parameter>DatabaseType</parameter></term>
+                            <listitem><para><parameter>PostgreSql</parameter>, <parameter>SqlServer</parameter>,
+                            or <parameter>Sqlite</parameter>,
+                            depending on your database type.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>ConnectionString</parameter></term>
+                            <listitem><para>The connection string to your database.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>Origins</parameter></term>
+                            <listitem><para>The URLs that are allowed for cross-origin access.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>PurgeKey</parameter></term>
+                            <listitem><para>The key required for administrative operations such as
+                            index management, purging deleted data, and managing search tables.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>SeedDataPath</parameter></term>
+                            <listitem><para>Optional path to a directory containing FHIR resource JSON files
+                            to be loaded as seed data on startup.</para></listitem></varlistentry>
+
+                </variablelist>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="maintenance"><title>Maintenance</title>
+
+            <para>This chapter describes <link linkend="schemas">database schema management</link>,
+            and <link linkend="browsing">browsing, editing, and deleting data</link> with just the FHIR server itself.</para>
+
+            <sect1 xml:id="schemas"><title>Database Schemas</title>
+
+                <para>Fire automatically creates all database schemas, tables, and indices when the server starts.
+                There is no manual schema creation step required. Simply create an empty database according to the
+                connection string in the <link linkend="configuring">configuration file</link> and start the server.</para>
+
+                <para>If a software update introduces new resources or search parameters, the server will create
+                the necessary tables and indices on the next startup.</para>
+
+                <para>In a development or testing environment, you can reset the database by dropping and recreating it,
+                then restarting the server.</para>
+
+                <sect2 xml:id="indexes"><title>Managing Indexes</title>
+
+                    <para>Fire provides administrative endpoints for managing search indexes. These endpoints
+                    require the <link linkend="configuring">PurgeKey</link> for authorization.</para>
+
+                    <para>To create all search indexes:</para>
+                    <para><literal>/admin/indexes/create/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/indexes/create/c522382c-8656-463e-8277-b913e4466f53">/admin/indexes/create/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                    <para>To drop all search indexes:</para>
+                    <para><literal>/admin/indexes/drop/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/indexes/drop/c522382c-8656-463e-8277-b913e4466f53">/admin/indexes/drop/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                </sect2>
+
+                <sect2 xml:id="searchtables"><title>Managing Search Tables</title>
+
+                    <para>If a software update introduces new search parameters, the following endpoints
+                    allow you to create or drop individual search tables. These endpoints require the
+                    <link linkend="configuring">PurgeKey</link> for authorization.</para>
+
+                    <para>To create a search table and populate it with index data from all existing resources:</para>
+                    <para><literal>/admin/createsearch/{Resource}/{parameter}/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/createsearch/Patient/family/c522382c-8656-463e-8277-b913e4466f53">/admin/createsearch/Patient/family/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                    <para>To drop a search table:</para>
+                    <para><literal>/admin/dropsearch/{Resource}/{parameter}/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/dropsearch/Patient/family/c522382c-8656-463e-8277-b913e4466f53">/admin/dropsearch/Patient/family/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                </sect2>
+
+                <sect2 xml:id="purging"><title>Purging Deleted Data</title>
+
+                    <para>When resources are deleted, their history records are retained in the
+                    <database>resource_history</database> table. To permanently remove all history
+                    records of deleted resources:</para>
+                    <para><literal>/purgeschema/{Resource}/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/purgeschema/Patient/c522382c-8656-463e-8277-b913e4466f53">/purgeschema/Patient/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                </sect2>
+
+                <sect2 xml:id="rollback"><title>Rolling Back to a Previous Version</title>
+
+                    <para>For resources with history enabled, you can roll back to a previous version.
+                    This restores the content of the specified version as the current version of the resource:</para>
+                    <para><literal>/fire/{Resource}/{id}/_rollback/{vid}</literal></para>
+
+                </sect2>
+
+                <sect2 xml:id="undeleting"><title>Undeleting Deleted Data</title>
+
+                    <para>When a resource is deleted by a <command>DELETE</command> request, Fire copies the record
+                    to the <database>resource_history</database> table with a <literal>DELETE</literal> marker and
+                    removes it from the <database>resource</database> table. You can still access the history of
+                    the deleted resource with FHIR's
+                    <olink targetdoc="https://hl7.org/fhir/http.html#history">history</olink> interaction.</para>
+
+                    <para>To undelete a single resource:</para>
+                    <para><literal>/fire/{Resource}/{id}/$undelete</literal></para>
+
+                    <para>To undelete all deleted resources of a certain resource type:</para>
+                    <para><literal>/admin/undelete/{Resource}/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/undelete/Patient/c522382c-8656-463e-8277-b913e4466f53">/admin/undelete/Patient/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                    <para>The response includes the number of restored resources, for example:
+                    <literal>{"restored": 5}</literal>.</para>
+
+                </sect2>
+
+                <sect2 xml:id="seeding"><title>Seeding Data</title>
+
+                    <para>If a <parameter>SeedDataPath</parameter> is configured in
+                    <link linkend="configuring">appsettings.json</link>, the server loads the seed data
+                    from that directory on startup. To reload the seed data at runtime:</para>
+                    <para><literal>/admin/seed/{PurgeKey}</literal></para>
+                    <para>Example: <olink targetdoc="/admin/seed/c522382c-8656-463e-8277-b913e4466f53">/admin/seed/c522382c-8656-463e-8277-b913e4466f53</olink></para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="browsing"><title>Browsing and Deleting Data</title>
+
+                <para>With Fire, you can browse, edit, create, and delete any resource without the need
+                for a front-end app. This is especially useful for inspecting data or for resource types
+                not yet supported by any app.</para>
+
+                <para>To get started, simply enter any legal FHIR search URL in the browser URL field to get a
+                <link linkend="bundlepage">bundle page</link> formatted as a table, or a simple resource read URI
+                to get directly to the <link linkend="resourcepage">resource page</link> for the requested resource
+                in an editable format.</para>
+
+                <sect2 xml:id="bundlepage"><title>Bundle Page</title>
+
+                    <para>If you enter a valid FHIR search URL in your browser URL input field, such as</para>
+                    <para><filename><olink targetdoc="http://myhost/fhir/Patient">http://myhost/fhir/Patient</olink></filename></para>
+                    <para>(replacing <filename>myhost</filename> by the host name of your actual FHIR server,
+                    and the port if applicable), the browser will send that search request to your FHIR server,
+                    receive a bundle of resources and display that bundle in a table format.</para>
+
+                    <para>This bundle page lets you</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>delete selected resources or all of the resources which match the search
+                        that you have entered in the URL field of the browser,
+                        </para></listitem>
+
+                        <listitem><para>download the results of the search as a JSON bundle file,</para></listitem>
+
+                        <listitem><para>browse the snapshot using navigation links if applicable,</para>
+
+                        <para>and</para></listitem>
+
+                        <listitem><para>clicking on the resource link in a line of the table to
+                        <link linkend="resourcepage">navigate to that resource</link>.</para></listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+                <sect2 xml:id="resourcepage"><title>Resource Page</title>
+
+                    <para>The resource page allows you to</para>
+
+                    <orderedlist>
+
+                        <listitem><para>inspect and edit the contents of a resource,</para></listitem>
+
+                        <listitem><para>navigate to resources which are referenced,</para>
+
+                        <para>and</para></listitem>
+
+                        <listitem><para>navigate to resources which reference the current resource.</para></listitem>
+
+                    </orderedlist>
+
+                    <para>To navigate to a referenced resource, click the link in the editing area of the resource.</para>
+
+                    <para>To download the current resource as a JSON file, click <command>Download JSON</command>.</para>
+
+                    <para>To display the versions of the current resource, click <command>History</command>.</para>
+
+                    <para>Below the editing area of the resources, there is the navigation area which allows
+                    you to load resources which reference the current resource. Each line in the navigation area
+                    contain links for each reference search parameter for a certain resource type that targets the current resource.
+                    Click on a link to perform the search for all resources of that type which reference the current resource.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="editing"><title>Editing Resources</title>
+
+                <para>To edit and save a resource, perform one or more of the following steps:</para>
+
+                <orderedlist>
+
+                    <listitem><para>To add an element, click the <command>+</command> button next to the name of the field and enter
+                    the data in the field.</para></listitem>
+
+                    <listitem><para>To remove an element, click the <command>-</command> button.</para></listitem>
+
+                    <listitem><para>To edit a resource reference, select <command>edit</command> in the drop-down list before the link
+                    and edit the reference. To display the reference as a link, select <command>link</command>.
+                    To remove the reference, select <command>-</command>.</para></listitem>
+
+                    <listitem><para>To save the changed contents of the resource, click <command>Save</command>.</para></listitem>
+
+                </orderedlist>
+
+                <para>To create a new resource, perform the following steps:</para>
+
+                <orderedlist>
+
+                    <listitem><para>Click <command>New</command>.</para></listitem>
+
+                    <listitem><para>Enter the data of the new resource.</para></listitem>
+
+                    <listitem><para>To save the resource, click <command>Save</command>.</para></listitem>
+
+                </orderedlist>
+
+                <para>To delete the current version of a resource, perform the following steps:</para>
+
+                <orderedlist>
+
+                    <listitem><para>Click <command>Rollback</command>.</para></listitem>
+
+                    <listitem><para>Click <command>Ok</command>.</para></listitem>
+
+                </orderedlist>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+    <part xml:id="working"><title>Working with Data</title>
+
+        <chapter xml:id="fhirfunctionality"><title>FHIR Functionality</title>
+
+            <para>TBD</para>
+
+            <sect1 xml:id="fhirapi"><title>FHIR API</title>
+
+                <para>TBD</para>
+
+                <sect2 xml:id="rest"><title>REST</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+                <sect2 xml:id="restoperations"><title>Operations</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+                <sect2 xml:id="restlimitations"><title>Limitations</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="querying"><title>Querying</title>
+
+                <para>TBD</para>
+
+                <sect2 xml:id="queryintro"><title>Introduction</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+                <sect2 xml:id="querylimitations"><title>Limitations</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="extendedapi"><title>Extended API</title>
+
+                <para>TBD</para>
+
+                <sect2 xml:id="autocomplete"><title>Autocomplete</title>
+
+                    <para>Each resource type exposes a <literal>GET /fire/{Resource}/$autocomplete</literal> operation
+                    that returns matching values from search index tables as a plain JSON string array.
+                    The query string uses the same format as regular FHIR search — a working search URL can be
+                    converted to autocomplete by inserting <literal>$autocomplete</literal> into the path.</para>
+
+                    <formalpara><title>Examples</title>
+                        <para>Search for patient names starting with "smi":
+                        <olink targetdoc="/fire/Patient/$autocomplete?name=smi">/fire/Patient/$autocomplete?name=smi</olink></para>
+                    </formalpara>
+
+                    <para>Return a different property than the one being searched. For example,
+                    return family names of patients whose name matches "smi":
+                    <olink targetdoc="/fire/Patient/$autocomplete?name=smi&amp;_autocomplete=family">/fire/Patient/$autocomplete?name=smi&amp;_autocomplete=family</olink></para>
+
+                    <para>Use <parameter>_count</parameter> and <parameter>_offset</parameter> to limit results:
+                    <olink targetdoc="/fire/Patient/$autocomplete?name=smi&amp;_count=5">/fire/Patient/$autocomplete?name=smi&amp;_count=5</olink></para>
+
+                    <para>Look up values for a specific resource by ID.
+                    The HTML UI uses this to resolve references to human-readable names:
+                    <olink targetdoc="/fire/Patient/$autocomplete?_id=123&amp;_autocomplete=name">/fire/Patient/$autocomplete?_id=123&amp;_autocomplete=name</olink></para>
+
+                    <formalpara><title>Response Format</title>
+                        <para>Returns a plain JSON string array:</para>
+                    </formalpara>
+
+                    <para><literal>["Smith", "Smythe"]</literal></para>
+
+                    <formalpara><title>Supported Search Parameters</title>
+                        <para>The search parameter and <parameter>_autocomplete</parameter> can be
+                        <literal>_id</literal>,
+                        any string search parameter (e.g. <literal>name</literal>,
+                        <literal>family</literal>, <literal>given</literal>), or non-inline token search parameter
+                        (e.g. <literal>identifier</literal>). Inline search parameters (those stored directly on the
+                        resource table rather than in a separate search index table) are not available for autocomplete.</para>
+                    </formalpara>
+
+                    <formalpara><title>Parameters Reference</title>
+                        <para>
+                            <variablelist>
+                                <varlistentry>
+                                    <term><parameter>{search-parameter}={value}</parameter> (required)</term>
+                                    <listitem><para>A FHIR search parameter with its prefix value, e.g. <literal>name=smi</literal>,
+                                    <literal>_id=123</literal>. For <literal>_id</literal> this is an exact match;
+                                    for other parameters it is a case-insensitive prefix match.</para></listitem>
+                                </varlistentry>
+                                <varlistentry>
+                                    <term><parameter>_autocomplete</parameter> (optional)</term>
+                                    <listitem><para>Which search parameter's values to return. Defaults to the search parameter.
+                                    Specify only when different, e.g. <literal>_autocomplete=family</literal>.</para></listitem>
+                                </varlistentry>
+                                <varlistentry>
+                                    <term><parameter>_count</parameter> (optional)</term>
+                                    <listitem><para>Maximum number of results. If omitted, all results are returned.</para></listitem>
+                                </varlistentry>
+                                <varlistentry>
+                                    <term><parameter>_offset</parameter> (optional)</term>
+                                    <listitem><para>Number of results to skip. Defaults to 0.</para></listitem>
+                                </varlistentry>
+                            </variablelist>
+                        </para>
+                    </formalpara>
+
+                </sect2>
+
+                <sect2 xml:id="importing"><title>Importing</title>
+
+                    <para>TBD</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+</book>
