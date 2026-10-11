@@ -330,6 +330,10 @@ steps() {
   while read -r method path rest; do
     case "$method" in ''|'#'*) continue ;; esac
     n=$((n+1)); out="$WORK/turns.$1.step.$n"
+    rm -f "$out.unlike"
+    # a line that begins with ! is carried out and not compared: it clears
+    # what the turns before left differently for the two servers
+    case "$method" in '!'*) method=${method#!}; : > "$out.unlike" ;; esac
     path=${path//\{S\}/$1}
     body="$WORK/turns.$1.step.body.json"
     if [ -n "$rest" ]; then sed "s/zz{S}/zz$1/g" "$ROOT/tools/turns/$rest" > "$body"; else : > "$body"; fi
@@ -445,6 +449,7 @@ turns() {
   # what one does when it writes the other does
   n=1
   while [ $n -le "${STEPPED:-0}" ]; do
+    if [ -f "$WORK/turns.s.step.$n.unlike" ]; then n=$((n+1)); continue; fi
     if ! cmp -s "$WORK/turns.s.step.$n.status" "$WORK/turns.c.step.$n.status" || [ "$(step_neutral "$WORK/turns.s.step.$n.body")" != "$(step_neutral "$WORK/turns.c.step.$n.body")" ]; then
       echo "turns: FAIL -- step $(cat "$WORK/turns.s.step.$n.request"): scaly $(cat "$WORK/turns.s.step.$n.status"), csharp $(cat "$WORK/turns.c.step.$n.status") (diff $WORK/turns.s.step.$n.body $WORK/turns.c.step.$n.body)"
       TURNS_FAILED=1

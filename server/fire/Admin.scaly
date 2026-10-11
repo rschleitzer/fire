@@ -1,0 +1,134 @@
+; What upstream offers beside FHIR for the upkeep of a database: the purge
+; of deleted resources, the restoring of all of a type, the search indexes
+; made and dropped. The routes are upstream's, outside /fire; the answers
+; are OperationOutcomes of severity information.
+
+use http.Request.Request
+use http.Response.Response
+
+procedure send_information(mutable res: ref[Response], diagnostics: Slice[u8])
+{
+    var out Array[u8]()
+    write_outcome(&out, "information", "informational", diagnostics)
+    res.set_status(200)
+    send_resource(res, out.as_slice())
+}
+
+; A route of a type the server does not store has no answer: upstream has
+; no such route.
+procedure send_nothing(mutable res: ref[Response])
+{
+    res.set_status(404)
+    res.send_empty()
+}
+
+; An instant as the database reads it, with its zone: one that names none
+; is universal time, a date alone its first moment.
+procedure put_instant(mutable out: ref[Array[u8]], value: Slice[u8])
+{
+    put_bytes(out, value)
+    var time: size_t 0
+    while time < value.length
+    {
+        let c value[time]
+        if c = 84 or c = 116 or c = 32
+            break
+        time := time + 1
+    }
+    if time = value.length
+    {
+        put_bytes(out, "T00:00:00Z")
+        return
+    }
+    var i time + 1
+    while i < value.length
+    {
+        let c value[i]
+        if c = 90 or c = 122 or c = 43 or c = 45
+            return
+        i := i + 1
+    }
+    put_bytes(out, "Z")
+}
+
+; GET and POST /purgeschema/{type}[?before=<instant>]
+procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type req.param("type")
+    if known_type(type) = false
+        return send_nothing(res)
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var before Array[u8]()
+    let given first_value(text.as_slice(), cells.as_slice(), "before")
+    if blank(given) = false
+        put_instant(&before, trim(given))
+    var shown Array[u8]()
+    var count Array[i64]()
+    let status resource_purge(type, before.as_slice(), &shown, &count)
+    if status = REFUSED
+        return send_error(res, "invalid", "Query parameter 'before' must be an ISO 8601 instant", 400)
+    if status <> STORED
+        return send_unavailable(res)
+    var message Array[u8]()
+    put_bytes(&message, "Purge completed for ")
+    put_bytes(&message, type)
+    put_bytes(&message, ": ")
+    put_decimal(&message, count[0])
+    put_bytes(&message, " resource(s)")
+    if shown.length > 0
+    {
+        put_bytes(&message, " deleted before ")
+        put_bytes(&message, shown.as_slice())
+    }
+    put_bytes(&message, " removed")
+    send_information(res, message.as_slice())
+}
+
+; GET /admin/undelete/{type}: every deleted resource of the type back. A
+; type the server does not store has none.
+procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type req.param("type")
+    var restored: i64 0
+    if known_type(type)
+    {
+        var ids Array[u8]()
+        if resource_deleted_ids(type, &ids) <> STORED
+            return send_unavailable(res)
+        var at: size_t 0
+        while at < ids.length
+        {
+            let id line_from(ids.as_slice(), at)
+            at := at + id.length + 1
+            var content Array[u8]()
+            let back undelete(type, id, &content)
+            if back.status = FAILED
+                return send_unavailable(res)
+            if back.status = STORED
+                restored := restored + 1
+        }
+    }
+    var message Array[u8]()
+    put_decimal(&message, restored)
+    put_bytes(&message, " ")
+    put_bytes(&message, type)
+    put_bytes(&message, " resource(s) restored")
+    send_information(res, message.as_slice())
+}
+
+; GET /admin/indexes/create and /admin/indexes/drop
+procedure indexes_create(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    if database_indexes(true) = false
+        return send_unavailable(res)
+    send_information(res, "Indexes created")
+}
+
+procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    if database_indexes(false) = false
+        return send_unavailable(res)
+    send_information(res, "Indexes dropped")
+}

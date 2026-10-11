@@ -113,3 +113,43 @@ PUT Patient/zz{S}-rb steps/patient-rb2.json
 POST Patient/zz{S}-rb/_rollback/2
 GET Patient/zz{S}-rb
 GET Patient/zz{S}-rb/_history
+
+# the purge: /purgeschema/<Type>. (A line with ! is carried out and not
+# compared: the two servers find different leftovers of the turns before.)
+!GET ../purgeschema/Practitioner
+PUT Practitioner/zz{S}-pg1 steps/practitioner.json
+DELETE Practitioner/zz{S}-pg1
+PUT Practitioner/zz{S}-pg2 steps/practitioner.json
+PUT Practitioner/zz{S}-pg2 steps/practitioner2.json
+DELETE Practitioner/zz{S}-pg2
+PUT Practitioner/zz{S}-pg3 steps/practitioner.json
+GET ../purgeschema/Practitioner?before=2000-01-01
+GET ../purgeschema/Practitioner?before=nonsense
+GET ../purgeschema/Practitioner?before=
+GET Practitioner/zz{S}-pg2/_history
+POST ../purgeschema/Practitioner?before=2099-06-01T12:00:00%2B02:00
+GET Practitioner/zz{S}-pg1/_history
+GET Practitioner/zz{S}-pg2/_history
+GET Practitioner/zz{S}-pg2
+GET Practitioner/zz{S}-pg3/_history
+GET ../purgeschema/Practitioner
+GET ../purgeschema/Nope
+
+# every deleted resource of a type back: /admin/undelete/<type>
+PUT Practitioner/zz{S}-pg1 steps/practitioner.json
+PUT Practitioner/zz{S}-pg2 steps/practitioner2.json
+DELETE Practitioner/zz{S}-pg1
+DELETE Practitioner/zz{S}-pg2
+DELETE Practitioner/zz{S}-pg3
+GET ../admin/undelete/Practitioner
+GET Practitioner/zz{S}-pg1
+GET Practitioner/zz{S}-pg3/_history
+GET ../admin/undelete/Practitioner
+GET ../admin/undelete/Nope
+
+# the search indexes dropped and made
+GET ../admin/indexes/drop
+GET Practitioner?identifier=urn:steps|zz{S}-pg&_summary=count
+GET Practitioner?identifier=urn:steps|zz{S}-pg&active=false
+GET ../admin/indexes/create
+GET ../admin/indexes/create

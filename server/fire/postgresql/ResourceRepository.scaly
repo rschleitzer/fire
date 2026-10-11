@@ -750,6 +750,138 @@ procedure postgresql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], versio
     StoreResult(STORED, result.version_id, result.seconds)
 }
 
+; The selection upstream's PurgeAsync works on: the ids that have a deletion
+; in their history and no current row -- with `bounded`, those whose last
+; history row was written before $1.
+procedure put_purge_selection(mutable sql: ref[Array[u8]], type: Slice[u8], bounded: bool)
+{
+    put_bytes(sql, "SELECT h.id FROM ")
+    put_table(sql, type)
+    put_bytes(sql, ".resource_history h LEFT JOIN ")
+    put_table(sql, type)
+    put_bytes(sql, " r ON h.id = r.id WHERE r.id IS NULL AND h.history_operation = 'DELETE' GROUP BY h.id")
+    if bounded
+        put_bytes(sql, " HAVING MAX(h.history_timestamp) < $1::timestamptz")
+}
+
+; One statement of the purge, with the bound as its parameter when there
+; is one.
+procedure run_purge(mutable c: ref[PgConn], sql: Slice[u8], before: Slice[u8]) returns bool
+{
+    if c.prepare_unnamed(sql) = false
+        return false
+    c.start("")
+    if before.length > 0
+        c.param_text(before)
+    c.run()
+}
+
+; The purge of a type, as upstream's PurgeAsync: every deleted resource's
+; history goes (and a Binary's bytes), counted by resources. `before` is an
+; instant with its zone, or empty; `shown` gets it as .NET's round-trip
+; format writes it. REFUSED when the database does not take it for an
+; instant.
+procedure postgresql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool
+{
+    let got scoped(0)
+    if got = null
+        return FAILED
+    var c got as ref[PgConn]
+    let bounded before.length > 0
+    if bounded
+    {
+        var understood c.prepare_unnamed("SELECT to_char($1::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')")
+        if understood
+        {
+            c.start("")
+            c.param_text(before)
+            understood := c.run() and c.next_row()
+        }
+        if understood = false
+        {
+            give_back(c, 0)
+            return REFUSED
+        }
+        put_bytes(shown, c.column(0))
+        put_bytes(shown, "0Z")
+    }
+    var sql Array[u8]()
+    put_bytes(&sql, "SELECT COUNT(*) FROM (")
+    put_purge_selection(&sql, type, bounded)
+    put_bytes(&sql, ") t")
+    var ok run_purge(c, sql.as_slice(), before) and c.next_row()
+    var found: i64 0
+    if ok
+        found := c.column_int(0)
+    if ok and found > 0 and keeps_data_apart(type)
+    {
+        sql.length := 0
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_data WHERE resource_id IN (")
+        put_purge_selection(&sql, type, bounded)
+        put_bytes(&sql, ")")
+        ok := run_purge(c, sql.as_slice(), before)
+    }
+    if ok and found > 0
+    {
+        sql.length := 0
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_history WHERE id IN (")
+        put_purge_selection(&sql, type, bounded)
+        put_bytes(&sql, ")")
+        ok := run_purge(c, sql.as_slice(), before)
+    }
+    give_back(c, 0)
+    if ok = false
+        return FAILED
+    count.add(found)
+    STORED
+}
+
+; The ids of a type that are in its history and not there, a line each.
+procedure postgresql_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool
+{
+    let got scoped(0)
+    if got = null
+        return FAILED
+    var c got as ref[PgConn]
+    var sql Array[u8]()
+    put_bytes(&sql, "SELECT DISTINCT h.id FROM ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".resource_history h LEFT JOIN ")
+    put_table(&sql, type)
+    put_bytes(&sql, " r ON h.id = r.id WHERE r.id IS NULL")
+    var ok c.prepare_unnamed(sql.as_slice())
+    if ok
+    {
+        c.start("")
+        ok := c.run()
+        while ok and c.next_row()
+        {
+            put_bytes(ids, c.column(0))
+            ids.add(10 as u8)
+        }
+    }
+    give_back(c, 0)
+    if ok = false
+        return FAILED
+    STORED
+}
+
+; A script sent as it is.
+procedure postgresql_script(sql: Slice[u8]) returns bool mutable pg_pool
+{
+    let got scoped(0)
+    if got = null
+        return false
+    var c got as ref[PgConn]
+    let done c.execute(sql)
+    give_back(c, 0)
+    done
+}
+
 ; Was the resource `id` deleted at some time?
 procedure postgresql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {

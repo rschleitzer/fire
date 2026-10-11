@@ -46,6 +46,33 @@ procedure resource_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_
     StoreResult(FAILED, 0, 0)
 }
 
+; The purge of a type's deleted resources (see postgresql_purge).
+procedure resource_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_purge(type, before, shown, count)
+    FAILED
+}
+
+; The ids of a type's deleted resources, a line each.
+procedure resource_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_deleted_ids(type, ids)
+    FAILED
+}
+
+; The search indexes of every table made, or dropped (upstream's
+; CreateIndexesSql and DropIndexesSql).
+procedure database_indexes(create: bool) returns bool mutable pg_pool
+{
+    if database_in_use() <> DATABASE_POSTGRESQL
+        return false
+    if create
+        return postgresql_script(postgresql_create_indexes())
+    postgresql_script(postgresql_drop_indexes())
+}
+
 ; Does the database answer?
 procedure database_ready() returns bool mutable pg_pool
 {

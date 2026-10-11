@@ -608,33 +608,44 @@ procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutab
 {
     let type type_of(req)
     let id req.param("id")
-    var message Array[u8]()
-    message.add(type)
-    put_bytes(&message, "/")
-    message.add(id)
-    put_bytes(&message, " not found or not deleted")
+    var content Array[u8]()
+    let stored undelete(type, id, &content)
+    if stored.status = FAILED
+        return send_unavailable(res)
+    if stored.status <> STORED
+    {
+        var message Array[u8]()
+        message.add(type)
+        put_bytes(&message, "/")
+        message.add(id)
+        put_bytes(&message, " not found or not deleted")
+        return send_error(res, "not-found", message.as_slice(), 404)
+    }
+    version_fields(res, "", type, id, stored.version_id, stored.seconds)
+    send_resource(res, content.as_slice())
+}
+
+; A deleted resource back: the state of its last history row as a new
+; version, into content. NOT_FOUND for one that is there or never was.
+procedure undelete(type: Slice[u8], id: Slice[u8], mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
     var current Array[u8]()
     let there resource_select(0, type, id, 0, &current)
     if there.status = FAILED
-        return send_unavailable(res)
+        return StoreResult(FAILED, 0, 0)
     if there.status = STORED
-        return send_error(res, "not-found", message.as_slice(), 404)
+        return StoreResult(NOT_FOUND, 0, 0)
     var found Array[u8]()
     var rows Array[i64]()
     let last resource_history(0, type, id, 1, 0, &found, &rows)
     if last.status <> STORED
-        return send_unavailable(res)
+        return StoreResult(FAILED, 0, 0)
     if rows.length = 0
-        return send_error(res, "not-found", message.as_slice(), 404)
+        return StoreResult(NOT_FOUND, 0, 0)
     let parsed JsonValue.parse(found.as_slice().subslice(rows[6] as size_t, (rows[6] + rows[7]) as size_t))
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
-    var content Array[u8]()
-    let stored resource_create(0, type, parsed.value, id, true, &content)
-    if stored.status <> STORED
-        return send_unavailable(res)
-    version_fields(res, "", type, id, stored.version_id, stored.seconds)
-    send_resource(res, content.as_slice())
+        return StoreResult(FAILED, 0, 0)
+    resource_create(0, type, parsed.value, id, true, content)
 }
 
 ; POST /fire/<type>/{id}/_rollback/{vid}: the current version undone, when it

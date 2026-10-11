@@ -39,6 +39,7 @@ define fire
     module Handlers
     module SystemHistory
     module Patch
+    module Admin
     module Bundle
 }
 
@@ -62,6 +63,11 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
     app.get("/fire/metadata", &metadata)
     app.get("/fire/SearchParameter", &search_parameters)
     app.get("/fire/_history", &system_history)
+    app.get("/purgeschema/{type}", &purge)
+    app.post("/purgeschema/{type}", &purge)
+    app.get("/admin/undelete/{type}", &undelete_all)
+    app.get("/admin/indexes/create", &indexes_create)
+    app.get("/admin/indexes/drop", &indexes_drop)
     app.get("/healthz", &healthz)
     app.get("/readyz", &readyz)
     add_resource_routes(app, page)

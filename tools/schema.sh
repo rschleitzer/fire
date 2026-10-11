@@ -6,6 +6,21 @@
 set -eu
 cd "$(dirname "$0")/.."
 
+# another script of the provider (a raw string property) as a function
+script() {  # <property> <function> <file>
+  echo
+  echo "function $2() returns Slice[u8]"
+  printf '    "'
+  awk -v start="public string $1 => \"\"\"" '
+    index($0, start) { inside = 1; next }
+    inside && /^""";/ { exit }
+    inside {
+      gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/`/, "\\`")
+      printf "%s\\n", $0
+    }' "$3"
+  echo '"'
+}
+
 one() {  # <provider directory of upstream> <module directory of the server> <function>
   local from="upstream/server/Repositories/$1/DatabaseProvider.cs" to="server/fire/$2/Schema.scaly"
   [ -f "$from" ] || { echo "schema: no $from -- run upstream/fire.sh first" >&2; exit 1; }
@@ -22,6 +37,8 @@ one() {  # <provider directory of upstream> <module directory of the server> <fu
         printf "%s\\n", $0
       }' "$from"
     echo '"'
+    script CreateIndexesSql "${3%_initial_schema}_create_indexes" "$from"
+    script DropIndexesSql "${3%_initial_schema}_drop_indexes" "$from"
   } > "$to"
   [ "$(wc -c < "$to")" -gt 1000 ] || { echo "schema: no InitialSchema found in $from" >&2; exit 1; }
 }
