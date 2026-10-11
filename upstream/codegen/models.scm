@@ -90,8 +90,9 @@
 ; A search on ONE type of a choice property: its expression narrows
 ; value[x] by ofType, which the model keeps as the cast of the path.
 ; String, token and reference searches of that kind are read by walking
-; every path (model-cast-section); the predicates are here because the
-; repository asks them too.
+; every path (model-cast-section), and so is a token search with several
+; paths to a concept; the predicates are here because the repository asks
+; them too.
 ; -------------------------------------------------------------------
 
 (define (search-path-nodes search)
@@ -128,11 +129,23 @@
                    (else (loop (cdr ps)))))))
 
 (define (search-is-cast? search)
-    (and (member (% "type" search) '("string" "token" "reference"))
-         (let loop ((ps (search-path-nodes search)))
-             (cond ((null? ps) #f)
-                   ((path-is-cast? (car ps)) #t)
-                   (else (loop (cdr ps)))))))
+    (or (and (member (% "type" search) '("string" "token" "reference"))
+             (let loop ((ps (search-path-nodes search)))
+                 (cond ((null? ps) #f)
+                       ((path-is-cast? (car ps)) #t)
+                       (else (loop (cdr ps))))))
+        (search-has-concept-paths? search)))
+
+; A token search with SEVERAL paths, each ending at a CodeableConcept or a
+; Coding (Observation.code | Observation.component.code): read the same
+; way, because the extractors by category read the first path alone.
+(define (search-has-concept-paths? search)
+    (and (string=? "token" (% "type" search))
+         (let loop ((ps (search-path-nodes search)) (seen '()))
+             (cond ((null? ps) (> (length seen) 1))
+                   ((not (member (downcase-string (cast-path-leaf (car ps))) '("codeableconcept" "coding"))) #f)
+                   (else (let ((keys (cast-path-keys (car ps))))
+                             (loop (cdr ps) (if (member keys seen) seen (cons keys seen)))))))))
 
 ; The JSON keys of a path, first to last; a choice property under its name
 ; for the type the path is cast to (value[x] as CodeableConcept:
