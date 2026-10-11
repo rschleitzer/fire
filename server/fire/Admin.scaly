@@ -165,3 +165,49 @@ procedure create_search(req: ref[Request], mutable res: ref[Response]) mutable p
 
 procedure drop_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
     search_table_route(req, res, false)
+
+; GET /admin/seed: the seed data put in again.
+procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    var totals Array[i64]()
+    seed_load("", &totals)
+    send_information(res, "Seed data loaded")
+}
+
+; GET /admin/{secret}/reseed/{type}: everything of a type gone and put in
+; anew from the seed data. There only when the environment names a
+; ReseedSecret, and for the one who knows it.
+procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let configured setting("ReseedSecret")
+    if configured.length = 0 or configured.equals(req.param("secret")) = false
+        return send_nothing(res)
+    let type req.param("type")
+    if known_type(type) = false
+    {
+        var refusal Array[u8]()
+        put_bytes(&refusal, "Unknown resource type ")
+        put_bytes(&refusal, type)
+        return send_error(res, "not-supported", refusal.as_slice(), 400)
+    }
+    if resource_truncate(type) = false
+        return send_unavailable(res)
+    var totals Array[i64]()
+    seed_load(type, &totals)
+    var message Array[u8]()
+    put_bytes(&message, type)
+    put_bytes(&message, " reseeded: ")
+    put_decimal(&message, totals[0])
+    put_bytes(&message, " created, ")
+    put_decimal(&message, totals[1])
+    put_bytes(&message, " updated, ")
+    put_decimal(&message, totals[2])
+    put_bytes(&message, " failed")
+    var out Array[u8]()
+    if totals[2] > 0
+        write_outcome(&out, "warning", "informational", message.as_slice())
+    else
+        write_outcome(&out, "information", "informational", message.as_slice())
+    res.set_status(200)
+    send_resource(res, out.as_slice())
+}

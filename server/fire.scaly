@@ -39,11 +39,12 @@ define fire
     module Handlers
     module SystemHistory
     module Patch
+    module Seed
     module Admin
     module Bundle
 }
 
-procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool
 {
     let page Page.allocate_page()
     let database_type setting_or("DatabaseType", "PostgreSql")
@@ -58,6 +59,11 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
     let db make_provider(page, database_type, connection_string)
     if initialize(db) = false
         return 3
+    if database_is_fresh()
+    {
+        var seeded Array[i64]()
+        seed_load("", &seeded)
+    }
 
     var app Router.create(page)
     app.get("/fire/metadata", &metadata)
@@ -68,6 +74,8 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
     app.get("/admin/undelete/{type}", &undelete_all)
     app.get("/admin/createsearch/{type}/{parameter}", &create_search)
     app.get("/admin/dropsearch/{type}/{parameter}", &drop_search)
+    app.get("/admin/seed", &seed)
+    app.get("/admin/{secret}/reseed/{type}", &reseed)
     app.get("/admin/indexes/create", &indexes_create)
     app.get("/admin/indexes/drop", &indexes_drop)
     app.get("/healthz", &healthz)

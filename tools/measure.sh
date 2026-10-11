@@ -113,6 +113,10 @@ start_server() {
   export DatabaseType=PostgreSql
   export ConnectionString="Host=localhost;Port=$PG_PORT;Database=Fire;Username=postgres;Password=$PG_PASSWORD"
   export Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE"
+  # the seed data both servers load into a database they create, and the
+  # secret of the reseed route
+  export SeedDataPath="$ROOT/tools/turns/seed"
+  export ReseedSecret=turns-secret
   export externalUrl="$BASE/fire"
   if [ "$1" = scaly ]; then
     "$ROOT/server/build/fire" > "$WORK/$1.server.log" 2>&1 &
@@ -326,10 +330,10 @@ asks() {
 # are compared without it, without ids and times.
 #   steps <server: s or c>
 steps() {
-  local n=0 method path rest out body
+  local n=0 method path rest out body label=${3:-step}
   while read -r method path rest; do
     case "$method" in ''|'#'*) continue ;; esac
-    n=$((n+1)); out="$WORK/turns.$1.step.$n"
+    n=$((n+1)); out="$WORK/turns.$1.$label.$n"
     rm -f "$out.unlike"
     # a line that begins with ! is carried out and not compared: it clears
     # what the turns before left differently for the two servers
@@ -339,7 +343,7 @@ steps() {
     local field=""
     case "$rest" in *' | '*) field=${rest#* | }; rest=${rest%% | *} ;; '| '*) field=${rest#| }; rest="" ;; esac
     field=${field//zz\{S\}/zz$1}
-    body="$WORK/turns.$1.step.body.json"
+    body="$WORK/turns.$1.$label.body.json"
     if [ -n "$rest" ]; then sed "s/zz{S}/zz$1/g" "$ROOT/tools/turns/$rest" > "$body"; else : > "$body"; fi
     case "$method" in
       GET|DELETE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" "$BASE/fire/$path" > "$out.status" ;;
@@ -347,12 +351,26 @@ steps() {
            -H 'Content-Type: application/fhir+json' --data-binary @"$body" "$BASE/fire/$path" > "$out.status" ;;
     esac
     echo "$method $path $rest" > "$out.request"
-  done < "$ROOT/tools/turns/steps.txt"
+  done < "$ROOT/tools/turns/${2:-steps.txt}"
   STEPPED=$n
 }
 
+# The answers of both servers to the lines of a steps file, compared.
+#   steps_alike <label> <count>
+steps_alike() {
+  local n=1
+  while [ $n -le "$2" ]; do
+    if [ -f "$WORK/turns.s.$1.$n.unlike" ]; then n=$((n+1)); continue; fi
+    if ! cmp -s "$WORK/turns.s.$1.$n.status" "$WORK/turns.c.$1.$n.status" || [ "$(step_neutral "$WORK/turns.s.$1.$n.body")" != "$(step_neutral "$WORK/turns.c.$1.$n.body")" ]; then
+      echo "turns: FAIL -- $1 $(cat "$WORK/turns.s.$1.$n.request"): scaly $(cat "$WORK/turns.s.$1.$n.status"), csharp $(cat "$WORK/turns.c.$1.$n.status") (diff $WORK/turns.s.$1.$n.body $WORK/turns.c.$1.$n.body)"
+      TURNS_FAILED=1
+    fi
+    n=$((n+1))
+  done
+}
+
 # A step's answer without what differs by nature.
-step_neutral() { sed -E 's/zz[sc]/zz?/g; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(\\u002B|[+-])[0-9:]+/<time>/g' "$1"; }
+step_neutral() { [ -f "$1" ] || return 0; sed -E 's/zz[sc]/zz?/g; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(\\u002B|[+-])[0-9:]+/<time>/g' "$1"; }
 
 # What must not be stored: every file of tools/turns/refused/, named
 # <Type>.<case>.json, is POSTed and must be answered with 400.
@@ -420,6 +438,7 @@ turns() {
   call s.recreate 201 PUT "Patient/$b" patient.json
   others read s c
   steps s
+  STEPPED_STEPS=$STEPPED
   stop_server
 
   echo "turns: 4 csharp  -- finds A deleted, reads its last version; reads B as created again; creates A again"
@@ -451,15 +470,7 @@ turns() {
   done
 
   # what one does when it writes the other does
-  n=1
-  while [ $n -le "${STEPPED:-0}" ]; do
-    if [ -f "$WORK/turns.s.step.$n.unlike" ]; then n=$((n+1)); continue; fi
-    if ! cmp -s "$WORK/turns.s.step.$n.status" "$WORK/turns.c.step.$n.status" || [ "$(step_neutral "$WORK/turns.s.step.$n.body")" != "$(step_neutral "$WORK/turns.c.step.$n.body")" ]; then
-      echo "turns: FAIL -- step $(cat "$WORK/turns.s.step.$n.request"): scaly $(cat "$WORK/turns.s.step.$n.status"), csharp $(cat "$WORK/turns.c.step.$n.status") (diff $WORK/turns.s.step.$n.body $WORK/turns.c.step.$n.body)"
-      TURNS_FAILED=1
-    fi
-    n=$((n+1))
-  done
+  steps_alike step "${STEPPED_STEPS:-0}"
 
   # what one refuses the other refuses, in the same words
   local f
@@ -500,6 +511,19 @@ turns() {
   done
   rows_of "$a" > "$WORK/turns.rows.a"
   rows_of "$b" > "$WORK/turns.rows.b"
+  # the last round, after everything was compared: what empties a whole type
+  # (tools/turns/last.txt). Each server finds what the other left -- and
+  # leaves the same.
+  echo "turns: 7 scaly, 8 csharp -- the $(grep -vc '^#\|^$' "$ROOT/tools/turns/last.txt") steps of tools/turns/last.txt"
+  start_server scaly
+  steps s last.txt last
+  stop_server
+  start_server csharp
+  steps c last.txt last
+  stop_server
+  steps_alike last "$STEPPED"
+  STEPPED=$((STEPPED + STEPPED_STEPS))
+
   stop_database
   # A: created and updated by scaly, updated by csharp, deleted by scaly,
   # created again by csharp; B the other way round, without the second update
@@ -512,6 +536,7 @@ turns() {
     cmp -s "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected" && continue
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
+
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
   echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words; $ASKED requests (searches, histories, bundles) answered the same by both; ${STEPPED:-0} writing steps answered alike"
   exit 0

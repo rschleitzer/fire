@@ -358,6 +358,15 @@ procedure transaction_entry_valid(entry: JsonValue, mutable outcome: ref[Array[u
     true
 }
 
+; One entry of a searchset: its resource put under its id.
+procedure searchset_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+{
+    let resource entry.get("resource")
+    if resource.get("resourceType").is_text() = false or resource.get("id").is_text() = false
+        return error_entry(e, "400", "searchset entry missing resource/resourceType/id")
+    put_entry(scope, resource.get("resourceType").text(), resource.get("id").text(), true, resource, 0, base, e)
+}
+
 ; POST /fire
 procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
@@ -424,13 +433,7 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
         i := i + 1
         var e JsonWriter()
         if kind.equals("searchset")
-        {
-            let resource entry.get("resource")
-            if resource.get("resourceType").is_text() = false or resource.get("id").is_text() = false
-                error_entry(&e, "400", "searchset entry missing resource/resourceType/id")
-            else
-                put_entry(scope, resource.get("resourceType").text(), resource.get("id").text(), true, resource, 0, base.as_slice(), &e)
-        }
+            searchset_entry(scope, entry, base.as_slice(), &e)
         else
             process_entry(scope, entry, base.as_slice(), &e)
         ; {"response":{"status":"4.. or 5..: the transaction ends here

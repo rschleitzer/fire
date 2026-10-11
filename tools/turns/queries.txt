@@ -317,3 +317,10 @@ GET Observation/$autocomplete?code=8&_autocomplete=code
 GET Observation/$autocomplete?code=urn:local|&_autocomplete=_id
 GET Patient/$autocomplete?family=zq
 GET Patient/$autocomplete?given=zq
+GET Patient/seed-p1
+GET Patient/seed-p1/_history
+GET Practitioner?family=Seeded&_sort=given
+GET Patient/seed-never
+GET Patient/seed-not-a-bundle
+GET Patient?family=NoId
+GET Patient?general-practitioner=Practitioner/seed-gp1&_include=Patient:general-practitioner

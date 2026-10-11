@@ -84,6 +84,14 @@ procedure search_table(type: Slice[u8], parameter: Slice[u8], create: bool) retu
     postgresql_drop_search(type, parameter)
 }
 
+; Everything of a type gone.
+procedure resource_truncate(type: Slice[u8]) returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_truncate(type)
+    false
+}
+
 ; Does the database answer?
 procedure database_ready() returns bool mutable pg_pool
 {

@@ -113,6 +113,7 @@ procedure prepare_schema(mutable c: ref[PgConn], software_version: Slice[u8]) re
         if c.execute(postgresql_initial_schema()) = false
             return false
         version := software_version
+        database_created()
     }
     if c.execute("CREATE SCHEMA IF NOT EXISTS \"fire_meta\"; CREATE TABLE IF NOT EXISTS \"fire_meta\".dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
         return false

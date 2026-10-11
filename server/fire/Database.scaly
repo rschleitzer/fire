@@ -13,6 +13,16 @@ define SOFTWARE_VERSION: Slice[u8] "5.0.0"
 define DATABASE_POSTGRESQL: u64 1
 shared atomic database_kind: u64 0
 
+; Set when the server found no schema at its start and created it: the seed
+; data goes in then (upstream's Database, ImportSeedData).
+shared atomic database_fresh: u64 0
+
+procedure database_is_fresh() returns bool
+    scaly_atomic_load_u64(&database_fresh) <> 0
+
+procedure database_created()
+    scaly_atomic_store_u64(&database_fresh, 1)
+
 procedure database_in_use() returns u64
     scaly_atomic_load_u64(&database_kind)
 

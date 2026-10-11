@@ -203,3 +203,9 @@ GET Patient/zz{S}-prov | If-None-Match: W/"1"
 POST Patient steps/patient-prov1.json | If-None-Exist: identifier=urn:steps|zz{S}-prov
 POST Patient steps/patient-prov1.json | If-None-Exist: gender=male
 GET Patient/zz{S}-prov/_history
+
+# the seed data put in again
+GET ../admin/seed
+GET Patient?_id=seed-p1&_summary=count
+GET Practitioner?family=Seeded&_summary=count
+GET Patient/seed-never

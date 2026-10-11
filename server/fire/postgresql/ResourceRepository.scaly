@@ -1049,6 +1049,38 @@ procedure postgresql_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) r
     STORED
 }
 
+; Everything of a type gone -- its search rows, a Binary's bytes, its
+; history, its resources --, as upstream's ReseedTruncateSql.
+procedure postgresql_truncate(type: Slice[u8]) returns bool mutable pg_pool
+{
+    var sql Array[u8]()
+    let tables model_searches(type)
+    var at: size_t 0
+    while at < tables.length
+    {
+        let line line_from(tables, at)
+        at := at + line.length + 1
+        if line[0] = 105
+            continue
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(line, 32, 1))
+        put_bytes(&sql, "; ")
+    }
+    if keeps_data_apart(type)
+    {
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_data; ")
+    }
+    put_bytes(&sql, "DELETE FROM ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".resource_history; DELETE FROM ")
+    put_table(&sql, type)
+    postgresql_script(sql.as_slice())
+}
+
 ; A script sent as it is.
 procedure postgresql_script(sql: Slice[u8]) returns bool mutable pg_pool
 {

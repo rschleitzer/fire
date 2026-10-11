@@ -1,0 +1,130 @@
+; The seed data, as upstream's SeedDataLoader replays it: every Bundle file
+; of the seed directory, each resource of it put under its id (a searchset,
+; whatever the file calls itself -- but a transaction or a batch there is an
+; upgrade's and is passed over). The directory is the SeedDataPath of the
+; environment, else `seed` where the server runs (upstream: beside its
+; binary). No directory, nothing to do.
+
+use json.Value.JsonValue
+use json.Writer.JsonWriter
+
+function ends_with_json(name: Slice[u8]) returns bool
+{
+    if name.length < 5
+        return false
+    name.slice_from(name.length - 5).equals(".json")
+}
+
+; Does a stand before b, the letters without regard to case?
+function name_before(a: Slice[u8], b: Slice[u8]) returns bool
+{
+    var i: size_t 0
+    while i < a.length and i < b.length
+    {
+        var ca a[i]
+        var cb b[i]
+        if ca >= 65 and ca <= 90
+            ca := ca + 32
+        if cb >= 65 and cb <= 90
+            cb := cb + 32
+        if ca <> cb
+            return ca < cb
+        i := i + 1
+    }
+    a.length < b.length
+}
+
+; Every seed file's resources -- of the type `only` when one is named --
+; put under their ids; totals counts them: created, updated, failed.
+procedure seed_load(only: Slice[u8], mutable totals: ref[Array[i64]]) mutable pg_pool
+{
+    totals.add(0)
+    totals.add(0)
+    totals.add(0)
+    var dir String("seed")
+    let configured setting("SeedDataPath")
+    if configured.length > 0
+        dir := String(configured.data as pointer[const_char], configured.length)
+    if Directory.exists(dir) = false
+        return
+    var entries Directory.list(dir)
+    ; the names of the JSON files, in order
+    var names Array[u8]()
+    var cells Array[i64]()
+    var i: size_t 0
+    while i < entries.length
+    {
+        let entry entries.at(i)
+        i := i + 1
+        if entry.is_directory or ends_with_json(entry.name.as_slice()) = false
+            continue
+        cell(&names, &cells, entry.name.as_slice())
+    }
+    var order Array[i64]()
+    var n: size_t 0
+    while n * 2 < cells.length
+    {
+        ; insertion into the order
+        let name names.as_slice().subslice(cells[n * 2] as size_t, (cells[n * 2] + cells[n * 2 + 1]) as size_t)
+        var at order.length
+        order.add(n as i64)
+        while at > 0
+        {
+            let other order[at - 1] as size_t
+            let other_name names.as_slice().subslice(cells[other * 2] as size_t, (cells[other * 2] + cells[other * 2 + 1]) as size_t)
+            if name_before(name, other_name) = false
+                break
+            order.put(at, other as i64)
+            at := at - 1
+        }
+        order.put(at, n as i64)
+        n := n + 1
+    }
+    let base setting("externalUrl")
+    var k: size_t 0
+    while k < order.length
+    {
+        let which order[k] as size_t
+        k := k + 1
+        let name names.as_slice().subslice(cells[which * 2] as size_t, (cells[which * 2] + cells[which * 2 + 1]) as size_t)
+        let path "`dir`/`String(name.data as pointer[const_char], name.length)`"
+        let text File.read_to_string(path)
+        let parsed JsonValue.parse(text.as_slice())
+        if parsed.ok() = false or parsed.value.is_object() = false
+            continue
+        let root parsed.value
+        if only.length = 0 and (root.get("resourceType").is_text() = false or root.get("resourceType").text().equals("Bundle") = false)
+            continue
+        if root.get("type").is_text() and (root.get("type").text().equals("transaction") or root.get("type").text().equals("batch"))
+            continue
+        let resources root.get("entry")
+        var r: size_t 0
+        while r < resources.length()
+        {
+            let one resources.item(r)
+            r := r + 1
+            if only.length > 0
+            {
+                let type one.get("resource").get("resourceType")
+                if type.is_text() = false or type.text().equals(only) = false
+                    continue
+            }
+            var e JsonWriter()
+            searchset_entry(0, one, base, &e)
+            ; {"response":{"status":"201 ...
+            let answer e.bytes()
+            var slot: size_t 2
+            if answer.length > 26
+            {
+                let d0 answer[23]
+                let d1 answer[24]
+                let d2 answer[25]
+                if d0 = 50 and d1 = 48 and d2 = 49
+                    slot := 0
+                if d0 = 50 and d1 = 48 and d2 = 48
+                    slot := 1
+            }
+            totals.put(slot, totals[slot] + 1)
+        }
+    }
+}

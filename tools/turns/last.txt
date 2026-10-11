@@ -1,0 +1,20 @@
+# The last round of tools/measure.sh turns, after everything else was
+# compared: steps that empty a whole type. The form is that of steps.txt.
+
+# a type made anew from the seed data: /admin/<secret>/reseed/<type>
+GET ../admin/wrong-secret/reseed/Practitioner
+GET ../admin/turns-secret/reseed/Nope
+GET ../admin/turns-secret/reseed/Practitioner
+GET Practitioner?_summary=count
+GET Practitioner?_sort=given
+GET Practitioner/seed-gp1/_history
+GET Practitioner/gp1
+GET ../admin/turns-secret/reseed/Patient
+GET Patient?_summary=count
+GET Patient/seed-p1/_history
+GET ../admin/turns-secret/reseed/Binary
+GET Binary?_summary=count
+GET ../admin/turns-secret/reseed/Observation
+GET Observation?_summary=count
+GET ../admin/seed
+GET Patient/seed-p1/_history
