@@ -1203,7 +1203,17 @@ public class "rn"Repository : I"rn"Repository
 "    public async Task<""bool> DeleteAsync(string id)
     {
 "
-    (open-conn-scoped db)"
+    (open-conn-scoped db)
+    ; no history to keep the bytes for: they go with the resource
+    (if (binary-data-table? rn db) ($"
+        await using (var dataCmd = "(new-cmd db)"
+            \"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)"\", conn, tx))
+        {
+"(add-param-line-for "dataCmd" 1 "id" db)"
+            await dataCmd.ExecuteNonQueryAsync();
+        }
+") "")
+"
         await using var cmd = "(new-cmd db)"
             \"DELETE FROM "(tbl-public rn db)" WHERE id = "(pp 1 db)"\", conn, tx);
 "(add-param-8 1 "id" db)"
@@ -2409,7 +2419,17 @@ public class "rn"Repository : I"rn"Repository
 
         if (count == 0)
             return 0;
-
+"
+    (if (binary-data-table? rn db) ($"
+        // the bytes of the versions that go (no foreign key takes them)
+        await using (var cmd = "(new-cmd db)"$\"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id IN ({selection})\", conn))
+        {
+            if (before != null)
+                cmd.Parameters.Add("(purge-before-param db)");
+            await cmd.ExecuteNonQueryAsync();
+        }
+") "")
+"
         await using (var cmd = "(new-cmd db)"$\"DELETE FROM "(tbl schema "resource_history" db)" WHERE id IN ({selection})\", conn))
         {
             if (before != null)

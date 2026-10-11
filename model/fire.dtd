@@ -1,6 +1,6 @@
 <!ELEMENT fhir (upgrades?, resources, elements, codesets)>
 <!ELEMENT upgrades (upgrade+)>
-<!ELEMENT upgrade  ((newsearch|dropsearch|newresource|dropresource|recreatestorage|addhistory|applybundle|datamigration)*)>
+<!ELEMENT upgrade  ((newsearch|dropsearch|newresource|dropresource|recreatestorage|addhistory|keepbinarydata|applybundle|datamigration)*)>
 <!ATTLIST upgrade
   to CDATA #REQUIRED
 >
@@ -21,6 +21,9 @@
   class CDATA #REQUIRED
   run   (both|upgrade|v1) "both"
 >
+<!-- A database made before the bytes of a Binary were kept past its delete: the
+     foreign key from "Binary".resource_data to the resource goes (PostgreSQL). -->
+<!ELEMENT keepbinarydata EMPTY>
 <!ELEMENT newsearch EMPTY>
 <!ATTLIST newsearch
   ref IDREF #REQUIRED

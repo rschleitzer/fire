@@ -282,6 +282,14 @@ linked() {
     name=$(basename "$f" .json); type=${name%%.*}; id=${name#*.}
     call "$1.linked.$name" 201 PUT "$type/$id" "linked/$name.json"
   done
+  # ... and those of tools/turns/gone/ are put twice and deleted: what is
+  # left of a resource that is gone (its versions, a Binary's bytes)
+  for f in "$ROOT"/tools/turns/gone/*.json; do
+    name=$(basename "$f" .json); type=${name%%.*}; id=${name#*.}
+    call "$1.gone.$name" 201 PUT "$type/$id" "gone/$name.json"
+    call "$1.gone.$name.again" 200 PUT "$type/$id" "gone/$name.json"
+    call "$1.gone.$name.delete" 204 DELETE "$type/$id"
+  done
 }
 
 # Ask the running server every request of tools/turns/queries.txt; status

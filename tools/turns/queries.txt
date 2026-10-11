@@ -245,3 +245,10 @@ GET Observation?date=ge2026&code=open
 GET Observation?value-date=lt2024-01-01
 GET Observation?value-date=gt2024-06
 GET Observation?_sort=date&code=spans,open
+GET Binary/b11
+GET Binary/b11/_history
+GET Binary/b11/_history/1
+GET Binary/b11/_history/2
+GET Binary/b11/_history/3
+GET Patient/pg1/_history
+GET Patient/pg1/_history/2

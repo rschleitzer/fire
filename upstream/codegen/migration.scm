@@ -197,13 +197,17 @@
 ")))
 
 ; --- Binary resource_data table (PostgreSql only) ---
+; No foreign key to the resource: the bytes of a version outlive the delete
+; of the resource, as its history does, and go when that is purged
+; (PurgeAsync). With ON DELETE CASCADE a deleted Binary's versions were
+; answered without their data from then on.
 
 (define (migration-binary-data-table rn schema db)
     (let ((tbl (migration-table schema "resource_data" db))
           (res-tbl (db-public-table rn db)))
     ($"-- Binary resource_data table (raw BYTEA storage)
 " (db-create-table db) tbl " (
-    resource_id VARCHAR(64) NOT NULL REFERENCES " res-tbl "(id) ON DELETE CASCADE,
+    resource_id VARCHAR(64) NOT NULL,
     version_id INTEGER NOT NULL,
     data BYTEA NOT NULL,
     PRIMARY KEY (resource_id, version_id)

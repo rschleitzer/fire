@@ -181,6 +181,26 @@ DROP TABLE IF EXISTS [" schema "];
                 ($ "-- dropresource " schema ": SQLite manual cleanup required
 ")))))
 
+; Generate SQL for a keepbinarydata action: a database made before the
+; Binary's bytes were kept past its delete has a foreign key from
+; resource_data to the resource with ON DELETE CASCADE; it goes (whatever
+; its name). Only PostgreSQL has the table.
+(define (upgrade-keepbinarydata-sql db)
+    (case db
+        ((PostgreSql) ($
+"DO $$
+DECLARE c text;
+BEGIN
+    IF to_regclass('\"Binary\".resource_data') IS NOT NULL THEN
+        FOR c IN SELECT conname FROM pg_constraint
+                 WHERE conrelid = '\"Binary\".resource_data'::regclass AND contype = 'f' LOOP
+            EXECUTE format('ALTER TABLE \"Binary\".resource_data DROP CONSTRAINT %I', c);
+        END LOOP;
+    END IF;
+END $$;
+"))
+        (else "")))
+
 ; Generate SQL for all actions in a single upgrade step, for a specific db type
 (define (upgrade-step-sql upgrade db)
     (for-children-of upgrade (lambda (action)
@@ -190,6 +210,7 @@ DROP TABLE IF EXISTS [" schema "];
             (("addhistory") (upgrade-addhistory-sql (ref action) db))
             (("dropsearch") (upgrade-dropsearch-sql action db))
             (("dropresource") (upgrade-dropresource-sql action db))
+            (("keepbinarydata") (upgrade-keepbinarydata-sql db))
             (("applybundle") "") ; data-only: applied at runtime via ApplyUpgradeBundle, no DDL
             (("datamigration") "") ; data-only: applied at runtime by the named class, no DDL
             (else "")))))
