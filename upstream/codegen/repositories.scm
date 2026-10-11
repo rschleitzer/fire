@@ -1525,8 +1525,11 @@ public class "rn"Repository : I"rn"Repository
                 key == \"_summary\" || key == \"_elements\")
                 continue;
 
-            // Skip chained params, _has, and composite params (handled by handler)
-            if (key.Contains('.') || key.StartsWith(\"_has:\") || key.Contains(\"-value-\"))
+            // Skip chained params, _has, and composite params (handled by handler;
+            // its names, as handlers.scm has them)
+            if (key.Contains('.') || key.StartsWith(\"_has:\") ||
+                key == \"code-value-quantity\" || key == \"code-value-concept\" ||
+                key == \"component-code-value-quantity\" || key == \"component-code-value-concept\")
                 continue;
 
             if (key == \"_sort\")

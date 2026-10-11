@@ -718,7 +718,7 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
             return true
         i := i + 1
     }
-    if contains(whole_key, "-value-") or (whole_key.length >= 5 and whole_key.slice_to(5).equals("_has:"))
+    if composite(whole_key) or (whole_key.length >= 5 and whole_key.slice_to(5).equals("_has:"))
         return true
     if whole_key.equals("_sort")
     {
