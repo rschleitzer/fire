@@ -946,23 +946,3 @@ procedure put_order(mutable q: ref[SearchQuery], type: Slice[u8], mutable out: r
     put_bytes(out, "r2.id ASC")
     true
 }
-
-; The name a statement goes by on a connection: one per text.
-procedure put_statement_name(mutable out: ref[Array[u8]], sql: Slice[u8])
-{
-    var hash: u64 14695981039346656037
-    var i: size_t 0
-    while i < sql.length
-    {
-        hash := (hash xor (sql[i] as u64)) * 1099511628211
-        i := i + 1
-    }
-    let digits: Slice[u8] "0123456789abcdef"
-    out.add(113 as u8)
-    var shift 60
-    while shift >= 0
-    {
-        out.add(digits[((hash >> (shift as u64)) & 15) as size_t])
-        shift := shift - 4
-    }
-}

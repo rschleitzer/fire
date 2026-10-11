@@ -717,13 +717,12 @@ procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells:
     var counting Array[u8]()
     put_bytes(&counting, "SELECT COUNT(DISTINCT r.id)")
     counting.add(matching.as_slice())
-    var name Array[u8]()
-    put_statement_name(&name, counting.as_slice())
+    ; a search's text is made for this request: the statement is not kept
     var total: i64 0
-    var ok c.prepare(name.as_slice(), counting.as_slice())
+    var ok c.prepare_unnamed(counting.as_slice())
     if ok
     {
-        c.start(name.as_slice())
+        c.start("")
         bind_parameters(c, &q)
         ok := c.run() and c.next_row()
         if ok
@@ -742,12 +741,10 @@ procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells:
         put_decimal(&page, (q.cells.length / 2 + 1) as i64)
         put_bytes(&page, " OFFSET $")
         put_decimal(&page, (q.cells.length / 2 + 2) as i64)
-        var page_name Array[u8]()
-        put_statement_name(&page_name, page.as_slice())
-        ok := c.prepare(page_name.as_slice(), page.as_slice())
+        ok := c.prepare_unnamed(page.as_slice())
         if ok
         {
-            c.start(page_name.as_slice())
+            c.start("")
             bind_parameters(c, &q)
             c.param_int(count)
             c.param_int(offset)
@@ -834,13 +831,11 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
     if got = null
         return StoreResult(FAILED, 0, 0)
     var c got as ref[PgConn]
-    var name Array[u8]()
-    put_statement_name(&name, counting.as_slice())
     var total: i64 0
-    var ok c.prepare(name.as_slice(), counting.as_slice())
+    var ok c.prepare_unnamed(counting.as_slice())
     if ok
     {
-        c.start(name.as_slice())
+        c.start("")
         if one
             c.param_text(id)
         ok := c.run() and c.next_row()
@@ -849,12 +844,10 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
     }
     if ok
     {
-        var list_name Array[u8]()
-        put_statement_name(&list_name, listing.as_slice())
-        ok := c.prepare(list_name.as_slice(), listing.as_slice())
+        ok := c.prepare_unnamed(listing.as_slice())
         if ok
         {
-            c.start(list_name.as_slice())
+            c.start("")
             if one
                 c.param_text(id)
             c.param_int(count)

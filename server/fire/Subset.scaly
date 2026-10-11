@@ -1,0 +1,78 @@
+; _summary and _elements: a resource of a search's answer cut down to a
+; part of its members and tagged as a subset, as upstream's handler does it.
+
+use json.Value.JsonValue
+use json.Writer.JsonWriter
+
+; Does the request ask for resources cut down?
+function subsetted(summary: Slice[u8], has_elements: bool) returns bool
+    has_elements or summary.equals("true") or summary.equals("text") or summary.equals("data")
+
+; Is name one of the names of list, separated by commas?
+function listed(list: Slice[u8], name: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    while at <= list.length
+    {
+        var end at
+        while end < list.length and list[end] <> 44
+            end := end + 1
+        if list.subslice(at, end).equals(name)
+            return true
+        at := end + 1
+    }
+    false
+}
+
+; The resource without the members `keep` does not let through.
+; (keep 1: resourceType, id, meta, text -- _summary=text; 2: those named in
+; elements, and resourceType, id, meta -- _elements.)
+procedure only_members(resource: JsonValue, keep: int, elements: Slice[u8]) returns JsonValue
+{
+    var cut resource
+    var i: size_t 0
+    while i < resource.length()
+    {
+        let name resource.key_at(i)
+        i := i + 1
+        var stays name.equals("resourceType") or name.equals("id") or name.equals("meta")
+        if keep = 1 and name.equals("text")
+            stays := true
+        if keep = 2 and listed(elements, name)
+            stays := true
+        if stays = false
+            cut := cut.without_member(name)
+    }
+    cut
+}
+
+; The resource with meta.tag saying it is a subset -- in the place of a
+; tag it had, a meta it did not have added at its end.
+procedure tagged(resource: JsonValue) returns JsonValue
+{
+    let tag JsonValue.parse("[{\"system\":\"http://terminology.hl7.org/CodeSystem/v3-ObservationValue\",\"code\":\"SUBSETTED\"}]")
+    var meta resource.get("meta")
+    if meta.is_object() = false
+        meta := JsonValue.empty_object()
+    resource.with_member("meta", meta.with_member("tag", tag.value))
+}
+
+; content cut down as summary and elements ask, written to w as one value.
+procedure write_subset(mutable w: ref[JsonWriter], content: Slice[u8], summary: Slice[u8], has_elements: bool, elements: Slice[u8])
+{
+    let parsed JsonValue.parse(content)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return w.raw(content)
+    var resource parsed.value
+    if summary.equals("true") or summary.equals("text") or summary.equals("data")
+    {
+        if summary.equals("text")
+            resource := only_members(resource, 1, "")
+        if summary.equals("data")
+            resource := resource.without_member("text")
+        resource := tagged(resource)
+    }
+    if has_elements
+        resource := tagged(only_members(resource, 2, elements))
+    w.value_dotnet(resource)
+}

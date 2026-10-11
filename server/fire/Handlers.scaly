@@ -629,6 +629,18 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         w.key("total")
         w.integer(total)
     }
+    ; _summary and _elements cut every resource of the answer down
+    let summary first_value(text, cells, "_summary")
+    var has_elements false
+    var e: size_t 0
+    while e < pair_count(cells)
+    {
+        if pair_key(text, cells, e).equals("_elements")
+            has_elements := true
+        e := e + 1
+    }
+    let elements first_value(text, cells, "_elements")
+    let cut subsetted(summary, has_elements)
     w.key("entry")
     w.begin_array()
     var i: size_t 0
@@ -642,7 +654,10 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         full.add(found.as_slice().subslice(rows[i * 4] as size_t, (rows[i * 4] + rows[i * 4 + 1]) as size_t))
         w.text_dotnet(full.as_slice())
         w.key("resource")
-        w.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
+        if cut
+            write_subset(&w, found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t), summary, has_elements, elements)
+        else
+            w.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
         w.key("search")
         w.begin_object()
         w.key("mode")
@@ -661,7 +676,10 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         full.add(included.as_slice().subslice(included_cells[i * 4] as size_t, (included_cells[i * 4] + included_cells[i * 4 + 1]) as size_t))
         w.text_dotnet(full.as_slice())
         w.key("resource")
-        w.raw(included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t))
+        if cut
+            write_subset(&w, included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t), summary, has_elements, elements)
+        else
+            w.raw(included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t))
         w.key("search")
         w.begin_object()
         w.key("mode")

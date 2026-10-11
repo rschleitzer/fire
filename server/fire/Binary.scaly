@@ -2,7 +2,8 @@
 ; stores the bytes of `data` in a table of their own, the content with
 ; "data": null, and puts them back -- encoded anew -- when the resource is
 ; read. Read without a wish for FHIR, a Binary is answered as the bytes
-; themselves.
+; themselves. (The white space .NET's Convert.FromBase64String passes over
+; is what the standard library's base64_decode passes over.)
 
 use http.Request.Request
 use http.Response.Response
@@ -11,111 +12,6 @@ use json.Value.JsonValue
 ; Does the type keep its data apart?
 function keeps_data_apart(type: Slice[u8]) returns bool
     type.equals("Binary")
-
-function base64_letter(v: int) returns u8
-{
-    if v < 26
-        return (v + 65) as u8
-    if v < 52
-        return (v + 71) as u8
-    if v < 62
-        return (v - 4) as u8
-    if v = 62
-        return 43
-    47
-}
-
-; bytes in base64, with padding.
-procedure base64_encode(bytes: Slice[u8], mutable out: ref[Array[u8]])
-{
-    var i: size_t 0
-    while i < bytes.length
-    {
-        let a bytes[i] as int
-        var b 0
-        var c 0
-        if i + 1 < bytes.length
-            b := bytes[i + 1] as int
-        if i + 2 < bytes.length
-            c := bytes[i + 2] as int
-        out.add(base64_letter(a >> 2))
-        out.add(base64_letter(((a & 3) << 4) | (b >> 4)))
-        if i + 1 < bytes.length
-            out.add(base64_letter(((b & 15) << 2) | (c >> 6)))
-        else
-            out.add(61 as u8)
-        if i + 2 < bytes.length
-            out.add(base64_letter(c & 63))
-        else
-            out.add(61 as u8)
-        i := i + 3
-    }
-}
-
-; The value of a base64 letter, -1 for none.
-function base64_value(c: u8) returns int
-{
-    if c >= 65 and c <= 90
-        return (c as int) - 65
-    if c >= 97 and c <= 122
-        return (c as int) - 71
-    if c >= 48 and c <= 57
-        return (c as int) + 4
-    if c = 43
-        return 62
-    if c = 47
-        return 63
-    0 - 1
-}
-
-; The bytes text encodes, as .NET's Convert.FromBase64String reads it:
-; white space anywhere is passed over, what is left comes in fours, with
-; one or two `=` at the very end at most. False for anything else.
-procedure base64_decode(text: Slice[u8], mutable out: ref[Array[u8]]) returns bool
-{
-    var quad 0
-    var have 0
-    var padding 0
-    var i: size_t 0
-    while i < text.length
-    {
-        let c text[i]
-        i := i + 1
-        if c = 32 or c = 9 or c = 10 or c = 13
-            continue
-        if c = 61
-        {
-            padding := padding + 1
-            if padding > 2
-                return false
-            quad := quad << 6
-        }
-        else
-        {
-            let v base64_value(c)
-            if v < 0 or padding > 0
-                return false
-            quad := (quad << 6) | v
-        }
-        have := have + 1
-        if have = 4
-        {
-            out.add(((quad >> 16) & 255) as u8)
-            if padding < 2
-                out.add(((quad >> 8) & 255) as u8)
-            if padding < 1
-                out.add((quad & 255) as u8)
-            quad := 0
-            have := 0
-        }
-        else
-        {
-            if padding > 0 and have < 3
-                return false
-        }
-    }
-    have = 0
-}
 
 ; Does haystack contain needle?
 function contains(haystack: Slice[u8], needle: Slice[u8]) returns bool

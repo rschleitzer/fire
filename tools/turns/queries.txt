@@ -192,3 +192,14 @@ BUNDLE transaction-mismatch.json
 BUNDLE empty.json
 BUNDLE wrong-type.json
 BUNDLE not-a-bundle.json
+GET Patient?_id=p1&_summary=true
+GET Patient?_id=p1,p2&_summary=text
+GET Patient?_summary=data&_count=3
+GET Patient?_id=p1&_summary=false
+GET Patient?_id=p1&_summary=count
+GET Patient?_id=p1&_elements=name,gender
+GET Patient?_id=p1&_elements=
+GET Patient?_id=p1&_elements=identifier&_summary=text
+GET Patient?_id=p1&_elements=name&_include=Patient:general-practitioner
+GET Observation?_id=o1&_summary=true&_include=Observation:subject
+GET Patient?_count=2&_summary=text&_sort=birthdate

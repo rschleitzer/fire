@@ -34,6 +34,7 @@ define fire
     module Repository
     module Chains
     module Composite
+    module Subset
     module Metadata
     module Handlers
     module Bundle
