@@ -1,0 +1,90 @@
+; The upgrade steps at the server's start, as upstream's Database runs them:
+; every step of the model the database is behind, in the model's order, each
+; in ONE transaction -- its SQL, what it does beside (a type's seed data, a
+; search parameter's table made and filled, a bundle applied), the new
+; version written. A step that fails leaves the database where it was, and
+; the server does not start.
+;
+; A step that names a data migration cannot run here: those are classes
+; written by hand in C# for upstream's server.
+
+; Is the version a behind b?
+function version_behind(a: Slice[u8], b: Slice[u8]) returns bool
+    version_newer(b, a)
+
+; One step.
+procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool
+{
+    Console.println("Upgrading database to `String(version.data as pointer[const_char], version.length)`...")
+    let scope transaction_begin()
+    if scope = 0
+        return false
+    var key Array[u8]()
+    put_bytes(&key, "postgresql.upgrade.")
+    put_bytes(&key, version)
+    let sql model_value(61, key.as_slice())
+    var ok true
+    if blank(sql) = false
+        ok := database_script(scope, sql)
+    let actions model_value(85, version)
+    var at: size_t 0
+    while ok and at < actions.length
+    {
+        let action line_from(actions, at)
+        at := at + action.length + 1
+        let what entry(action, 32, 0)
+        if what.equals("newsearch")
+            ok := search_table(scope, entry(action, 32, 1), entry(action, 32, 2), true) = STORED
+        else if what.equals("newresource")
+        {
+            var totals Array[i64]()
+            seed_load(scope, entry(action, 32, 1), &totals)
+        }
+        else if what.equals("applybundle")
+        {
+            Console.println("Upgrade bundle '`String(entry(action, 32, 1).data as pointer[const_char], entry(action, 32, 1).length)`' is not applied: this server applies no upgrade bundles yet.")
+            ok := false
+        }
+        else if what.equals("datamigration")
+        {
+            Console.println("Data migration `String(entry(action, 32, 1).data as pointer[const_char], entry(action, 32, 1).length)` cannot run: it is a class of the C# server.")
+            ok := false
+        }
+    }
+    if ok
+    {
+        var update Array[u8]()
+        put_bytes(&update, "UPDATE \"fire_meta\".dbinfo SET value = '")
+        put_bytes(&update, version)
+        put_bytes(&update, "' WHERE name = 'version'; SELECT 1")
+        ok := database_script(scope, update.as_slice())
+    }
+    if transaction_end(scope, ok) = false or ok = false
+        return false
+    Console.println("Database upgraded to `String(version.data as pointer[const_char], version.length)`.")
+    true
+}
+
+; Every step the database is behind. False when one fails.
+procedure upgrade_database() returns bool mutable pg_pool
+{
+    var current Array[u8]()
+    if database_version(&current) = false
+        return false
+    let steps model_value(61, "upgrades")
+    var i: size_t 0
+    while entry(steps, 32, i).length > 0
+    {
+        let step entry(steps, 32, i)
+        i := i + 1
+        if version_behind(current.as_slice(), step)
+        {
+            if upgrade_step(step) = false
+            {
+                Console.println("The upgrade to `String(step.data as pointer[const_char], step.length)` failed.")
+                return false
+            }
+        }
+    }
+    true
+}

@@ -22,10 +22,12 @@ procedure serve_model(model: Slice[u8]) returns int mutable pg_pool
     let db make_provider(page, database_type, connection_string)
     if initialize(db) = false
         return 3
+    if upgrade_database() = false
+        return 3
     if database_is_fresh()
     {
         var seeded Array[i64]()
-        seed_load("", &seeded)
+        seed_load(0, "", &seeded)
     }
 
     var app Router.create(page)

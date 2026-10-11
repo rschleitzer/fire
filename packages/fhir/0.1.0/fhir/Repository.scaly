@@ -69,18 +69,18 @@ procedure database_indexes(create: bool) returns bool mutable pg_pool
     if database_in_use() <> DATABASE_POSTGRESQL
         return false
     if create
-        return postgresql_script(model_value(61, "postgresql.indexes.create"))
-    postgresql_script(model_value(61, "postgresql.indexes.drop"))
+        return postgresql_script(0, model_value(61, "postgresql.indexes.create"))
+    postgresql_script(0, model_value(61, "postgresql.indexes.drop"))
 }
 
 ; A search parameter's table made and filled, or dropped (see the
 ; PostgreSQL side).
-procedure search_table(type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool
+procedure search_table(scope: u64, type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool
 {
     if database_in_use() <> DATABASE_POSTGRESQL
         return FAILED
     if create
-        return postgresql_create_search(type, parameter)
+        return postgresql_create_search(scope, type, parameter)
     postgresql_drop_search(type, parameter)
 }
 
@@ -89,6 +89,22 @@ procedure resource_truncate(type: Slice[u8]) returns bool mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL
         return postgresql_truncate(type)
+    false
+}
+
+; A script on the transaction `scope` (0: by itself), and the version the
+; database is at.
+procedure database_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_script(scope, sql)
+    false
+}
+
+procedure database_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_version(version)
     false
 }
 

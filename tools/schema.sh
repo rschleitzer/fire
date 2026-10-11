@@ -5,7 +5,7 @@
 # model's text: server/<name>/Schema.scaly. tools/generate.sh runs it.
 #   tools/schema.sh <name of the program: fire>
 set -eu
-cd "$(dirname "$0")/.."
+cd "${FIRE_OUT:-$(dirname "$0")/..}"
 name=${1:-fire}
 to="server/$name/Schema.scaly"
 
@@ -18,7 +18,8 @@ to="server/$name/Schema.scaly"
   echo "procedure schema_write(mutable out: ref[Array[u8]])"
   echo "{"
   for f in "server/$name"/sql/*.sql; do
-    [ -s "$f" ] || { echo "schema: $f is empty" >&2; exit 1; }
+    # an upgrade step without SQL has an empty script, and no record
+    [ -s "$f" ] || continue
     key=$(basename "$f" .sql)
     printf '    record(out, "@@=:%s\\n' "$key"
     awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/`/, "\\`"); printf "%s\\n", $0 }' "$f"
@@ -26,3 +27,4 @@ to="server/$name/Schema.scaly"
   done
   echo "}"
 } > "$to"
+grep -q '@@=:postgresql.schema' "$to" || { echo "schema: no schema among server/$name/sql" >&2; exit 1; }

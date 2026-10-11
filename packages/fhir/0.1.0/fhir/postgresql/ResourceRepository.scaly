@@ -828,12 +828,12 @@ procedure put_search_index(mutable sql: ref[Array[u8]], type: Slice[u8], table: 
 ; upstream's CreateSearchAsync. REFUSED for a parameter the type has none
 ; of; FAILED also where the table holds rows already (upstream fails on the
 ; key, too).
-procedure postgresql_create_search(type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool
+procedure postgresql_create_search(scope: u64, type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool
 {
     let line search_line(type, parameter)
     if line.length = 0
         return REFUSED
-    let got scoped(0)
+    let got scoped(scope)
     if got = null
         return FAILED
     var c got as ref[PgConn]
@@ -906,7 +906,7 @@ procedure postgresql_create_search(type: Slice[u8], parameter: Slice[u8]) return
             }
         }
     }
-    give_back(c, 0)
+    give_back(c, scope)
     if ok = false
         return FAILED
     STORED
@@ -924,7 +924,7 @@ procedure postgresql_drop_search(type: Slice[u8], parameter: Slice[u8]) returns 
     put_table(&sql, type)
     put_bytes(&sql, ".")
     put_bytes(&sql, entry(line, 32, 1))
-    if postgresql_script(sql.as_slice()) = false
+    if postgresql_script(0, sql.as_slice()) = false
         return FAILED
     STORED
 }
@@ -1078,19 +1078,35 @@ procedure postgresql_truncate(type: Slice[u8]) returns bool mutable pg_pool
     put_table(&sql, type)
     put_bytes(&sql, ".resource_history; DELETE FROM ")
     put_table(&sql, type)
-    postgresql_script(sql.as_slice())
+    postgresql_script(0, sql.as_slice())
 }
 
-; A script sent as it is.
-procedure postgresql_script(sql: Slice[u8]) returns bool mutable pg_pool
+; A script sent as it is -- on the connection of the transaction `scope`,
+; or (0) on one of its own.
+procedure postgresql_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool
+{
+    let got scoped(scope)
+    if got = null
+        return false
+    var c got as ref[PgConn]
+    let done c.execute(sql)
+    give_back(c, scope)
+    done
+}
+
+; The version the database is at, into `version`; false when it does not
+; say.
+procedure postgresql_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool
 {
     let got scoped(0)
     if got = null
         return false
     var c got as ref[PgConn]
-    let done c.execute(sql)
+    let found c.execute("SELECT value FROM \"fire_meta\".dbinfo WHERE name = 'version'") and c.next_row()
+    if found
+        put_bytes(version, c.column(0))
     give_back(c, 0)
-    done
+    found
 }
 
 ; Was the resource `id` deleted at some time?

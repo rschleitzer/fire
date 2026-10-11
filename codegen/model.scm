@@ -161,6 +161,8 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutabl
 ;      column:member:kind separated by commas (b a boolean, t a text, d an
 ;      instant, i an int, l a long, m a decimal)
 ;   Q  the members a resource of it must have, separated by blanks
+;   U  an upgrade step's actions beside its SQL, one per line (the steps'
+;      versions, in order: =:upgrades)
 ;   P  its search parameters as the searchset Bundle upstream's
 ;      SearchParameterHandler answers
 
@@ -188,8 +190,47 @@ procedure model_write(mutable out: ref[Array[u8]])
             (for active scaly-columns)
             (for active scaly-required)
             (for active scaly-search-parameters)
+            (scaly-upgrades root)
 "}
 "))))
+
+; The upgrade steps of the model, in its order: the versions (=:upgrades),
+; and for each what the server does beside the step's SQL (which is a
+; script of its own, sql/DATABASE.upgrade.VERSION.sql), one a line:
+;   newresource TYPE             the type's seed data put in
+;   newsearch TYPE PARAMETER     the parameter's table made and filled
+;   applybundle FILE             a bundle of the seed directory applied
+;   datamigration CLASS          a migration written by hand for upstream
+;                                (C#) -- this server has none and refuses
+(define (scaly-upgrade-nodes root)
+    (let ((upgrades (select-children "upgrades" root)))
+        (if (node-list-empty? upgrades) '()
+            (node-list->list (children (node-list-first upgrades))))))
+
+(define (scaly-upgrade-action action)
+    (case (gi action)
+        (("newresource") ($ "newresource " (name-of (ref action)) "\\n"))
+        (("newsearch")
+            (let ((search (ref action)))
+                ($ "newsearch " (name-of (parent (parent search))) " " (% "name" search) "\\n")))
+        (("applybundle") ($ "applybundle " (% "file" action) "\\n"))
+        (("datamigration")
+            (let ((run (% "run" action)))
+                (if (or (not run) (string=? run "both") (string=? run "upgrade"))
+                    ($ "datamigration " (% "class" action) "\\n")
+                    "")))
+        (else "")))
+
+(define (scaly-upgrades root)
+    (let ((steps (scaly-upgrade-nodes root)))
+        ($ "    record(out, \"@@=:upgrades\\n" (scaly-joined-with " " (map (lambda (u) (% "to" u)) steps)) "\\n\")
+"
+           (apply $ (map (lambda (u)
+                ($ "    record(out, \"@@U:" (% "to" u) "\\n"
+                   (apply $ (map scaly-upgrade-action (node-list->list (children u))))
+                   "\\n\")
+"))
+                steps)))))
 
 ; Each database's scripts, as upstream's provider has them -- written as
 ; they are (schema-sql and its fellows answer what cannot be taken apart
@@ -199,7 +240,13 @@ procedure model_write(mutable out: ref[Array[u8]])
         (sosofo-append
             (file "postgresql.schema.sql" (schema-sql 'PostgreSql))
             (file "postgresql.indexes.create.sql" (create-indexes-sql 'PostgreSql))
-            (file "postgresql.indexes.drop.sql" (drop-indexes-sql 'PostgreSql)))))
+            (file "postgresql.indexes.drop.sql" (drop-indexes-sql 'PostgreSql))
+            ; the SQL of every upgrade step (empty for one that only moves data)
+            (if (has-upgrades?)
+                (for-nodes (upgrade-list) (lambda (upgrade)
+                    (file ($ "postgresql.upgrade." (% "to" upgrade) ".sql")
+                          (upgrade-step-sql upgrade 'PostgreSql))))
+                (empty-sosofo)))))
 
 ; --- /metadata ---
 

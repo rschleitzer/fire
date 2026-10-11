@@ -41,5 +41,6 @@ define fhir
     module Seed
     module Admin
     module Bundle
+    module Upgrade
     module Server
 }

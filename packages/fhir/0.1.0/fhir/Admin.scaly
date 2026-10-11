@@ -142,7 +142,7 @@ procedure search_table_route(req: ref[Request], mutable res: ref[Response], crea
     let parameter req.param("parameter")
     if known_type(type) = false
         return send_nothing(res)
-    let status search_table(type, parameter, create)
+    let status search_table(0, type, parameter, create)
     ; a parameter the type has none of: upstream throws and answers nothing
     ; of its own
     if status = REFUSED
@@ -170,7 +170,7 @@ procedure drop_search(req: ref[Request], mutable res: ref[Response]) mutable pg_
 procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
 {
     var totals Array[i64]()
-    seed_load("", &totals)
+    seed_load(0, "", &totals)
     send_information(res, "Seed data loaded")
 }
 
@@ -193,7 +193,7 @@ procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
     if resource_truncate(type) = false
         return send_unavailable(res)
     var totals Array[i64]()
-    seed_load(type, &totals)
+    seed_load(0, type, &totals)
     var message Array[u8]()
     put_bytes(&message, type)
     put_bytes(&message, " reseeded: ")

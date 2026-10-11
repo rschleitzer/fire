@@ -8,6 +8,7 @@
 <!ENTITY fhirmodel      SYSTEM "../upstream/codegen/fhirmodel.scm">
 <!ENTITY fhirvalidator  SYSTEM "../upstream/codegen/fhirvalidator.scm">
 <!ENTITY migration      SYSTEM "../upstream/codegen/migration.scm">
+<!ENTITY dbupgrade      SYSTEM "../upstream/codegen/dbupgrade.scm">
 <!ENTITY models         SYSTEM "../upstream/codegen/models.scm">
 <!ENTITY model          SYSTEM "model.scm">
 <!ENTITY search         SYSTEM "search.scm">
@@ -20,6 +21,7 @@
 &fhirmodel;
 &fhirvalidator;
 &migration;
+&dbupgrade;
 &models;
 &model;
 &search;
