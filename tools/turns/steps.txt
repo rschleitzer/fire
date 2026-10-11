@@ -175,3 +175,31 @@ GET ../admin/dropsearch/Practitioner/nonsense
 GET ../admin/createsearch/Practitioner/_lastUpdated
 GET ../admin/createsearch/Nope/family
 GET ../admin/dropsearch/Nope/family
+
+# the Provenance a write brings along (X-Provenance), and other fields of a
+# request: what stands behind " | " is sent as a header
+PUT Patient/zz{S}-prov steps/patient-prov1.json | X-Provenance: {"recorded":"2026-05-05T05:05:05Z","agent":[{"who":{"reference":"Practitioner/gp1"}}],"target":[{"reference":"Patient/other"}],"resourceType":"Nonsense"}
+GET Provenance?target=Patient/zz{S}-prov&_sort=recorded
+PUT Patient/zz{S}-prov steps/patient-prov2.json | X-Provenance: {"recorded":"2026-05-06T05:05:05Z","agent":[{"who":{"reference":"Practitioner/gp2"}}]}
+PUT Patient/zz{S}-prov steps/patient-prov1.json | X-Provenance: not json
+PUT Patient/zz{S}-prov steps/patient-prov2.json | X-Provenance: [1,2]
+PUT Patient/zz{S}-prov steps/patient-prov1.json | X-Provenance: {"recorded":"nonsense","agent":[]}
+PUT Patient/zz{S}-prov steps/patient-prov2.json | X-Provenance: {}
+GET Provenance?target=Patient/zz{S}-prov&_sort=recorded
+PATCH Patient/zz{S}-prov steps/patch/replace.json | X-Provenance: {"recorded":"2026-05-07T05:05:05Z","agent":[{"who":{"reference":"Practitioner/gp1"}}]}
+GET Provenance?target=Patient/zz{S}-prov&_sort=recorded
+POST Patient/zz{S}-prov/_rollback/6
+GET Provenance?target=Patient/zz{S}-prov&_sort=recorded
+PUT Patient/zz{S}-prov steps/patient-prov1.json | Prefer: return=minimal
+PUT Patient/zz{S}-prov steps/patient-prov2.json | Prefer: return=OperationOutcome
+PUT Patient/zz{S}-prov steps/patient-prov1.json | If-Match: W/"1"
+PUT Patient/zz{S}-prov steps/patient-prov1.json | If-Match: W/"7"
+PUT Patient/zz{S}-prov steps/patient-prov2.json | If-Match: 8
+PATCH Patient/zz{S}-prov steps/patch/replace.json | If-Match: W/"1"
+PATCH Patient/zz{S}-prov steps/patch/replace.json | If-Match: 9
+PATCH Patient/zz{S}-prov steps/patch/replace.json | If-Match: W/"10"
+GET Patient/zz{S}-prov | If-None-Match: W/"11"
+GET Patient/zz{S}-prov | If-None-Match: W/"1"
+POST Patient steps/patient-prov1.json | If-None-Exist: identifier=urn:steps|zz{S}-prov
+POST Patient steps/patient-prov1.json | If-None-Exist: gender=male
+GET Patient/zz{S}-prov/_history

@@ -107,9 +107,47 @@ procedure version_fields(mutable res: ref[Response], host: Slice[u8], type: Slic
     res.header("Last-Modified", d)
 }
 
-; The body of a write's answer, as the Prefer field asks for it.
-procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Slice[u8])
+; The Provenance a write brings along in its X-Provenance field, as
+; upstream's HandlePrefer records it: what the field holds, made a
+; Provenance whose one target is the resource just written, and created
+; without a check. A field that is no JSON object, and a Provenance the
+; store does not take, are passed over in silence.
+procedure record_provenance(req: ref[Request], content: Slice[u8]) mutable pg_pool
 {
+    let field trim(req.header("x-provenance"))
+    if field.length = 0 or known_type("Provenance") = false
+        return
+    let given JsonValue.parse(field)
+    let written JsonValue.parse(content)
+    if given.ok() = false or given.value.is_object() = false or written.ok() = false
+        return
+    let type written.value.get("resourceType")
+    let id written.value.get("id")
+    if type.is_text() = false or id.is_text() = false
+        return
+    var target Array[u8]()
+    put_bytes(&target, "[{\"reference\":\"")
+    put_bytes(&target, type.text())
+    put_bytes(&target, "/")
+    put_bytes(&target, id.text())
+    put_bytes(&target, "\"}]")
+    let targets JsonValue.parse(target.as_slice())
+    if targets.ok() = false
+        return
+    let provenance given.value.with_member("resourceType", JsonValue.of_text("Provenance")).with_member("target", targets.value)
+    var id_bytes u8[36]
+    var new_id Slice[u8](36, &id_bytes[0])
+    if new_uuid(new_id) = false
+        return
+    var stored Array[u8]()
+    resource_create(0, "Provenance", provenance, new_id, false, &stored)
+}
+
+; The body of a write's answer, as the Prefer field asks for it -- after the
+; Provenance the request brought along is recorded.
+procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Slice[u8]) mutable pg_pool
+{
+    record_provenance(req, content)
     let prefer trim(req.header("prefer"))
     if prefer.equals("return=minimal")
         return res.send("", "")

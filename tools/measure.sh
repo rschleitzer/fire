@@ -335,11 +335,15 @@ steps() {
     # what the turns before left differently for the two servers
     case "$method" in '!'*) method=${method#!}; : > "$out.unlike" ;; esac
     path=${path//\{S\}/$1}
+    # what stands behind " | " is a header of the request
+    local field=""
+    case "$rest" in *' | '*) field=${rest#* | }; rest=${rest%% | *} ;; '| '*) field=${rest#| }; rest="" ;; esac
+    field=${field//zz\{S\}/zz$1}
     body="$WORK/turns.$1.step.body.json"
     if [ -n "$rest" ]; then sed "s/zz{S}/zz$1/g" "$ROOT/tools/turns/$rest" > "$body"; else : > "$body"; fi
     case "$method" in
-      GET|DELETE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X "$method" "$BASE/fire/$path" > "$out.status" ;;
-      *) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X "$method" \
+      GET|DELETE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" "$BASE/fire/$path" > "$out.status" ;;
+      *) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" \
            -H 'Content-Type: application/fhir+json' --data-binary @"$body" "$BASE/fire/$path" > "$out.status" ;;
     esac
     echo "$method $path $rest" > "$out.request"
