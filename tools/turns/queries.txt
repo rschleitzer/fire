@@ -228,3 +228,20 @@ GET Binary/b9
 GET Binary/b10
 PUT Patient/p%C3%A4 patient.json
 PUT Patient/pä patient.json
+GET Observation?subject=Patient/p1/_history/1
+GET Observation?subject=Patient/p1/_history/2
+GET Observation?subject=Patient/p1&code=spans
+GET Observation?subject=p3/_history/2
+GET Observation?subject=p3&code=open
+GET Observation?performer=http://example.org/fhir/Practitioner/gp1
+GET Observation?performer=Practitioner/gp1&code=spans
+GET Observation?performer=Practitioner/gp2/_history/7
+GET Observation?performer=gp2
+GET Observation?_id=o8&_include=Observation:subject&_include=Observation:performer
+GET Observation?date=2024-03-05
+GET Observation?date=ge2024-03-10&date=le2024-03-10&code=spans
+GET Observation?date=gt2024-03-11&code=spans
+GET Observation?date=ge2026&code=open
+GET Observation?value-date=lt2024-01-01
+GET Observation?value-date=gt2024-06
+GET Observation?_sort=date&code=spans,open

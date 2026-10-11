@@ -163,7 +163,7 @@ function search_columns(kind: u8) returns Slice[u8]
     match kind as int
         case 116: return "system, value"
         case 100: return "value_low, value_high"
-        case 114: return "target_type, target_id"
+        case 114: return "target_type, target_id, target_version"
         case 113: return "value, system, code, unit"
     "value"
 }

@@ -20,13 +20,13 @@
 ;   ccin F p           the codings of the concept p of every item of F
 ;   variant k:m ...    the first member k that is there, by m (b a boolean,
 ;                      t the word true, v its text; for a date d the value,
-;                      p a period's start)
+;                      p a period from its start to its end)
 ;   date F             the date F
 ;   period F           the period F, from its start to its end
 ;   first F p          the first date at p in the items of the array F
 ;   firstperiod F p    the first start of a period p in the items of F
 ;   path F p           the date at F.p
-;   pathperiod F p     the start of the period at F.p
+;   pathperiod F p     the period at F.p, from its start to its end
 ;   ref F              the reference F, or every one of the array F
 ;   refin F p          the reference p of every item of F
 ;   refin2 F s p       the reference p of every item of s of every item of F

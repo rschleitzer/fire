@@ -1,0 +1,1 @@
+{"resourceType":"Observation","id":"o9","status":"final","code":{"coding":[{"system":"urn:local","code":"open"}]},"subject":{"reference":"p3/_history/2"},"effectivePeriod":{"start":"2025-01-01"}}

@@ -2718,16 +2718,17 @@ public class "rn"Repository : I"rn"Repository
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private static async Task InsertReferenceIndexAsync(ConnType conn, TxType tx, string table, string resourceId, List<(string? type, string? id)> values)
+    private static async Task InsertReferenceIndexAsync(ConnType conn, TxType tx, string table, string resourceId, List<(string? type, string? id, string? version)> values)
     {
         for (int i = 0; i < values.Count; i++)
         {
             await using var cmd = new CmdType(
-                $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, target_type, target_id) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)})\", conn, tx);
+                $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, target_type, target_id, target_version) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)}, {P(5)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
             cmd.Parameters.Add(NewParam(3, (object?)values[i].type ?? DBNull.Value));
             cmd.Parameters.Add(NewParam(4, (object?)values[i].id ?? DBNull.Value));
+            cmd.Parameters.Add(NewParam(5, (object?)values[i].version ?? DBNull.Value));
             await cmd.ExecuteNonQueryAsync();
         }
     }
@@ -3534,20 +3535,38 @@ internal static class SearchQueryBuilder
         var orParts = new List<""string>();
         foreach (var value in values)
         {
-            if (value.Contains('/'))
+            // the value by its last parts, as the index has a reference
+            // (AddReference): Type/id, an absolute URL's base left out, a
+            // version behind /_history/ asked for only when it is named
+            var parts = value.Split('/');
+            int n = parts.Length;
+            string? version = null;
+            if (n >= 3 && parts[n - 2] == \"_history\")
             {
-                var parts = value.Split('/', 2);
-                orParts.Add($\"({alias}.target_type = {P(paramIndex)} AND {alias}.target_id = {P(paramIndex + 1)})\");
-                parameters.Add(NewParam(paramIndex, parts[0]));
-                parameters.Add(NewParam(paramIndex + 1, parts[1]));
+                version = parts[n - 1];
+                n -= 2;
+            }
+            var part = n >= 2
+                ? $\"{alias}.target_type = {P(paramIndex)} AND {alias}.target_id = {P(paramIndex + 1)}\"
+                : $\"{alias}.target_id = {P(paramIndex)}\";
+            if (n >= 2)
+            {
+                parameters.Add(NewParam(paramIndex, parts[n - 2]));
+                parameters.Add(NewParam(paramIndex + 1, parts[n - 1]));
                 paramIndex += 2;
             }
             else
             {
-                orParts.Add($\"{alias}.target_id = {P(paramIndex)}\");
-                parameters.Add(NewParam(paramIndex, value));
+                parameters.Add(NewParam(paramIndex, version == null ? value : parts[0]));
                 paramIndex++;
             }
+            if (version != null)
+            {
+                part += $\" AND {alias}.target_version = {P(paramIndex)}\";
+                parameters.Add(NewParam(paramIndex, version));
+                paramIndex++;
+            }
+            orParts.Add(n >= 2 || version != null ? $\"({part})\" : part);
         }
 
         if (orParts.Count > 0)

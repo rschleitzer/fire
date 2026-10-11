@@ -5,7 +5,8 @@
 ; The rows are cells in a row: each cell a piece of `text`, written into
 ; `cells` as its offset and its length, -1 for NULL. A string or number
 ; table has one cell a row, a token table two (system, value), a date
-; table two (low, high, as timestamps), a reference table two (type, id),
+; table two (low, high, as timestamps), a reference table three (type, id,
+; version),
 ; a quantity table four (value, system, code, unit).
 
 use json.Value.JsonValue
@@ -106,20 +107,56 @@ procedure reference_row(mutable text: ref[Array[u8]], mutable cells: ref[Array[i
         reference_cells(text, cells, node.get("reference"))
 }
 
+; Where the last slash before `end` stands in s; -1 when there is none.
+function slash_before(s: Slice[u8], end: size_t) returns i64
+{
+    var i end
+    while i > 0
+    {
+        i := i - 1
+        if s[i] = 47
+            return i as i64
+    }
+    -1
+}
+
+; A reference by its LAST parts, as upstream's AddReference: type and id,
+; what stands before them (the base of an absolute URL) left out, and the
+; version behind /_history/ apart. One part alone is the id.
 procedure reference_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], reference: JsonValue)
 {
-    let length reference.text().length
-    var slash: size_t 0
-    while slash < length and (reference.text()[slash] <> 47)
-        slash := slash + 1
-    if slash < length
+    let whole reference.text()
+    var end whole.length
+    var version_at: i64 -1
+    let a slash_before(whole, end)
+    if a >= 0
     {
-        cell(text, cells, reference.text().slice_to(slash))
-        cell(text, cells, reference.text().slice_from(slash + 1))
-        return
+        let b slash_before(whole, a as size_t)
+        if b >= 0
+        {
+            let marker whole.subslice((b + 1) as size_t, a as size_t)
+            if marker.equals("_history")
+            {
+                version_at := a + 1
+                end := b as size_t
+            }
+        }
     }
+    let s slash_before(whole, end)
+    if s >= 0
+    {
+        let t slash_before(whole, s as size_t)
+        cell(text, cells, whole.subslice((t + 1) as size_t, s as size_t))
+        cell(text, cells, whole.subslice((s + 1) as size_t, end))
+    }
+    else
+    {
+        null_cell(cells)
+        cell(text, cells, whole.slice_to(end))
+    }
+    if version_at >= 0
+        return cell(text, cells, whole.slice_from(version_at as size_t))
     null_cell(cells)
-    cell(text, cells, reference.text())
 }
 
 function leap(year: i64) returns bool
@@ -218,6 +255,21 @@ procedure date_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]
     if value.is_text() = false
         return false
     range_cells(text, cells, value.text(), low, high)
+    true
+}
+
+; A period from its start to its end, an open side unbounded; false when
+; it has neither.
+procedure period_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], period: JsonValue) returns bool
+{
+    let start period.get("start")
+    let end period.get("end")
+    if start.is_text() = false and end.is_text() = false
+        return false
+    if date_cells(text, cells, start, true, false) = false
+        cell(text, cells, "-infinity")
+    if date_cells(text, cells, end, false, true) = false
+        cell(text, cells, "infinity")
     true
 }
 
@@ -353,14 +405,7 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
     }
     if shape.equals("period")
     {
-        let start first.get("start")
-        let end first.get("end")
-        if start.is_text() = false and end.is_text() = false
-            return
-        if date_cells(text, cells, start, true, false) = false
-            cell(text, cells, "-infinity")
-        if date_cells(text, cells, end, false, true) = false
-            cell(text, cells, "infinity")
+        period_cells(text, cells, first)
         return
     }
     if shape.equals("path")
@@ -370,7 +415,7 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
     }
     if shape.equals("pathperiod")
     {
-        date_cells(text, cells, first.get(second).get("start"), true, true)
+        period_cells(text, cells, first.get(second))
         return
     }
     if shape.equals("variant")
@@ -386,11 +431,14 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
                 continue
             if kind = 100
             {
-                ; a date: the value itself, or the start of a period
-                var date value
+                ; a date: the value itself, or a period from start to end
                 if mode = 112
-                    date := value.get("start")
-                if date_cells(text, cells, date, true, true)
+                {
+                    if period_cells(text, cells, value)
+                        return
+                    continue
+                }
+                if date_cells(text, cells, value, true, true)
                     return
                 continue
             }
@@ -560,5 +608,7 @@ function row_width(kind: u8) returns size_t
         return 1
     if kind = 113
         return 4
+    if kind = 114
+        return 3
     2
 }

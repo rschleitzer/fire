@@ -413,27 +413,53 @@ procedure table_condition(mutable q: ref[SearchQuery], type: Slice[u8], kind: u8
             case 114
             {
                 next_part(q, &parts)
-                var slash: size_t 0
-                while slash < v.length and v[slash] <> 47
-                    slash := slash + 1
-                if slash < v.length
+                ; the value by its last parts, as the index has a
+                ; reference (Search.reference_cells)
+                var end v.length
+                var version_at: i64 -1
+                let a slash_before(v, end)
+                if a >= 0
                 {
+                    let b slash_before(v, a as size_t)
+                    if b >= 0
+                    {
+                        let marker v.subslice((b + 1) as size_t, a as size_t)
+                        if marker.equals("_history")
+                        {
+                            version_at := a + 1
+                            end := b as size_t
+                        }
+                    }
+                }
+                let s slash_before(v, end)
+                if s >= 0 or version_at >= 0
                     put_bytes(&q.wheres, "(")
+                if s >= 0
+                {
+                    let t slash_before(v, s as size_t)
                     put_column(&q.wheres, alias, "target_type")
                     put_bytes(&q.wheres, " = ")
-                    put_param(q, &q.wheres, v.slice_to(slash))
+                    put_param(q, &q.wheres, v.subslice((t + 1) as size_t, s as size_t))
                     put_bytes(&q.wheres, " AND ")
                     put_column(&q.wheres, alias, "target_id")
                     put_bytes(&q.wheres, " = ")
-                    put_param(q, &q.wheres, v.slice_from(slash + 1))
-                    put_bytes(&q.wheres, ")")
+                    put_param(q, &q.wheres, v.subslice((s + 1) as size_t, end))
                 }
                 else
                 {
                     put_column(&q.wheres, alias, "target_id")
                     put_bytes(&q.wheres, " = ")
-                    put_param(q, &q.wheres, v)
+                    put_param(q, &q.wheres, v.slice_to(end))
                 }
+                if version_at >= 0
+                {
+                    put_bytes(&q.wheres, " AND ")
+                    put_column(&q.wheres, alias, "target_version")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v.slice_from(version_at as size_t))
+                }
+                if s >= 0 or version_at >= 0
+                    put_bytes(&q.wheres, ")")
             }
             case 110
             {

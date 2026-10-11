@@ -1112,11 +1112,16 @@ namespace " (project-name) ".Search;
         if (" (downcase-string json-prop) " != null) return FhirDateHelper.ParseFhirDateRange(" (downcase-string json-prop) ");
 "))
                             ((and (string=? "element" vtype) vref (string=? "period" vref))
+                                ; a Period: from its start to its end, an open side
+                                ; unbounded, as the direct Period (model-date-period-extract)
                                 ($"        var " (downcase-string json-prop) " = content[\"" json-prop "\"];
         if (" (downcase-string json-prop) " != null)
         {
             var start = " (downcase-string json-prop) "[\"start\"]?.GetValue<""string>();
-            if (start != null) return FhirDateHelper.ParseFhirDateRange(start);
+            var end = " (downcase-string json-prop) "[\"end\"]?.GetValue<""string>();
+            if (start != null || end != null)
+                return (start != null ? FhirDateHelper.ParseFhirDateRange(start).low : DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc),
+                        end != null ? FhirDateHelper.ParseFhirDateRange(end).high : DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc));
         }
 "))
                             (else ""))
@@ -1207,7 +1212,7 @@ namespace " (project-name) ".Search;
     }
 
 "))
-            ; Single first part, Period last part: read period.start directly
+            ; Single first part, Period last part: the period from its start to its end
             (is-period
             ($
 "    public static (DateTime low, DateTime high)? " method-name "(JsonNode content)
@@ -1215,8 +1220,11 @@ namespace " (project-name) ".Search;
         var period = content[\"" first-field "\"]?[\"" last-field "\"];
         if (period == null) return null;
         var start = period[\"start\"]?.GetValue<""string>();
-        if (start != null) return FhirDateHelper.ParseFhirDateRange(start);
-        return null;
+        var end = period[\"end\"]?.GetValue<""string>();
+        if (start == null && end == null) return null;
+        var low = start != null ? FhirDateHelper.ParseFhirDateRange(start).low : DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+        var high = end != null ? FhirDateHelper.ParseFhirDateRange(end).high : DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
+        return (low, high);
     }
 
 "))
@@ -1235,9 +1243,9 @@ namespace " (project-name) ".Search;
 ; --- Direct reference (generic, generated once) ---
 (define (model-direct-ref-extract rn)
     ($
-"    public static List<""(string? type, string? id)> ExtractReference(JsonNode content, string propertyName)
+"    public static List<""(string? type, string? id, string? version)> ExtractReference(JsonNode content, string propertyName)
     {
-        var results = new List<""(string?, string?)>();
+        var results = new List<""(string?, string?, string?)>();
         var node = content[propertyName];
         if (node == null) return results;
 
@@ -1254,9 +1262,9 @@ namespace " (project-name) ".Search;
 ; --- Backbone reference (e.g. link.other) ---
 (define (model-backbone-ref-extract rn sn method-name fhir-field last-field)
     ($
-"    public static List<""(string? type, string? id)> "method-name"(JsonNode content)
+"    public static List<""(string? type, string? id, string? version)> "method-name"(JsonNode content)
     {
-        var results = new List<""(string?, string?)>();
+        var results = new List<""(string?, string?, string?)>();
         var links = content[\""fhir-field"\"]?.AsArray();
         if (links == null) return results;
         foreach (var link in links)
@@ -1272,9 +1280,9 @@ namespace " (project-name) ".Search;
 ; --- Backbone reference 3-part (e.g. plannedWeek.exercise.medium) ---
 (define (model-backbone-ref-extract-3 rn sn method-name first-field second-field third-field)
     ($
-"    public static List<""(string? type, string? id)> "method-name"(JsonNode content)
+"    public static List<""(string? type, string? id, string? version)> "method-name"(JsonNode content)
     {
-        var results = new List<""(string?, string?)>();
+        var results = new List<""(string?, string?, string?)>();
         var items = content[\"" first-field "\"]?.AsArray();
         if (items == null) return results;
         foreach (var item in items)
@@ -1447,6 +1455,14 @@ namespace " (project-name) ".Search;
 ")))
                 (loop (cdr ps) (if (member line seen) seen (cons line seen)))))))
 
+; What a search of that kind answers with: strings, tokens as (system,
+; value), references as (type, id, version).
+(define (cast-result-type search)
+    (case (% "type" search)
+        (("string") "string")
+        (("reference") "(string?, string?, string?)")
+        (else "(string?, string?)")))
+
 (define (model-cast-section rn searches)
     (if (null? searches) ""
         ($"    // -- Search params on one type of a choice --
@@ -1455,10 +1471,10 @@ namespace " (project-name) ".Search;
             (apply $ (map (lambda (s)
                 (let* ((sn (% "name" s))
                        (method-name ($ "Extract" (kebab-to-pascal sn)))
-                       (string? (string=? "string" (% "type" s))))
-                    ($"    public static List<""" (if string? "string" "(string?, string?)") "> " method-name "(JsonNode content)
+                       )
+                    ($"    public static List<""" (cast-result-type s) "> " method-name "(JsonNode content)
     {
-        var results = new List<""" (if string? "string" "(string?, string?)") ">();
+        var results = new List<""" (cast-result-type s) ">();
 "
                         (apply $ (cast-path-statements s))
 "        return results;
@@ -1500,7 +1516,7 @@ namespace " (project-name) ".Search;
         if (text != null) results.Add(text);
     }
 
-    private static void AddReachedReference(List<""(string?, string?)> results, JsonNode node)
+    private static void AddReachedReference(List<""(string?, string?, string?)> results, JsonNode node)
     {
         if (node is JsonObject) AddReference(results, node);
     }
@@ -1535,15 +1551,25 @@ namespace " (project-name) ".Search;
     ($
 "    // -- Helpers --
 
-    private static void AddReference(List<""(string?, string?)> results, JsonNode? refNode)
+    // A reference by its LAST parts: Type/id, with what stands before them
+    // (the base of an absolute URL) left out, and Type/id/_history/version
+    // with its version apart. One part alone is the id.
+    private static void AddReference(List<""(string?, string?, string?)> results, JsonNode? refNode)
     {
         var reference = refNode?[\"reference\"]?.GetValue<""string>();
         if (reference == null) return;
-        var parts = reference.Split('/', 2);
-        if (parts.Length == 2)
-            results.Add((parts[0], parts[1]));
+        var parts = reference.Split('/');
+        int n = parts.Length;
+        string? version = null;
+        if (n >= 3 && parts[n - 2] == \"_history\")
+        {
+            version = parts[n - 1];
+            n -= 2;
+        }
+        if (n >= 2)
+            results.Add((parts[n - 2], parts[n - 1], version));
         else
-            results.Add((null, reference));
+            results.Add((null, version == null ? reference : parts[0], version));
     }
 
     private static void AddIfPresent(List<""string> parts, JsonNode node, string fieldName)
