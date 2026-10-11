@@ -36,6 +36,16 @@ procedure resource_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[
     FAILED
 }
 
+; Undo the current version `version_id` of `id`; what the resource is
+; afterwards, or was last, into content. NOT_FOUND when that is not the
+; current version.
+procedure resource_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_rollback(scope, type, id, version_id, content)
+    StoreResult(FAILED, 0, 0)
+}
+
 ; Does the database answer?
 procedure database_ready() returns bool mutable pg_pool
 {

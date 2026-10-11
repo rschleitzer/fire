@@ -1323,6 +1323,20 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-line 1 "id" db)"
             await cmd.ExecuteNonQueryAsync();
         }
+"
+    ; the bytes of the version that is undone go with it: no foreign key takes
+    ; them, and left behind they would stand in the way of the next version
+    ; with that number
+    (if (binary-data-table? rn db) ($"
+        await using (var cmd = "(new-cmd db)"
+            \"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
+        {
+"(add-param-line 1 "id" db)"
+"(add-param-line 2 "currentVersionId" db)"
+            await cmd.ExecuteNonQueryAsync();
+        }
+") "")
+"
 
         // Find the most recent history entry - the DELETE row included, because it is the
         // version the resource stood in when it was deleted.

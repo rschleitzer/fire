@@ -30,6 +30,7 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.put(pattern(page, type, ""), &resource_put_conditional)
         app.patch(pattern(page, type, "/{id}"), &resource_patch)
         app.post(pattern(page, type, "/{id}/$undelete"), &resource_undelete)
+        app.post(pattern(page, type, "/{id}/_rollback/{vid}"), &resource_rollback_post)
         app.put(pattern(page, type, "/_history/{id}"), &resource_import)
         app.delete(pattern(page, type, ""), &resource_remove_conditional)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
@@ -633,6 +634,32 @@ procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutab
     if stored.status <> STORED
         return send_unavailable(res)
     version_fields(res, "", type, id, stored.version_id, stored.seconds)
+    send_resource(res, content.as_slice())
+}
+
+; POST /fire/<type>/{id}/_rollback/{vid}: the current version undone, when it
+; is the one named. As upstream's Rollback.
+procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    let id req.param("id")
+    let vid req.param("vid")
+    if whole_number(vid) = false
+        return send_error(res, "invalid", "Invalid version id", 400)
+    var content Array[u8]()
+    let result resource_rollback(0, type, id, whole_value(vid), &content)
+    if result.status = FAILED
+        return send_unavailable(res)
+    if result.status <> STORED
+    {
+        var message Array[u8]()
+        message.add(type)
+        put_bytes(&message, "/")
+        message.add(id)
+        put_bytes(&message, " rollback failed")
+        return send_error(res, "not-found", message.as_slice(), 404)
+    }
+    version_fields(res, "", type, id, result.version_id, result.seconds)
     send_resource(res, content.as_slice())
 }
 

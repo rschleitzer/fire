@@ -557,7 +557,6 @@ procedure postgresql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns 
     STORED
 }
 
-; Was the resource `id` deleted at some time?
 ; Does the server answer a query?
 procedure postgresql_ready() returns bool mutable pg_pool
 {
@@ -570,6 +569,188 @@ procedure postgresql_ready() returns bool mutable pg_pool
     answered
 }
 
+; One statement with the id and, when version_id is not 0, the version as
+; its parameters.
+procedure run_for(mutable c: ref[PgConn], type: Slice[u8], what: Slice[u8], sql: Slice[u8], id: Slice[u8], version_id: i64) returns bool
+{
+    var name Array[u8]()
+    statement_name(&name, type, what)
+    if c.prepare(name.as_slice(), sql) = false
+        return false
+    c.start(name.as_slice())
+    c.param_text(id)
+    if version_id > 0
+        c.param_int(version_id)
+    c.run()
+}
+
+; The Provenances written for `id` of `type` no earlier than its current
+; version, as lines of ids -- those upstream's rollback removes with the
+; version they record: they name the resource by exactly <type>/<id>.
+procedure provenance_since(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], mutable ids: ref[Array[u8]]) returns bool
+{
+    var sql Array[u8]()
+    put_bytes(&sql, "SELECT p.id, p.content FROM \"Provenance\" p WHERE p.last_updated >= (SELECT last_updated FROM ")
+    put_table(&sql, type)
+    put_bytes(&sql, " WHERE id = $1) AND p.id IN (SELECT resource_id FROM \"Provenance\".search_target WHERE target_type = $2 AND target_id = $1) ORDER BY p.id")
+    if c.prepare_unnamed(sql.as_slice()) = false
+        return false
+    c.start("")
+    c.param_text(id)
+    c.param_text(type)
+    c.binary_column(1)
+    if c.run() = false
+        return false
+    var exact Array[u8]()
+    put_bytes(&exact, type)
+    put_bytes(&exact, "/")
+    put_bytes(&exact, id)
+    while c.next_row()
+    {
+        let parsed JsonValue.parse(c.column(1))
+        if parsed.ok() = false
+            continue
+        let targets parsed.value.get("target")
+        var t: size_t 0
+        while t < targets.length()
+        {
+            let reference targets.item(t).get("reference")
+            if reference.is_text() and reference.text().equals(exact.as_slice())
+            {
+                put_bytes(ids, c.column(0))
+                ids.add(10 as u8)
+                break
+            }
+            t := t + 1
+        }
+    }
+    true
+}
+
+; Undo the current version `version_id` of `id`, as upstream's
+; RollbackAsync: the current row goes, and the last row of the history
+; comes back in its place -- unless that row is a deletion (the resource
+; stays deleted) or there is none (the resource is gone). The Provenance
+; written for the undone version goes with it, without a trace. What the
+; resource is afterwards -- or was last -- is appended to content;
+; NOT_FOUND when the current version is not the one named.
+procedure postgresql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+{
+    let got scoped(scope)
+    if got = null
+        return StoreResult(FAILED, 0, 0)
+    var c got as ref[PgConn]
+    if begin(c, scope) = false
+    {
+        end_transaction(c, scope, false)
+        return StoreResult(FAILED, 0, 0)
+    }
+    let current lock_current(c, type, id)
+    if current <= 0 or current <> version_id
+    {
+        end_transaction(c, scope, false)
+        if current < 0
+            return StoreResult(FAILED, 0, 0)
+        return StoreResult(NOT_FOUND, 0, 0)
+    }
+    var undone Array[u8]()
+    var result select_row(c, type, "select", false, id, 0, &undone)
+    var ok result.status = STORED
+    var provenances Array[u8]()
+    if ok and known_type("Provenance")
+        ok := provenance_since(c, type, id, &provenances)
+
+    var sql Array[u8]()
+    if ok
+    {
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, " WHERE id = $1")
+        ok := run_for(c, type, "delete", sql.as_slice(), id, 0)
+    }
+    if ok and keeps_data_apart(type)
+    {
+        sql.length := 0
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_data WHERE resource_id = $1 AND version_id = $2")
+        ok := run_for(c, type, "undo-data", sql.as_slice(), id, version_id)
+    }
+
+    ; the last row of the history: its version and what wrote it
+    var previous: i64 0
+    var was_delete false
+    if ok
+    {
+        sql.length := 0
+        put_bytes(&sql, "SELECT version_id, history_operation FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_history WHERE id = $1 ORDER BY version_id DESC LIMIT 1")
+        ok := run_for(c, type, "last", sql.as_slice(), id, 0)
+        if ok and c.next_row()
+        {
+            previous := c.column_int(0)
+            was_delete := c.column(1).equals("DELETE")
+        }
+    }
+    if ok and previous = 0
+        content.add(undone.as_slice())
+    if ok and previous > 0 and was_delete
+    {
+        result := select_row(c, type, "history", true, id, previous, content)
+        ok := result.status = STORED
+    }
+    if ok and previous > 0 and was_delete = false
+    {
+        sql.length := 0
+        put_bytes(&sql, "INSERT INTO ")
+        put_table(&sql, type)
+        put_bytes(&sql, " (id, version_id, last_updated, content")
+        put_column_names(&sql, type)
+        put_bytes(&sql, ") SELECT id, version_id, last_updated, content")
+        put_column_names(&sql, type)
+        put_bytes(&sql, " FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_history WHERE id = $1 AND version_id = $2")
+        ok := run_for(c, type, "back", sql.as_slice(), id, previous)
+        if ok
+        {
+            sql.length := 0
+            put_bytes(&sql, "DELETE FROM ")
+            put_table(&sql, type)
+            put_bytes(&sql, ".resource_history WHERE id = $1 AND version_id = $2")
+            ok := run_for(c, type, "forget", sql.as_slice(), id, previous)
+        }
+        if ok
+        {
+            result := select_row(c, type, "select", false, id, 0, content)
+            ok := result.status = STORED
+        }
+        if ok
+        {
+            let parsed JsonValue.parse(content.as_slice())
+            ok := parsed.ok() and insert_searches(c, type, id, parsed.value)
+        }
+    }
+    if ok and previous > 0 and keeps_data_apart(type)
+        ok := restore_data(c, type, id, result.version_id, content)
+
+    ; the Provenance of the undone version, hard
+    var at: size_t 0
+    while ok and at < provenances.length
+    {
+        let provenance line_from(provenances.as_slice(), at)
+        at := at + provenance.length + 1
+        ok := run_for(c, "Provenance", "hard", "DELETE FROM \"Provenance\" WHERE id = $1", provenance, 0)
+        if ok
+            ok := run_for(c, "Provenance", "hard-history", "DELETE FROM \"Provenance\".resource_history WHERE id = $1", provenance, 0)
+    }
+    if end_transaction(c, scope, ok) = false
+        return StoreResult(FAILED, 0, 0)
+    StoreResult(STORED, result.version_id, result.seconds)
+}
+
+; Was the resource `id` deleted at some time?
 procedure postgresql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
     let got scoped(scope)

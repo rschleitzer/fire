@@ -83,3 +83,33 @@ GET Patient/zz{S}-imp
 PUT Patient/_history/zz{S}-imp steps/broken.json
 PUT Patient/_history/zz{S}-imp observation.json
 GET Patient/zz{S}-imp/_history
+
+# _rollback: the current version undone
+PUT Patient/zz{S}-rb steps/patient-rb1.json
+PUT Patient/zz{S}-rb steps/patient-rb2.json
+POST Provenance steps/provenance-rb.json
+PUT Patient/zz{S}-rb steps/patient-rb3.json
+POST Provenance steps/provenance-rb.json
+POST Provenance steps/provenance-rb-versioned.json
+POST Patient/zz{S}-rb/_rollback/2
+POST Patient/zz{S}-rb/_rollback/abc
+POST Patient/zz{S}-never/_rollback/1
+POST Patient/zz{S}-rb/_rollback/3
+GET Patient/zz{S}-rb
+GET Patient/zz{S}-rb/_history
+GET Patient?identifier=urn:steps|zz{S}-rb&active=false&family=Version2
+GET Provenance?target=Patient/zz{S}-rb&_sort=recorded
+PUT Patient/zz{S}-rb steps/patient-rb3.json
+GET Patient/zz{S}-rb/_history
+POST Patient/zz{S}-rb/_rollback/3
+POST Patient/zz{S}-rb/_rollback/2
+POST Patient/zz{S}-rb/_rollback/1
+GET Patient/zz{S}-rb
+GET Patient/zz{S}-rb/_history
+GET Provenance?target=Patient/zz{S}-rb&_sort=recorded
+PUT Patient/zz{S}-rb steps/patient-rb1.json
+DELETE Patient/zz{S}-rb
+PUT Patient/zz{S}-rb steps/patient-rb2.json
+POST Patient/zz{S}-rb/_rollback/2
+GET Patient/zz{S}-rb
+GET Patient/zz{S}-rb/_history
