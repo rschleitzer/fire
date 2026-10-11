@@ -2438,7 +2438,7 @@ public static class SearchParameterHandler
            (searches-node (select-children "searches" resource))
            (all-searches (if (node-list-empty? searches-node) '()
                             (node-list->list (children (node-list-first searches-node)))))
-           (non-composite-searches (filter (lambda (s) (not (string=? "composite" (% "type" s)))) all-searches)))
+           (served-searches (filter search-is-served? all-searches)))
         (apply $ (map (lambda (s)
             (let* ((sn (% "name" s))
                    (st (% "type" s))
@@ -2448,7 +2448,7 @@ public static class SearchParameterHandler
                     ($"        Add(all, \"" rn "\", \"" sn "\", \"" st "\", \"" fhirpath "\");
 ")
                     "")))
-            non-composite-searches)))))
+            served-searches)))))
 "
         var result = new Dictionary<""string, byte[]>();
         foreach (var group in all.GroupBy(x => x.baseName))
@@ -2523,7 +2523,7 @@ public static class MetadataHandler
            (searches-node (select-children "searches" resource))
            (all-searches (if (node-list-empty? searches-node) '()
                             (node-list->list (children (node-list-first searches-node)))))
-           (non-composite-searches (filter (lambda (s) (not (string=? "composite" (% "type" s)))) all-searches)))
+           (served-searches (filter search-is-served? all-searches)))
         ($"                        new JsonObject
                         {
                             [\"type\"] = \"" rn "\",
@@ -2557,7 +2557,7 @@ public static class MetadataHandler
     (apply $ (map (lambda (s)
         ($"                                new JsonObject { [\"name\"] = \"" (% "name" s) "\", [\"type\"] = \"" (% "type" s) "\" },
 "))
-        non-composite-searches))
+        served-searches))
 "                            }
                         },
 "))))

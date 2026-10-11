@@ -252,3 +252,4 @@ GET Binary/b11/_history/2
 GET Binary/b11/_history/3
 GET Patient/pg1/_history
 GET Patient/pg1/_history/2
+GET metadata

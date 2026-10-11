@@ -62,6 +62,25 @@
                                  (not (string=? "special" (% "type" s)))))
                 (children (node-list-first searches))))))
 
+; Does the repository answer a search by this parameter? A column of the
+; resource, _lastUpdated, a table of a kind the query builder has a helper
+; for (repo-search-case-table), or one of the four composites the handler
+; serves (handlers.scm). What /metadata announces is exactly this set: it
+; listed every search of the model, the ones the repository refuses with
+; "Unknown search parameter" among them (uri, special), and no composite.
+(define (search-is-served? search)
+    (let ((type (% "type" search)))
+        (cond
+            ((string=? "composite" type)
+                (if (member (% "name" search)
+                        '("code-value-quantity" "code-value-concept"
+                          "component-code-value-quantity" "component-code-value-concept"))
+                    #t #f))
+            ((search-is-inline? search) #t)
+            ((search-is-last-updated? search) #t)
+            ((member type '("string" "token" "date" "reference" "number" "quantity")) #t)
+            (else #f))))
+
 ; Helper: collect searches by type
 (define (string-table-searches resource)
     (node-list-filter (lambda (s) (string=? "string" (% "type" s))) (table-searches resource)))

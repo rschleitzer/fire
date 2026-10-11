@@ -156,4 +156,41 @@ function model_references(name: Slice[u8]) returns Slice[u8]
                     (lambda (r) (scaly-references r active-names))))
 "    \"\"
 }
+
+; The CapabilityStatement, as upstream's MetadataHandler serializes it: the
+; active resource types with their interactions and the search parameters
+; the repository answers (migration.scm, search-is-served?).
+function model_capability() returns Slice[u8]
+    \"" (string-replace (scaly-capability root) "\"" "\\\"") "\"
 "))))
+
+; --- /metadata ---
+
+(define (scaly-capability-resource resource)
+    (let* ((rn (name-of resource))
+           (has-history (history? resource))
+           (searches-node (select-children "searches" resource))
+           (all-searches (if (node-list-empty? searches-node) '()
+                            (node-list->list (children (node-list-first searches-node)))))
+           (served (filter search-is-served? all-searches)))
+        ($ "{\"type\":\"" rn "\",\"interaction\":[{\"code\":\"read\"},"
+           (if has-history "{\"code\":\"vread\"}," "")
+           "{\"code\":\"update\"},{\"code\":\"patch\"},{\"code\":\"delete\"},{\"code\":\"create\"},{\"code\":\"search-type\"}"
+           (if has-history ",{\"code\":\"history-instance\"},{\"code\":\"history-type\"}" "")
+           "],\"versioning\":\"" (if has-history "versioned" "no-version") "\","
+           "\"conditionalCreate\":true,\"conditionalUpdate\":true,\"conditionalDelete\":\"single\","
+           "\"searchParam\":["
+           (let loop ((ss served) (first #t))
+               (if (null? ss) ""
+                   ($ (if first "" ",")
+                      "{\"name\":\"" (% "name" (car ss)) "\",\"type\":\"" (% "type" (car ss)) "\"}"
+                      (loop (cdr ss) #f))))
+           "]}")))
+
+(define (scaly-capability root)
+    ($ "{\"resourceType\":\"CapabilityStatement\",\"status\":\"active\",\"kind\":\"instance\",\"fhirVersion\":\"5.0.0\","
+       "\"format\":[\"json\",\"xml\"],\"rest\":[{\"mode\":\"server\",\"resource\":["
+       (let loop ((rs (node-list->list (node-list-filter active? (children (select-children "resources" root))))) (first #t))
+           (if (null? rs) ""
+               ($ (if first "" ",") (scaly-capability-resource (car rs)) (loop (cdr rs) #f))))
+       "],\"interaction\":[{\"code\":\"transaction\"},{\"code\":\"batch\"}]}]}"))
