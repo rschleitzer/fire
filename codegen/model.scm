@@ -157,6 +157,16 @@ function model_references(name: Slice[u8]) returns Slice[u8]
 "    \"\"
 }
 
+; The search parameters of the resource type `name` as the searchset Bundle
+; upstream's SearchParameterHandler answers for that base; an empty one
+; for every other name.
+function model_search_parameters(name: Slice[u8]) returns Slice[u8]
+{
+"
+            (for (node-list-filter active? (children (select-children "resources" root))) scaly-search-parameters)
+"    \"{\\\"resourceType\\\":\\\"Bundle\\\",\\\"type\\\":\\\"searchset\\\",\\\"total\\\":0,\\\"entry\\\":[]}\"
+}
+
 ; The CapabilityStatement, as upstream's MetadataHandler serializes it: the
 ; active resource types with their interactions and the search parameters
 ; the repository answers (migration.scm, search-is-served?).
@@ -194,3 +204,35 @@ function model_capability() returns Slice[u8]
            (if (null? rs) ""
                ($ (if first "" ",") (scaly-capability-resource (car rs)) (loop (cdr rs) #f))))
        "],\"interaction\":[{\"code\":\"transaction\"},{\"code\":\"batch\"}]}]}"))
+
+; --- /SearchParameter ---
+
+; One resource type's Bundle: a SearchParameter for every search the
+; repository answers that has an expression (boilerplate.scm,
+; boilerplate-search-parameter-handler). A type with none has no case: the
+; handler answers the empty Bundle for it.
+(define (scaly-search-parameters resource)
+    (let* ((rn (name-of resource))
+           (searches-node (select-children "searches" resource))
+           (all-searches (if (node-list-empty? searches-node) '()
+                            (node-list->list (children (node-list-first searches-node)))))
+           (entries (let loop ((ss (filter search-is-served? all-searches)))
+               (if (null? ss) '()
+                   (let ((path (scaly-dot-path (search-path-parts (car ss)))))
+                       (if path
+                           (cons ($ "{\"resource\":{\"resourceType\":\"SearchParameter\",\"code\":\"" (% "name" (car ss))
+                                    "\",\"base\":[\"" rn "\"],\"type\":\"" (% "type" (car ss))
+                                    "\",\"expression\":\"" rn "." path "\"}}")
+                                 (loop (cdr ss)))
+                           (loop (cdr ss))))))))
+        (if (null? entries) ""
+            ($ "    if name.equals(\"" rn "\")
+        return \""
+               (string-replace
+                   ($ "{\"resourceType\":\"Bundle\",\"type\":\"searchset\",\"total\":" (number->string (length entries)) ",\"entry\":["
+                      (let loop ((es entries) (first #t))
+                          (if (null? es) "" ($ (if first "" ",") (car es) (loop (cdr es) #f))))
+                      "]}")
+                   "\"" "\\\"")
+               "\"
+"))))

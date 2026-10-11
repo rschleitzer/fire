@@ -558,6 +558,18 @@ procedure postgresql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns 
 }
 
 ; Was the resource `id` deleted at some time?
+; Does the server answer a query?
+procedure postgresql_ready() returns bool mutable pg_pool
+{
+    let got scoped(0)
+    if got = null
+        return false
+    var c got as ref[PgConn]
+    let answered c.execute("SELECT 1")
+    give_back(c, 0)
+    answered
+}
+
 procedure postgresql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
     let got scoped(scope)

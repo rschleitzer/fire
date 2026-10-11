@@ -27,6 +27,14 @@ procedure resource_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns in
     FAILED
 }
 
+; Does the database answer?
+procedure database_ready() returns bool mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_ready()
+    false
+}
+
 procedure resource_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
     if database_in_use() = DATABASE_POSTGRESQL

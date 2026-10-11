@@ -278,3 +278,11 @@ GET Observation?component-value-canonical:below=http://example.org/c
 GET Observation?_sort=value-canonical&_id=o1,o2,o3
 GET Patient?_has:Observation:subject:code=spans
 GET Patient?_has:Observation:subject:code=open
+GET SearchParameter?base=Patient
+GET SearchParameter?base=Observation
+GET SearchParameter?base=Binary
+GET SearchParameter?base=Nope
+GET SearchParameter
+GET SearchParameter?base=Patient&base=Observation
+GET ../healthz
+GET ../readyz

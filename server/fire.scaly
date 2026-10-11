@@ -58,6 +58,9 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
 
     var app Router.create(page)
     app.get("/fire/metadata", &metadata)
+    app.get("/fire/SearchParameter", &search_parameters)
+    app.get("/healthz", &healthz)
+    app.get("/readyz", &readyz)
     add_resource_routes(app, page)
     app.post("/fire", &bundle_post)
 

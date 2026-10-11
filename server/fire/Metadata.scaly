@@ -9,3 +9,37 @@ procedure metadata(req: ref[Request], mutable res: ref[Response])
     res.header("Vary", "Accept")
     res.send("application/fhir+json", model_capability())
 }
+
+; GET /fire/SearchParameter?base=<type>: the type's search parameters.
+procedure search_parameters(req: ref[Request], mutable res: ref[Response])
+{
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var base: Slice[u8] ""
+    var i: size_t 0
+    while i < pair_count(cells.as_slice())
+    {
+        if pair_key(text.as_slice(), cells.as_slice(), i).equals("base")
+        {
+            base := pair_value(text.as_slice(), cells.as_slice(), i)
+            break
+        }
+        i := i + 1
+    }
+    res.header("Vary", "Accept")
+    res.send("application/fhir+json", model_search_parameters(base))
+}
+
+; GET /healthz: the process is up. It does not ask the database.
+procedure healthz(req: ref[Request], mutable res: ref[Response])
+    res.send("text/plain", "healthy")
+
+; GET /readyz: the database answers.
+procedure readyz(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    if database_ready()
+        return res.send("text/plain", "ready")
+    res.set_status(503)
+    res.send_empty()
+}
