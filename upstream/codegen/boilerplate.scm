@@ -1116,16 +1116,56 @@ public static partial class FhirValidator
         v != null && !IdRegex.IsMatch(v) ? \"Invalid id format\" : null;
 
     public static string? ValidateDate(string? v) =>
-        v != null && !DateRegex.IsMatch(v) ? \"Invalid date format\" : null;
+        v != null && !(DateRegex.IsMatch(v) && OnCalendar(v)) ? \"Invalid date format\" : null;
 
     public static string? ValidateDateTime(string? v) =>
-        v != null && !DateTimeRegex.IsMatch(v) ? \"Invalid dateTime format\" : null;
+        v != null && !(DateTimeRegex.IsMatch(v) && OnCalendar(v)) ? \"Invalid dateTime format\" : null;
 
     public static string? ValidateInstant(string? v) =>
-        v != null && !InstantRegex.IsMatch(v) ? \"Invalid instant format\" : null;
+        v != null && !(InstantRegex.IsMatch(v) && OnCalendar(v)) ? \"Invalid instant format\" : null;
 
     public static string? ValidateTime(string? v) =>
-        v != null && !TimeRegex.IsMatch(v) ? \"Invalid time format\" : null;
+        v != null && !(TimeRegex.IsMatch(v) && OnClock(v, 0)) ? \"Invalid time format\" : null;
+
+    // The patterns take any digits: a value that has the form is still none
+    // when no calendar has its day and no clock its time (2020-13-45, 25:61).
+    private static int TwoDigits(string v, int at) => (v[at] - '0') * 10 + (v[at + 1] - '0');
+
+    private static bool OnCalendar(string v)
+    {
+        int year = TwoDigits(v, 0) * 100 + TwoDigits(v, 2);
+        if (year < 1 || year > 9999) return false;
+        if (v.Length >= 7)
+        {
+            int month = TwoDigits(v, 5);
+            if (month < 1 || month > 12) return false;
+            if (v.Length >= 10)
+            {
+                int day = TwoDigits(v, 8);
+                if (day < 1 || day > DateTime.DaysInMonth(year, month)) return false;
+            }
+        }
+        return v.Length < 12 || v[10] != 'T' || OnClock(v, 11);
+    }
+
+    private static bool OnClock(string v, int at)
+    {
+        if (TwoDigits(v, at) > 23 || TwoDigits(v, at + 3) > 59) return false;
+        int rest = at + 5;
+        if (rest < v.Length && v[rest] == ':')
+        {
+            if (TwoDigits(v, rest + 1) > 59) return false;
+            rest += 3;
+            if (rest < v.Length && v[rest] == '.')
+            {
+                rest++;
+                while (rest < v.Length && char.IsDigit(v[rest])) rest++;
+            }
+        }
+        if (rest + 5 < v.Length && (v[rest] == '+' || v[rest] == '-'))
+            return TwoDigits(v, rest + 1) <= 14 && TwoDigits(v, rest + 4) <= 59;
+        return true;
+    }
 
     public static string? ValidatePositiveInt(int? v) =>
         v.HasValue && v.Value < 1 ? \"Must be positive\" : null;

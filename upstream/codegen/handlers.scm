@@ -301,7 +301,7 @@ public static class "rn"Handlers
 "    public static async Task<""IResult> Update(string id, HttpContext ctx, I"rn"Repository repo)
     {
         // Validate ID format
-        if (id.Length > 64 || id.Any(c => !char.IsLetterOrDigit(c) && c != '-' && c != '.'))
+        if (id.Length > 64 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '.'))
         {
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Invalid resource ID format\", 400);
         }
@@ -381,7 +381,7 @@ public static class "rn"Handlers
 "    public static async Task<""IResult> Update(string id, HttpContext ctx, I"rn"Repository repo)
     {
         // Validate ID format
-        if (id.Length > 64 || id.Any(c => !char.IsLetterOrDigit(c) && c != '-' && c != '.'))
+        if (id.Length > 64 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '.'))
         {
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Invalid resource ID format\", 400);
         }

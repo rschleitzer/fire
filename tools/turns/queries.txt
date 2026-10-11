@@ -226,3 +226,5 @@ PUT Binary/b9 refused/Binary.base64.json
 PUT Binary/b10 refused/Binary.base64.json
 GET Binary/b9
 GET Binary/b10
+PUT Patient/p%C3%A4 patient.json
+PUT Patient/pä patient.json

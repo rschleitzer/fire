@@ -284,6 +284,70 @@ function date_at(s: Slice[u8], with_time: int) returns bool
     time_at(s, 11, with_time)
 }
 
+; The patterns take any digits: a value that has the form is still none
+; when no calendar has its day and no clock its time (2020-13-45, 25:61).
+function two_digits(s: Slice[u8], at: size_t) returns i64
+    ((s[at] as i64) - 48) * 10 + ((s[at + 1] as i64) - 48)
+
+function on_calendar(s: Slice[u8]) returns bool
+{
+    let year two_digits(s, 0) * 100 + two_digits(s, 2)
+    if year < 1 or year > 9999
+        return false
+    if s.length >= 7
+    {
+        let month two_digits(s, 5)
+        if month < 1 or month > 12
+            return false
+        if s.length >= 10
+        {
+            let day two_digits(s, 8)
+            if day < 1 or day > days_in(year, month)
+                return false
+        }
+    }
+    if s.length < 12
+        return true
+    let mark s[10]
+    if mark <> 84
+        return true
+    on_clock(s, 11)
+}
+
+function on_clock(s: Slice[u8], at: size_t) returns bool
+{
+    if two_digits(s, at) > 23 or two_digits(s, at + 3) > 59
+        return false
+    var rest at + 5
+    if rest < s.length
+    {
+        let colon s[rest]
+        if colon = 58
+        {
+            if two_digits(s, rest + 1) > 59
+                return false
+            rest := rest + 3
+            if rest < s.length
+            {
+                let dot s[rest]
+                if dot = 46
+                {
+                    rest := rest + 1
+                    while rest < s.length and is_digit(s[rest])
+                        rest := rest + 1
+                }
+            }
+        }
+    }
+    if rest + 5 < s.length
+    {
+        let sign s[rest]
+        if sign = 43 or sign = 45
+            return two_digits(s, rest + 1) <= 14 and two_digits(s, rest + 4) <= 59
+    }
+    true
+}
+
 ; Does text have the form of the primitive type? (upstream's patterns; a
 ; line feed at the very end is not counted, as its `$` does not count it)
 function well_formed(type: Slice[u8], text: Slice[u8]) returns bool
@@ -292,13 +356,13 @@ function well_formed(type: Slice[u8], text: Slice[u8]) returns bool
     if s.length > 0 and s[s.length - 1] = 10
         s := s.slice_to(s.length - 1)
     if type.equals("date")
-        return date_at(s, 0)
+        return date_at(s, 0) and on_calendar(s)
     if type.equals("dateTime")
-        return date_at(s, 1)
+        return date_at(s, 1) and on_calendar(s)
     if type.equals("instant")
-        return s.length > 10 and date_at(s, 2)
+        return s.length > 10 and date_at(s, 2) and on_calendar(s)
     if type.equals("time")
-        return time_at(s, 0, 0)
+        return time_at(s, 0, 0) and on_clock(s, 0)
     ; id
     if s.length < 1 or s.length > 64
         return false
