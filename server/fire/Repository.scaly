@@ -73,6 +73,17 @@ procedure database_indexes(create: bool) returns bool mutable pg_pool
     postgresql_script(postgresql_drop_indexes())
 }
 
+; A search parameter's table made and filled, or dropped (see the
+; PostgreSQL side).
+procedure search_table(type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool
+{
+    if database_in_use() <> DATABASE_POSTGRESQL
+        return FAILED
+    if create
+        return postgresql_create_search(type, parameter)
+    postgresql_drop_search(type, parameter)
+}
+
 ; Does the database answer?
 procedure database_ready() returns bool mutable pg_pool
 {

@@ -153,3 +153,25 @@ GET Practitioner?identifier=urn:steps|zz{S}-pg&_summary=count
 GET Practitioner?identifier=urn:steps|zz{S}-pg&active=false
 GET ../admin/indexes/create
 GET ../admin/indexes/create
+
+# a search parameter's table dropped, and made anew from the stored resources
+GET ../admin/dropsearch/Practitioner/family
+GET Practitioner?family=Purged&_summary=count
+GET ../admin/createsearch/Practitioner/family
+GET Practitioner?family=Purged&identifier=urn:steps|zz{S}-pg&_summary=count
+GET ../admin/createsearch/Practitioner/family
+GET ../admin/dropsearch/Practitioner/identifier
+GET ../admin/createsearch/Practitioner/identifier
+GET Practitioner?identifier=urn:steps|zz{S}-pg&active=false
+GET ../admin/dropsearch/Practitioner/qualification-period
+GET ../admin/createsearch/Practitioner/qualification-period
+GET Practitioner?qualification-period=ge2011&family=Listed
+GET ../admin/createsearch/Practitioner/gender
+GET ../admin/dropsearch/Practitioner/gender
+GET ../admin/createsearch/Practitioner/active
+GET Practitioner?identifier=urn:steps|zz{S}-pg&active=true&_summary=count
+GET ../admin/createsearch/Practitioner/nonsense
+GET ../admin/dropsearch/Practitioner/nonsense
+GET ../admin/createsearch/Practitioner/_lastUpdated
+GET ../admin/createsearch/Nope/family
+GET ../admin/dropsearch/Nope/family

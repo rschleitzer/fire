@@ -132,3 +132,36 @@ procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg
         return send_unavailable(res)
     send_information(res, "Indexes dropped")
 }
+
+; GET /admin/createsearch/{type}/{parameter} and /admin/dropsearch/...: the
+; table of a search parameter made and filled from the stored resources,
+; or dropped.
+procedure search_table_route(req: ref[Request], mutable res: ref[Response], create: bool) mutable pg_pool
+{
+    let type req.param("type")
+    let parameter req.param("parameter")
+    if known_type(type) = false
+        return send_nothing(res)
+    let status search_table(type, parameter, create)
+    ; a parameter the type has none of: upstream throws and answers nothing
+    ; of its own
+    if status = REFUSED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    if status <> STORED
+        return send_unavailable(res)
+    var message Array[u8]()
+    put_bytes(&message, "Search table '")
+    put_bytes(&message, parameter)
+    if create
+        put_bytes(&message, "' created for ")
+    else
+        put_bytes(&message, "' dropped for ")
+    put_bytes(&message, type)
+    send_information(res, message.as_slice())
+}
+
+procedure create_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+    search_table_route(req, res, true)
+
+procedure drop_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+    search_table_route(req, res, false)

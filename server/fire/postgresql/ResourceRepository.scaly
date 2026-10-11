@@ -53,28 +53,34 @@ procedure version_params(mutable c: ref[PgConn], type: Slice[u8], root: JsonValu
     var i: size_t 0
     while entry(columns, 44, i).length > 0
     {
-        let column entry(columns, 44, i)
-        let value root.get(column_name(column))
-        if column[column.length - 1] = 98
-        {
-            if value.is_bool() = false
-                c.param_null()
-            else
-            {
-                if value.as_bool()
-                    c.param_text("t")
-                else
-                    c.param_text("f")
-            }
-        }
+        column_param(c, entry(columns, 44, i), root)
+        i := i + 1
+    }
+}
+
+; The value a resource has for one of its type's own search columns
+; (`name:kind`), as the next parameter.
+procedure column_param(mutable c: ref[PgConn], column: Slice[u8], root: JsonValue)
+{
+    let value root.get(column_name(column))
+    if column[column.length - 1] = 98
+    {
+        if value.is_bool() = false
+            c.param_null()
         else
         {
-            if value.is_text()
-                c.param_text(value.text())
+            if value.as_bool()
+                c.param_text("t")
             else
-                c.param_null()
+                c.param_text("f")
         }
-        i := i + 1
+    }
+    else
+    {
+        if value.is_text()
+            c.param_text(value.text())
+        else
+            c.param_null()
     }
 }
 
@@ -180,53 +186,61 @@ procedure insert_searches(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]
         at := at + line.length + 1
         if line[0] = 105
             continue
-        var text Array[u8]()
-        var cells Array[i64]()
-        search_rows(line, root, &text, &cells)
-        let width row_width(line[0])
-        if cells.length = 0
-            continue
-        var name Array[u8]()
-        statement_name(&name, type, entry(line, 32, 1))
-        var sql Array[u8]()
-        put_bytes(&sql, "INSERT INTO ")
-        put_table(&sql, type)
-        put_bytes(&sql, ".")
-        sql.add(entry(line, 32, 1))
-        put_bytes(&sql, " (id, resource_id, ")
-        put_bytes(&sql, search_columns(line[0]))
-        put_bytes(&sql, ") VALUES ($1, $2")
-        var p: size_t 0
-        while p < width
-        {
-            put_bytes(&sql, ", $")
-            put_decimal(&sql, (p + 3) as i64)
-            p := p + 1
-        }
-        put_bytes(&sql, ")")
-        if c.prepare(name.as_slice(), sql.as_slice()) = false
+        if insert_search(c, type, id, root, line) = false
             return false
-        var row: size_t 0
-        while row * width * 2 < cells.length
+    }
+    true
+}
+
+; The rows of ONE search table (its line of the model) for `id`.
+procedure insert_search(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8], root: JsonValue, line: Slice[u8]) returns bool
+{
+    var text Array[u8]()
+    var cells Array[i64]()
+    search_rows(line, root, &text, &cells)
+    let width row_width(line[0])
+    if cells.length = 0
+        return true
+    var name Array[u8]()
+    statement_name(&name, type, entry(line, 32, 1))
+    var sql Array[u8]()
+    put_bytes(&sql, "INSERT INTO ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".")
+    sql.add(entry(line, 32, 1))
+    put_bytes(&sql, " (id, resource_id, ")
+    put_bytes(&sql, search_columns(line[0]))
+    put_bytes(&sql, ") VALUES ($1, $2")
+    var p: size_t 0
+    while p < width
+    {
+        put_bytes(&sql, ", $")
+        put_decimal(&sql, (p + 3) as i64)
+        p := p + 1
+    }
+    put_bytes(&sql, ")")
+    if c.prepare(name.as_slice(), sql.as_slice()) = false
+        return false
+    var row: size_t 0
+    while row * width * 2 < cells.length
+    {
+        c.start(name.as_slice())
+        c.param_int(row as i64)
+        c.param_text(id)
+        var k: size_t 0
+        while k < width
         {
-            c.start(name.as_slice())
-            c.param_int(row as i64)
-            c.param_text(id)
-            var k: size_t 0
-            while k < width
-            {
-                let offset cells[(row * width + k) * 2]
-                let length cells[(row * width + k) * 2 + 1]
-                if length < 0
-                    c.param_null()
-                else
-                    c.param_text(text.as_slice().subslice(offset as size_t, (offset + length) as size_t))
-                k := k + 1
-            }
-            if c.run() = false
-                return false
-            row := row + 1
+            let offset cells[(row * width + k) * 2]
+            let length cells[(row * width + k) * 2 + 1]
+            if length < 0
+                c.param_null()
+            else
+                c.param_text(text.as_slice().subslice(offset as size_t, (offset + length) as size_t))
+            k := k + 1
         }
+        if c.run() = false
+            return false
+        row := row + 1
     }
     true
 }
@@ -748,6 +762,171 @@ procedure postgresql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], versio
     if end_transaction(c, scope, ok) = false
         return StoreResult(FAILED, 0, 0)
     StoreResult(STORED, result.version_id, result.seconds)
+}
+
+; The statements that make a search table and its indexes, as upstream's
+; CreateSearchAsync has them for a table of that kind.
+procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: Slice[u8])
+{
+    let table entry(line, 32, 1)
+    let kind line[0]
+    put_bytes(sql, "CREATE TABLE IF NOT EXISTS ")
+    put_table(sql, type)
+    put_bytes(sql, ".")
+    put_bytes(sql, table)
+    put_bytes(sql, " (id INT NOT NULL, resource_id VARCHAR(64) NOT NULL REFERENCES ")
+    put_table(sql, type)
+    put_bytes(sql, "(id) ON DELETE CASCADE, ")
+    var indexed: Slice[u8] "value"
+    match kind as int
+        case 116: put_bytes(sql, "system TEXT, value TEXT, display TEXT")
+        case 100
+        {
+            put_bytes(sql, "value_low TIMESTAMPTZ, value_high TIMESTAMPTZ")
+            indexed := "value_low"
+        }
+        case 114
+        {
+            put_bytes(sql, "target_type TEXT, target_id TEXT, target_version TEXT")
+            indexed := "reference"
+        }
+        case 110: put_bytes(sql, "value DECIMAL")
+        case 113: put_bytes(sql, "value DECIMAL, system TEXT, code TEXT, unit TEXT")
+        else: put_bytes(sql, "value TEXT")
+    put_bytes(sql, ", PRIMARY KEY (id, resource_id))")
+    put_search_index(sql, type, table, indexed)
+    if kind = 100
+        put_search_index(sql, type, table, "value_high")
+    if kind = 116 and (table.equals("search_identifier") or table.equals("search_language"))
+        put_search_index(sql, type, table, "system")
+}
+
+procedure put_search_index(mutable sql: ref[Array[u8]], type: Slice[u8], table: Slice[u8], what: Slice[u8])
+{
+    put_bytes(sql, "; CREATE INDEX IF NOT EXISTS ix_")
+    put_bytes(sql, type)
+    put_bytes(sql, "_")
+    put_bytes(sql, table)
+    put_bytes(sql, "_")
+    put_bytes(sql, what)
+    put_bytes(sql, " ON ")
+    put_table(sql, type)
+    put_bytes(sql, ".")
+    put_bytes(sql, table)
+    if what.equals("reference")
+        put_bytes(sql, " (target_id, target_type)")
+    else
+    {
+        put_bytes(sql, " (")
+        put_bytes(sql, what)
+        put_bytes(sql, ")")
+    }
+}
+
+; A search parameter's table made and filled from every stored resource --
+; for one that is a column of the resource, the column filled --, as
+; upstream's CreateSearchAsync. REFUSED for a parameter the type has none
+; of; FAILED also where the table holds rows already (upstream fails on the
+; key, too).
+procedure postgresql_create_search(type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool
+{
+    let line search_line(type, parameter)
+    if line.length = 0
+        return REFUSED
+    let got scoped(0)
+    if got = null
+        return FAILED
+    var c got as ref[PgConn]
+    var ok true
+    if line[0] <> 105
+    {
+        var ddl Array[u8]()
+        put_search_table(&ddl, type, line)
+        ok := c.execute(ddl.as_slice())
+    }
+    ; every resource first, then the writes: one statement at a time
+    var read Array[u8]()
+    var cells Array[i64]()
+    if ok
+    {
+        var sql Array[u8]()
+        put_bytes(&sql, "SELECT id, content FROM ")
+        put_table(&sql, type)
+        ok := c.prepare_unnamed(sql.as_slice())
+        if ok
+        {
+            c.start("")
+            c.binary_column(1)
+            ok := c.run()
+            while ok and c.next_row()
+            {
+                cell(&read, &cells, c.column(0))
+                cell(&read, &cells, c.column(1))
+            }
+        }
+    }
+    var r: size_t 0
+    while ok and r * 4 < cells.length
+    {
+        let id read.as_slice().subslice(cells[r * 4] as size_t, (cells[r * 4] + cells[r * 4 + 1]) as size_t)
+        let parsed JsonValue.parse(read.as_slice().subslice(cells[r * 4 + 2] as size_t, (cells[r * 4 + 2] + cells[r * 4 + 3]) as size_t))
+        r := r + 1
+        if parsed.ok() = false
+            continue
+        if line[0] <> 105
+        {
+            ok := insert_search(c, type, id, parsed.value, line)
+            continue
+        }
+        ; the column: its entry among the type's own (name:kind)
+        let columns inline_columns(type)
+        var k: size_t 0
+        while entry(columns, 44, k).length > 0
+        {
+            let column entry(columns, 44, k)
+            k := k + 1
+            if column_name(column).equals(entry(line, 32, 3)) = false
+                continue
+            var sql Array[u8]()
+            put_bytes(&sql, "UPDATE ")
+            put_table(&sql, type)
+            put_bytes(&sql, " SET \"")
+            put_bytes(&sql, entry(line, 32, 3))
+            put_bytes(&sql, "\" = $1 WHERE id = $2")
+            var name Array[u8]()
+            statement_name(&name, type, entry(line, 32, 1))
+            put_bytes(&name, "_fill")
+            ok := c.prepare(name.as_slice(), sql.as_slice())
+            if ok
+            {
+                c.start(name.as_slice())
+                column_param(c, column, parsed.value)
+                c.param_text(id)
+                ok := c.run()
+            }
+        }
+    }
+    give_back(c, 0)
+    if ok = false
+        return FAILED
+    STORED
+}
+
+; A search parameter's table dropped, as upstream's DropSearchAsync.
+; REFUSED for a parameter the type has no table of.
+procedure postgresql_drop_search(type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool
+{
+    let line search_line(type, parameter)
+    if line.length = 0 or line[0] = 105
+        return REFUSED
+    var sql Array[u8]()
+    put_bytes(&sql, "DROP TABLE IF EXISTS ")
+    put_table(&sql, type)
+    put_bytes(&sql, ".")
+    put_bytes(&sql, entry(line, 32, 1))
+    if postgresql_script(sql.as_slice()) = false
+        return FAILED
+    STORED
 }
 
 ; The selection upstream's PurgeAsync works on: the ids that have a deletion
