@@ -604,7 +604,7 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
 ; The cells a row of a table of that kind has.
 function row_width(kind: u8) returns size_t
 {
-    if kind = 115 or kind = 110
+    if kind = 115 or kind = 110 or kind = 117
         return 1
     if kind = 113
         return 4

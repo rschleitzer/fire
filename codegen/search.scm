@@ -2,7 +2,7 @@
 ; one line per table of a resource type, the fields separated by blanks:
 ;   kind table shape arguments
 ; kind is the table's (s string, t token, d date, r reference, n number,
-; q quantity), shape names the way upstream's extractor for that table
+; q quantity, u uri), shape names the way upstream's extractor for that table
 ; reads the resource -- chosen here as models.scm chooses it, with its own
 ; predicates --, and fire/Search.scaly has one routine per shape:
 ;   names F            every part of every name of the array F
@@ -156,7 +156,7 @@
                              (period "pathperiod ")
                              (else "path "))
                        first-field " " last-field)))
-            ((and prop (string=? "variant" (% "type" prop)))
+            ((and prop (property-has-variants? prop))
                 ($ "variant"
                    (apply $ (map (lambda (v)
                        (let* ((vtype (% "type" v))
@@ -241,7 +241,8 @@
            (apply $ (map (lambda (s) (line "d" s (scaly-date-shape s))) dates))
            (apply $ (map (lambda (s) (line "r" s (if (search-is-cast? s) (scaly-cast-shape s) (scaly-reference-shape s)))) (of "reference")))
            (apply $ (map (lambda (s) (line "n" s (scaly-number-shape s))) (of "number")))
-           (apply $ (map (lambda (s) (line "q" s (scaly-quantity-shape s))) (of "quantity"))))))
+           (apply $ (map (lambda (s) (line "q" s (scaly-quantity-shape s))) (of "quantity")))
+           (apply $ (map (lambda (s) (line "u" s (scaly-cast-shape s))) (of "uri"))))))
 
 (define (scaly-searches resource) ($
 "    if name.equals(\"" (name-of resource) "\")

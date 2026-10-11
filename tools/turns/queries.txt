@@ -260,3 +260,21 @@ GET Practitioner?qualification-period=2010-06-01&family=Listed
 GET Practitioner?_sort=qualification-period
 GET Practitioner?_sort=-qualification-period
 GET Practitioner?qualification-period:missing=true
+
+GET Observation?value-canonical=http://example.org/fhir/ValueSet/vital-signs
+GET Observation?value-canonical=http://example.org/fhir/ValueSet/vital
+GET Observation?value-canonical=urn:oid:1.2.3.4,http://example.org/fhir/ValueSet
+GET Observation?value-canonical:below=http://example.org/fhir/ValueSet
+GET Observation?value-canonical:below=http://example.org/fhir/ValueSet/
+GET Observation?value-canonical:below=http://example.org/fhir
+GET Observation?value-canonical:above=http://example.org/fhir/ValueSet/vital-signs/heart/rate
+GET Observation?value-canonical:above=http://example.org/fhir/ValueSet/vital-signs
+GET Observation?value-canonical:above=urn:oid:1.2.3.4
+GET Observation?value-canonical:missing=true&code=mood
+GET Observation?value-canonical:missing=false
+GET Observation?value-canonical:not=urn:oid:1.2.3.4&_id=o1,o2
+GET Observation?component-value-canonical=http://example.org/c/2
+GET Observation?component-value-canonical:below=http://example.org/c
+GET Observation?_sort=value-canonical&_id=o1,o2,o3
+GET Patient?_has:Observation:subject:code=spans
+GET Patient?_has:Observation:subject:code=open

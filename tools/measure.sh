@@ -290,6 +290,11 @@ linked() {
     call "$1.gone.$name.again" 200 PUT "$type/$id" "gone/$name.json"
     call "$1.gone.$name.delete" 204 DELETE "$type/$id"
   done
+  # ... and rows of tools/turns/rows.sql, written past the servers: a uri
+  # search has no resource here that could hold one (R5's Observation has no
+  # valueCanonical), so its tables are filled by hand for the questions
+  docker exec -i "$PG_NAME" psql -U postgres -d Fire -q < "$ROOT/tools/turns/rows.sql" \
+    || { echo "turns: FAIL -- tools/turns/rows.sql"; TURNS_FAILED=1; }
 }
 
 # Ask the running server every request of tools/turns/queries.txt; status

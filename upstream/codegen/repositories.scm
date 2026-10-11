@@ -448,7 +448,7 @@ public interface I"rn"Repository
            (inlines (inline-searches resource))
            (inline-list (node-list->list inlines))
            (raw-table-search-list (node-list->list (table-searches resource)))
-           ; Filter to supported types only (excludes composite, uri)
+           ; Filter to supported types only (excludes composite, special)
            (all-table-search-list (filter (lambda (s)
                (let ((t (% "type" s)))
                    (or (string=? "string" t)
@@ -456,7 +456,8 @@ public interface I"rn"Repository
                        (string=? "date" t)
                        (string=? "reference" t)
                        (string=? "number" t)
-                       (string=? "quantity" t)))) raw-table-search-list))
+                       (string=? "quantity" t)
+                       (string=? "uri" t)))) raw-table-search-list))
            (string-searches (filter (lambda (s) (string=? "string"(% "type" s))) all-table-search-list))
            (token-searches (filter (lambda (s) (and (string=? "token"(% "type" s)) (not (search-is-inline? s)))) all-table-search-list))
            (date-searches (filter (lambda (s) (and (string=? "date"(% "type" s)) (not (search-is-inline-instant? s)))) all-table-search-list))
@@ -464,6 +465,7 @@ public interface I"rn"Repository
            (ref-searches (filter (lambda (s) (string=? "reference"(% "type" s))) all-table-search-list))
            (number-searches (filter (lambda (s) (string=? "number"(% "type" s))) all-table-search-list))
            (quantity-searches (filter (lambda (s) (string=? "quantity"(% "type" s))) all-table-search-list))
+           (uri-searches (filter (lambda (s) (string=? "uri"(% "type" s))) all-table-search-list))
            (hn-all (filter (lambda (s)
                (and (search-is-humanname? s) (equal? "all"(search-humanname-field s))))
                string-searches)))
@@ -494,7 +496,7 @@ public interface I"rn"Repository
                         (repo-drop-search schema all-table-search-list db)
                         (repo-purge rn schema has-history db)
                         (repo-read-resource-helper rn inline-list has-history db)
-                        (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches hn-all db)
+                        (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
                         (repo-delete-search-indexes schema all-table-search-list db)
                         (repo-insert-helpers schema db)
                         (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
@@ -1803,9 +1805,10 @@ public class "rn"Repository : I"rn"Repository
                ((string=? "reference" type)"AddReferenceSearchOr")
                ((string=? "number" type)"AddNumberSearchOr")
                ((string=? "quantity" type)"AddQuantitySearchOr")
+               ((string=? "uri" type)"AddUriSearchOr")
                (else #f))))
         (if helper
-            (if (or is-string is-token)
+            (if (or is-string is-token (string=? "uri" type))
                 ($"                    case \"" sn "\":
                         SearchQueryBuilder." helper "(\"" schema "\", joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
                             \"" tn "\", orValues, modifier);
@@ -2174,7 +2177,7 @@ public class "rn"Repository : I"rn"Repository
        " (id INT NOT NULL, resource_id " (db-id-type db)
        " NOT NULL REFERENCES " (tbl-public rn db) "(id) ON DELETE CASCADE, "
        (case stype
-           (("string") ($"value " (db-search-text-type db)))
+           (("string" "uri") ($"value " (db-search-text-type db)))
            (("token") ($"system " (db-search-text-type db) ", value " (db-search-text-type db) ", display " (db-search-display-type db)))
            (("date") ($"value_low " (db-timestamp-type db) ", value_high " (db-timestamp-type db)))
            (("reference") ($"target_type " (db-search-text-type db) ", target_id " (db-search-text-type db) ", target_version " (db-search-display-type db)))
@@ -2187,7 +2190,7 @@ public class "rn"Repository : I"rn"Repository
 (define (search-index-ddl schema tn stype sn db)
     (let ((ci (db-create-index db)))
     (case stype
-        (("string") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"))
+        (("string" "uri") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"))
         (("token") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"
                      (if (or (string=? "identifier" sn) (string=? "language" sn))
                          ($"; " ci "ix_" schema "_" tn "_system ON " (tbl schema tn db) " (system)")
@@ -2250,6 +2253,9 @@ public class "rn"Repository : I"rn"Repository
 "))
         (("quantity")
             ($"                    await InsertQuantityIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
+"))
+        (("uri")
+            ($"                    await InsertStringIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
 "))
         (else ""))))
 
@@ -2528,7 +2534,7 @@ public class "rn"Repository : I"rn"Repository
 ; Section: InsertSearchIndexesAsync
 ; ===================================================================
 
-(define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches hn-all db)
+(define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
     ($
 "    private async Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
     {
@@ -2571,6 +2577,15 @@ public class "rn"Repository : I"rn"Repository
         // Quantity indexes
 "
             (apply $ (map (lambda (s) (repo-quantity-index-line rn s)) quantity-searches))))
+        ; Uri indexes: the table of a string search, filled by the paths of the search
+        (if (null? uri-searches)""
+            ($"
+        // Uri indexes
+"
+            (apply $ (map (lambda (s)
+                ($"        await InsertStringIndexAsync(conn, tx, \""(search-table-name s)"\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal (% "name" s))"(content));
+"))
+                uri-searches))))
 "    }
 
 "))
@@ -3068,6 +3083,7 @@ internal static class SearchQueryBuilder
     (sqb-add-inline-number-searches db)
     (sqb-add-number-search-or db)
     (if (any-quantity-table-search?) (sqb-add-quantity-search-or db) "")
+    (if (any-uri-table-search?) (sqb-add-uri-search-or db) "")
     (sqb-add-reference-search-or db)))
 
 (define (sqb-schema-table db)
@@ -3486,6 +3502,79 @@ internal static class SearchQueryBuilder
         (cond ((null? rs) #f)
               ((and (active? (car rs)) (not (node-list-empty? (quantity-table-searches (car rs))))) #t)
               (else (loop (cdr rs))))))
+
+; Does any active resource of the model have a uri search? The query helper
+; is emitted only then.
+(define (any-uri-table-search?)
+    (let loop ((rs (node-list->list (select-elements (descendants (tree-root (current-node))) "resource"))))
+        (cond ((null? rs) #f)
+              ((and (active? (car rs)) (not (node-list-empty? (uri-table-searches (car rs))))) #t)
+              (else (loop (cdr rs))))))
+
+; The first n characters of a column, n written by the caller in C#.
+(define (db-left-cs column-cs count-cs db)
+    (case db
+        ((Sqlite) ($ "SUBSTR(" column-cs ", 1, " count-cs ")"))
+        (else ($ "LEFT(" column-cs ", " count-cs ")"))))
+
+; Uri search: the whole value, as it is written (no case folding, no
+; prefix). :below takes what stands at or under the value, :above what the
+; value stands at or under -- by path steps, a slash between them.
+(define (sqb-add-uri-search-or db)
+    ($
+"    internal static void AddUriSearchOr(string schema, List<""string> joins, List<""string> wheres, List<""ParamType> parameters,
+        ref int paramIndex, ref int aliasIndex, string table, string[] values, string modifier)
+    {
+        var alias = NextAlias(ref aliasIndex);
+        joins.Add($\"JOIN {SchemaTable(schema, table)} {alias} ON {alias}.resource_id = r.id\");
+
+        var orParts = new List<""string>();
+        foreach (var value in values)
+        {
+            switch (modifier)
+            {
+                case \"below\":
+                {
+                    var under = value.TrimEnd('/') + \"/\";
+                    orParts.Add($\"({alias}.value = {P(paramIndex)} OR " (db-left-cs "{alias}.value" "{under.Length}" db) " = {P(paramIndex + 1)})\");
+                    parameters.Add(NewParam(paramIndex, value));
+                    parameters.Add(NewParam(paramIndex + 1, under));
+                    paramIndex += 2;
+                    break;
+                }
+                case \"above\":
+                {
+                    // the value and every step above it, down to its authority
+                    var steps = new List<""string> { value };
+                    var floor = value.IndexOf(\"://\", StringComparison.Ordinal);
+                    floor = floor < 0 ? 0 : floor + 3;
+                    for (var at = value.LastIndexOf('/'); at > floor; at = value.LastIndexOf('/', at - 1))
+                    {
+                        var step = value[..at];
+                        if (step.Length > 0 && !step.EndsWith('/')) steps.Add(step);
+                    }
+                    var marks = new List<""string>();
+                    foreach (var step in steps)
+                    {
+                        marks.Add($\"{P(paramIndex)}\");
+                        parameters.Add(NewParam(paramIndex, step));
+                        paramIndex++;
+                    }
+                    orParts.Add($\"{alias}.value IN ({string.Join(\", \", marks)})\");
+                    break;
+                }
+                default:
+                    orParts.Add($\"{alias}.value = {P(paramIndex)}\");
+                    parameters.Add(NewParam(paramIndex, value));
+                    paramIndex++;
+                    break;
+            }
+        }
+
+        wheres.Add(orParts.Count == 1 ? orParts[0] : $\"({string.Join(\" OR \", orParts)})\");
+    }
+
+"))
 
 ; Quantity search: [prefix]number, or [prefix]number|system|code.
 ; Prefixes eq (default), ne, gt, lt, ge, le as for a number, and ap: within

@@ -67,7 +67,7 @@
 ; for (repo-search-case-table), or one of the four composites the handler
 ; serves (handlers.scm). What /metadata announces is exactly this set: it
 ; listed every search of the model, the ones the repository refuses with
-; "Unknown search parameter" among them (uri, special), and no composite.
+; "Unknown search parameter" among them (special), and no composite.
 (define (search-is-served? search)
     (let ((type (% "type" search)))
         (cond
@@ -78,12 +78,21 @@
                     #t #f))
             ((search-is-inline? search) #t)
             ((search-is-last-updated? search) #t)
-            ((member type '("string" "token" "date" "reference" "number" "quantity")) #t)
+            ((member type '("string" "token" "date" "reference" "number" "quantity" "uri")) #t)
             (else #f))))
 
 ; Helper: collect searches by type
 (define (string-table-searches resource)
     (node-list-filter (lambda (s) (string=? "string" (% "type" s))) (table-searches resource)))
+
+; A uri search has a table of the same form as a string search (value
+; TEXT) and is made and dropped with them; what differs is how it is asked
+; (exact, :above, :below -- repositories.scm, sqb-add-uri-search-or).
+(define (uri-table-searches resource)
+    (node-list-filter (lambda (s) (string=? "uri" (% "type" s))) (table-searches resource)))
+
+(define (valued-table-searches resource)
+    (node-list-filter (lambda (s) (or (string=? "string" (% "type" s)) (string=? "uri" (% "type" s)))) (table-searches resource)))
 
 (define (token-table-searches resource)
     (node-list-filter (lambda (s) (and (string=? "token" (% "type" s)) (not (search-is-inline? s)))) (table-searches resource)))
@@ -237,7 +246,7 @@
 ; --- String search tables ---
 
 (define (migration-string-tables rn schema resource db)
-    (let ((searches (node-list->list (string-table-searches resource))))
+    (let ((searches (node-list->list (valued-table-searches resource))))
         (if (null? searches) ""
             ($"-- =============================================================================
 -- String search tables (value TEXT)
@@ -463,7 +472,7 @@
 " ci "ix_" schema "_resource_history_last_updated ON " htbl " (last_updated);
 "))
                 "")
-            (for (string-table-searches resource) (lambda (s)
+            (for (valued-table-searches resource) (lambda (s)
                 (let ((tn (search-table-name s)))
                 ($"" ci "ix_" schema "_" tn "_value ON " (migration-table schema tn db) " (value);
 "))))
@@ -502,7 +511,7 @@
                     (drop-schema-ix ($"ix_" schema "_resource_history_timestamp") schema "resource_history" db)
                     (drop-schema-ix ($"ix_" schema "_resource_history_last_updated") schema "resource_history" db))
                 "")
-            (for (string-table-searches resource) (lambda (s)
+            (for (valued-table-searches resource) (lambda (s)
                 (let ((tn (search-table-name s)))
                 (drop-schema-ix ($"ix_" schema "_" tn "_value") schema tn db))))
             (for (token-table-searches resource) (lambda (s)
@@ -534,7 +543,7 @@
 ")))
            (del-search (lambda (s) (del (migration-table schema (search-table-name s) db)))))
         ($
-            (for (string-table-searches resource) del-search)
+            (for (valued-table-searches resource) del-search)
             (for (token-table-searches resource) del-search)
             (for (date-table-searches resource) del-search)
             (for (instant-table-searches resource) del-search)

@@ -93,34 +93,41 @@ procedure joined_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64
     close_cell(text, cells)
 }
 
-; The reference of a node as a line of set, once: type/id as it stands,
-; or, with ids, what follows its last slash. One without a slash is none.
+; The reference of a node as a line of set, once, read by its LAST parts
+; as the index reads it (Search.reference_cells): type/id -- the base of
+; an absolute URL and a version behind /_history/ left out --, or, with
+; ids, the id alone. One without a slash is none.
 procedure reference_line_of(mutable set: ref[Array[u8]], reference: JsonValue, ids: bool)
 {
     if reference.is_text() = false
         return
-    let length reference.text().length
-    var slash length
-    var first length
-    var i: size_t 0
-    while i < length
+    let whole reference.text()
+    var end whole.length
+    let a slash_before(whole, end)
+    if a < 0
+        return
+    let b slash_before(whole, a as size_t)
+    if b >= 0
     {
-        if reference.text()[i] = 47
-        {
-            slash := i
-            if first = length
-                first := i
-        }
-        i := i + 1
+        let marker whole.subslice((b + 1) as size_t, a as size_t)
+        if marker.equals("_history")
+            end := b as size_t
     }
-    if slash = length
-        return
+    let s slash_before(whole, end)
     var from: size_t 0
-    if ids
-        from := slash + 1
-    if has_line(set.as_slice(), reference.text().slice_from(from))
+    if s >= 0
+    {
+        if ids
+            from := (s + 1) as size_t
+        else
+            from := (slash_before(whole, s as size_t) + 1) as size_t
+    }
+    else if ids = false
         return
-    set.add(reference.text().slice_from(from))
+    let line whole.subslice(from, end)
+    if has_line(set.as_slice(), line)
+        return
+    set.add(line)
     set.add(10 as u8)
 }
 

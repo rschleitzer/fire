@@ -129,7 +129,8 @@
                    (else (loop (cdr ps)))))))
 
 (define (search-is-cast? search)
-    (or (and (member (% "type" search) '("string" "token" "reference"))
+    (or (string=? "uri" (% "type" search))   ; a uri search is always read by its paths
+        (and (member (% "type" search) '("string" "token" "reference"))
              (let loop ((ps (search-path-nodes search)))
                  (cond ((null? ps) #f)
                        ((path-is-cast? (car ps)) #t)
@@ -552,7 +553,7 @@ namespace " (project-name) ".Search;
                        (parts (search-path-parts s))
                        (prop (search-property s))
                        (fhir-field (if prop (% "name" prop) sn))
-                       (is-variant (and prop (string=? "variant" (% "type" prop))))
+                       (is-variant (and prop (property-has-variants? prop)))
                        (is-period (and prop (let ((r (% "ref" prop))) (and r (string=? "period" r))))))
                     (cond ((> (length parts) 1)
                            (model-date-backbone-extract rn sn method-name s))
@@ -1455,7 +1456,7 @@ namespace " (project-name) ".Search;
 (define (cast-path-adder search path)
     (let ((leaf (downcase-string (cast-path-leaf path))))
         (case (% "type" search)
-            (("string") "AddReachedText")
+            (("string" "uri") "AddReachedText")
             (("reference") "AddReachedReference")
             (else (cond ((string=? "codeableconcept" leaf) "AddReachedConcept")
                         ((string=? "coding" leaf) "AddReachedCoding")
@@ -1474,7 +1475,7 @@ namespace " (project-name) ".Search;
 ; value), references as (type, id, version).
 (define (cast-result-type search)
     (case (% "type" search)
-        (("string") "string")
+        (("string" "uri") "string")
         (("reference") "(string?, string?, string?)")
         (else "(string?, string?)")))
 

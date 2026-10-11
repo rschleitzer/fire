@@ -408,6 +408,85 @@ procedure table_condition(mutable q: ref[SearchQuery], type: Slice[u8], kind: u8
             }
             case 116
                 token_part(q, alias, v, modifier.equals("contains"), &parts)
+            case 117
+            {
+                ; a uri: the whole value as it is written; :below what stands
+                ; at or under it, :above what it stands at or under
+                next_part(q, &parts)
+                if modifier.equals("below")
+                {
+                    var end v.length
+                    while end > 0
+                    {
+                        let last v[end - 1]
+                        if last <> 47
+                            break
+                        end := end - 1
+                    }
+                    var under Array[u8]()
+                    put_bytes(&under, v.slice_to(end))
+                    put_bytes(&under, "/")
+                    var letters: i64 0
+                    var u: size_t 0
+                    while u < under.length
+                    {
+                        let b under[u]
+                        if b < 128 or b >= 192
+                            letters := letters + 1
+                        u := u + 1
+                    }
+                    put_bytes(&q.wheres, "(")
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v)
+                    put_bytes(&q.wheres, " OR LEFT(")
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, ", ")
+                    put_decimal(&q.wheres, letters)
+                    put_bytes(&q.wheres, ") = ")
+                    put_param(q, &q.wheres, under.as_slice())
+                    put_bytes(&q.wheres, ")")
+                }
+                else if modifier.equals("above")
+                {
+                    var floor: i64 0
+                    var i: size_t 0
+                    while i + 2 < v.length
+                    {
+                        let c0 v[i]
+                        let c1 v[i + 1]
+                        let c2 v[i + 2]
+                        if c0 = 58 and c1 = 47 and c2 = 47
+                        {
+                            floor := (i + 3) as i64
+                            break
+                        }
+                        i := i + 1
+                    }
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, " IN (")
+                    put_param(q, &q.wheres, v)
+                    var at slash_before(v, v.length)
+                    while at > floor
+                    {
+                        let cut at as size_t
+                        let last v[cut - 1]
+                        if last <> 47
+                        {
+                            put_bytes(&q.wheres, ", ")
+                            put_param(q, &q.wheres, v.slice_to(cut))
+                        }
+                        at := slash_before(v, cut)
+                    }
+                    put_bytes(&q.wheres, ")")
+                }
+                else
+                {
+                    put_column(&q.wheres, alias, "value")
+                    put_bytes(&q.wheres, " = ")
+                    put_param(q, &q.wheres, v)
+                }
+            }
             case 100
                 date_part(q, alias, "value_low", "value_high", v, false, &parts)
             case 114

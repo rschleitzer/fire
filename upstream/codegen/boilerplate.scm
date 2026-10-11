@@ -1980,8 +1980,18 @@ public static class SearchHelper
         {
             var refStr = refNode?[\"reference\"]?.GetValue<""string>();
             if (refStr != null && refStr.Contains('/'))
-                ids.Add(refStr.Split('/').Last());
+                ids.Add(ReferenceTarget(refStr).id);
         }
+    }
+
+    // Type and id of a reference by its LAST parts, as the index has it: the
+    // base of an absolute URL and a version behind /_history/ left out.
+    private static (string? type, string id) ReferenceTarget(string reference)
+    {
+        var parts = reference.Split('/');
+        int n = parts.Length;
+        if (n >= 3 && parts[n - 2] == \"_history\") n -= 2;
+        return n >= 2 ? (parts[n - 2], parts[n - 1]) : (null, parts[0]);
     }
 
     public static async Task<""List<""JsonObject>> ResolveIncludesAsync(
@@ -2148,9 +2158,8 @@ public static class SearchHelper
             {
                 var refStr = refNode?[\"reference\"]?.GetValue<""string>();
                 if (refStr == null || !refStr.Contains('/')) continue;
-                var slashIdx = refStr.IndexOf('/');
-                var refType = refStr.Substring(0, slashIdx);
-                var refId = refStr.Substring(slashIdx + 1);
+                var (refType, refId) = ReferenceTarget(refStr);
+                if (refType == null) continue;
 
                 if (targetTypeFilter != null && refType != targetTypeFilter) continue;
 
