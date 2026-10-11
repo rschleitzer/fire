@@ -5,7 +5,6 @@ use fire.postgresql.DatabaseProvider.PostgreSqlProvider
 
 ; The version of the schema this software is written for (upstream's
 ; Database.SoftwareVersion).
-define SOFTWARE_VERSION: Slice[u8] "5.0.0"
 
 ; Which provider the server runs on, for the threads that serve requests:
 ; stored once at the start, before they exist, and only through
@@ -47,6 +46,6 @@ procedure initialize(db: DatabaseProvider) returns bool
         when p: PostgreSql
         {
             scaly_atomic_store_u64(&database_kind, DATABASE_POSTGRESQL)
-            return p.initialize(SOFTWARE_VERSION)
+            return p.initialize(model_version())
         }
 }

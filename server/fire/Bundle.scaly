@@ -287,6 +287,21 @@ procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e
     error_entry(e, "400", message.as_slice())
 }
 
+; The first member a resource of the type must have (the model's) that it
+; has not; empty when it has them all.
+function missing_member(type: Slice[u8], resource: JsonValue) returns Slice[u8]
+{
+    let needed model_required(type)
+    var k: size_t 0
+    while entry(needed, 32, k).length > 0
+    {
+        if resource.get(entry(needed, 32, k)).is_null()
+            return entry(needed, 32, k)
+        k := k + 1
+    }
+    ""
+}
+
 ; What upstream asks of a transaction's entry before any of them runs: true
 ; when it may run, else `outcome` is the OperationOutcome to refuse the
 ; bundle with.
@@ -340,13 +355,7 @@ procedure transaction_entry_valid(entry: JsonValue, mutable outcome: ref[Array[u
         write_outcome(outcome, "error", "invalid", "Field 'active' must be a boolean")
         return false
     }
-    var required: Slice[u8] ""
-    if type.equals("Binary") and resource.get("contentType").is_null()
-        required := "contentType"
-    if type.equals("Observation") and resource.get("code").is_null()
-        required := "code"
-    if type.equals("Observation") and resource.get("status").is_null()
-        required := "status"
+    let required missing_member(type, resource)
     if required.length > 0
     {
         var message Array[u8]()
@@ -391,7 +400,7 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
     var base Array[u8]()
     put_bytes(&base, "http://")
     put_bytes(&base, trim(req.header("host")))
-    put_bytes(&base, "/fire")
+    put_bytes(&base, model_route())
 
     var scope: u64 0
     if transaction

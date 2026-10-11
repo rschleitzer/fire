@@ -167,6 +167,39 @@ function model_search_parameters(name: Slice[u8]) returns Slice[u8]
 "    \"{\\\"resourceType\\\":\\\"Bundle\\\",\\\"type\\\":\\\"searchset\\\",\\\"total\\\":0,\\\"entry\\\":[]}\"
 }
 
+; The resource types the server stores, separated by blanks, in the
+; model's order.
+function model_types() returns Slice[u8]
+    \"" (scaly-joined-with " " (map name-of (node-list->list (node-list-filter active? (children (select-children "resources" root)))))) "\"
+
+; The path every route begins with, and the version of the model -- the one
+; a database of this server is at.
+function model_route() returns Slice[u8]
+    \"/" (downcase-string (fhir-name)) "\"
+
+function model_version() returns Slice[u8]
+    \"" (let ((v (% "version" root))) (if v v "0.0.0")) "\"
+
+; The columns a type keeps beside its content, in the model's order, as
+; column:member:kind separated by commas -- the column's name, the member
+; of the resource it holds, and b a boolean, t a text, d an instant, i an
+; int, l a long, m a decimal.
+function model_columns(name: Slice[u8]) returns Slice[u8]
+{
+"
+            (for (node-list-filter active? (children (select-children "resources" root))) scaly-columns)
+"    \"\"
+}
+
+; The members a resource of the type must have, separated by blanks, in the
+; model's order (upstream asks them of a transaction's entries).
+function model_required(name: Slice[u8]) returns Slice[u8]
+{
+"
+            (for (node-list-filter active? (children (select-children "resources" root))) scaly-required)
+"    \"\"
+}
+
 ; The CapabilityStatement, as upstream's MetadataHandler serializes it: the
 ; active resource types with their interactions and the search parameters
 ; the repository answers (migration.scm, search-is-served?).
@@ -235,4 +268,42 @@ function model_capability() returns Slice[u8]
                       "]}")
                    "\"" "\\\"")
                "\"
+"))))
+
+; --- the facts of a type the handlers and the repository ask for ---
+
+(define (scaly-joined-with separator names)
+    (if (null? names) ""
+        ($ (car names) (apply $ (map (lambda (n) ($ separator n)) (cdr names))))))
+
+(define (scaly-column-kind search)
+    (let ((prop (search-property search)))
+        (case (if prop (% "type" prop) "string")
+            (("boolean") "b")
+            (("instant") "d")
+            (("integer" "positiveInt" "unsignedInt") "i")
+            (("integer64") "l")
+            (("decimal") "m")
+            (else "t"))))
+
+(define (scaly-columns resource)
+    (let ((inline (node-list->list (inline-searches resource))))
+        (if (null? inline) ""
+            ($ "    if name.equals(\"" (name-of resource) "\")
+        return \""
+               (scaly-joined-with ","
+                   (map (lambda (s)
+                            ($ (search-col s) ":" (or (search-fhir-field-name s) (% "name" s)) ":" (scaly-column-kind s)))
+                        inline))
+               "\"
+"))))
+
+(define (scaly-required resource)
+    (let* ((props-node (select-children "properties" resource))
+           (all-props (if (node-list-empty? props-node) '()
+                          (node-list->list (children (node-list-first props-node)))))
+           (required (filter (lambda (p) (and (true? "notnull" p) (not (string=? "id" (% "name" p))))) all-props)))
+        (if (null? required) ""
+            ($ "    if name.equals(\"" (name-of resource) "\")
+        return \"" (scaly-joined-with " " (map (lambda (p) (% "name" p)) required)) "\"
 "))))

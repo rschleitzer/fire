@@ -66,9 +66,9 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutabl
     }
 
     var app Router.create(page)
-    app.get("/fire/metadata", &metadata)
-    app.get("/fire/SearchParameter", &search_parameters)
-    app.get("/fire/_history", &system_history)
+    app.get(pattern(page, "metadata", ""), &metadata)
+    app.get(pattern(page, "SearchParameter", ""), &search_parameters)
+    app.get(pattern(page, "_history", ""), &system_history)
     app.get("/purgeschema/{type}", &purge)
     app.post("/purgeschema/{type}", &purge)
     app.get("/admin/undelete/{type}", &undelete_all)
@@ -81,7 +81,7 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutabl
     app.get("/healthz", &healthz)
     app.get("/readyz", &readyz)
     add_resource_routes(app, page)
-    app.post("/fire", &bundle_post)
+    app.post(model_route(), &bundle_post)
 
     var l TcpListener.listen(port)
     if l.is_open() = false

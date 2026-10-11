@@ -226,7 +226,7 @@
            (contactpoints (filter (lambda (s) (string=? "contactpoint" (token-category s))) tokens))
            (line (lambda (kind s shape) ($ kind " " (search-table-name s) " " shape "\\n"))))
         ($ (apply $ (map (lambda (s)
-                (line "i" s ($ "inline " (% "name" s) " "
+                (line "i" s ($ "inline " (search-col s) " "
                     (let ((prop (search-property s)))
                         (case (if prop (% "type" prop) "string")
                             (("boolean") "b")

@@ -62,7 +62,7 @@ procedure version_params(mutable c: ref[PgConn], type: Slice[u8], root: JsonValu
 ; (`name:kind`), as the next parameter.
 procedure column_param(mutable c: ref[PgConn], column: Slice[u8], root: JsonValue)
 {
-    let value root.get(column_name(column))
+    let value root.get(column_member(column))
     if column[column.length - 1] = 98
     {
         if value.is_bool() = false

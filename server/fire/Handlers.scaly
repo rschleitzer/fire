@@ -38,11 +38,11 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
     }
 }
 
-; /fire/<type><rest>, on page.
+; <route>/<type><rest>, on page (the route is the model's: /fire).
 procedure pattern(page: ref[Page], type: Slice[u8], rest: Slice[u8]) returns Slice[u8]
 {
-    let prefix: Slice[u8] "/fire/"
-    var p allocate_slice[u8]^page(page, prefix.length + type.length + rest.length)
+    let prefix model_route()
+    var p allocate_slice[u8]^page(page, prefix.length + 1 + type.length + rest.length)
     var at: size_t 0
     var i: size_t 0
     while i < prefix.length
@@ -51,6 +51,8 @@ procedure pattern(page: ref[Page], type: Slice[u8], rest: Slice[u8]) returns Sli
         at := at + 1
         i := i + 1
     }
+    p.put(at, 47 as u8)
+    at := at + 1
     i := 0
     while i < type.length
     {
@@ -72,10 +74,11 @@ procedure pattern(page: ref[Page], type: Slice[u8], rest: Slice[u8]) returns Sli
 function type_of(req: ref[Request]) returns Slice[u8]
 {
     let path req.path
-    var end: size_t 6
+    let from model_route().length + 1
+    var end from
     while end < path.length and path[end] <> 47
         end := end + 1
-    path.subslice(6, end)
+    path.subslice(from, end)
 }
 
 ; Location (with a host), ETag and Last-Modified for a version.
@@ -88,7 +91,8 @@ procedure version_fields(mutable res: ref[Response], host: Slice[u8], type: Slic
         var location Array[u8]()
         put_bytes(&location, "http://")
         location.add(host)
-        put_bytes(&location, "/fire/")
+        put_bytes(&location, model_route())
+        put_bytes(&location, "/")
         location.add(type)
         put_bytes(&location, "/")
         location.add(id)
@@ -837,7 +841,8 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
     var base Array[u8]()
     put_bytes(&base, "http://")
     put_bytes(&base, trim(req.header("host")))
-    put_bytes(&base, "/fire/")
+    put_bytes(&base, model_route())
+    put_bytes(&base, "/")
     put_bytes(&base, type)
     var address Array[u8]()
     put_bytes(&address, base.as_slice())
@@ -1003,7 +1008,8 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     var root Array[u8]()
     put_bytes(&root, "http://")
     root.add(trim(req.header("host")))
-    put_bytes(&root, "/fire/")
+    put_bytes(&root, model_route())
+    put_bytes(&root, "/")
     var base Array[u8]()
     base.add(root.as_slice())
     base.add(type)

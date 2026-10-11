@@ -21,24 +21,15 @@ define BROKEN: int 6
 ; base64), and the version it wrote or found with the second it is from.
 define StoreResult (status: int, version_id: i64, seconds: i64)
 
-; The resource types the server stores, separated by blanks.
+; The resource types the server stores, separated by blanks (the model's,
+; written by the generator).
 function resource_types() returns Slice[u8]
-    "Binary Observation Patient Practitioner Provenance"
+    model_types()
 
-; The columns a type keeps beside its content, in the table's order, as
-; name:kind separated by commas -- b a boolean, t a text, d an instant.
+; The columns a type keeps beside its content, in the model's order, as
+; column:member:kind separated by commas (the model's).
 function inline_columns(type: Slice[u8]) returns Slice[u8]
-{
-    if type.equals("Observation")
-        return "status:t"
-    if type.equals("Patient")
-        return "active:b,gender:t"
-    if type.equals("Practitioner")
-        return "gender:t,active:b"
-    if type.equals("Provenance")
-        return "recorded:d"
-    ""
-}
+    model_columns(type)
 
 ; The i-th entry of a list separated by `separator`; empty past its end.
 function entry(list: Slice[u8], separator: u8, i: size_t) returns Slice[u8]
@@ -58,9 +49,13 @@ function entry(list: Slice[u8], separator: u8, i: size_t) returns Slice[u8]
     list.slice_to(0)
 }
 
-; The name of the column entry name:kind.
+; The column of an entry column:member:kind, and the member of the
+; resource it holds.
 function column_name(column: Slice[u8]) returns Slice[u8]
-    column.slice_to(column.length - 2)
+    entry(column, 58, 0)
+
+function column_member(column: Slice[u8]) returns Slice[u8]
+    entry(column, 58, 1)
 
 ; The resource `root` with its id, meta.versionId and meta.lastUpdated set
 ; -- each in its place when the member is there, else as the last --,
