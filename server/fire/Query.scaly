@@ -10,7 +10,7 @@ function hex_value(c: u8) returns int
         return (c as int) - 55
     if c >= 97 and c <= 102
         return (c as int) - 87
-    0 - 1
+    -1
 }
 
 ; s without its percent escapes, a `+` read as a blank; appended to out.

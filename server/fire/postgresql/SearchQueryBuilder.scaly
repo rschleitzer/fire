@@ -83,7 +83,7 @@ procedure put_operand(mutable out: ref[Array[u8]], alias: int, column: Slice[u8]
         out.add(46 as u8)
         return out.add(column)
     }
-    if alias = 0 - 1
+    if alias = -1
     {
         put_bytes(out, "r.\"")
         out.add(column)
@@ -737,12 +737,12 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
     let last_updated key.equals("_lastUpdated")
     ; the parameter as a column of the resource's own table
     var inline last_updated
-    var inline_alias 0 - 2
+    var inline_alias -2
     var inline_column: Slice[u8] "r.last_updated"
     if line.length > 0 and line[0] = 105
     {
         inline := true
-        inline_alias := 0 - 1
+        inline_alias := -1
         inline_column := entry(line, 32, 3)
     }
 
@@ -852,7 +852,7 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
         return true
     }
     if key.equals("_id")
-        return inline_condition(q, 0 - 2, "r.id", 116, key, value, "", problem)
+        return inline_condition(q, -2, "r.id", 116, key, value, "", problem)
     if last_updated
         return inline_condition(q, inline_alias, inline_column, 100, key, value, modifier, problem)
     if line.length = 0

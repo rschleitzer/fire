@@ -31,7 +31,7 @@ procedure close_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]
 procedure null_cell(mutable cells: ref[Array[i64]])
 {
     cells.add(0 as i64)
-    cells.add((0 as i64) - 1)
+    cells.add(-1)
 }
 
 ; A cell of the value's text when it is a string, else NULL.

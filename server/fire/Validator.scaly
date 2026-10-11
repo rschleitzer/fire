@@ -96,7 +96,7 @@ procedure conforms_kind(kind: u8, class: Slice[u8], clr: Slice[u8], in_list: boo
     match kind as int
         case 116: fits := value.is_text()
         case 98: fits := value.is_bool()
-        case 105: fits := value.is_number() and value.is_integer() and value.as_i64() <= 2147483647 and value.as_i64() >= 0 - 2147483648
+        case 105: fits := value.is_number() and value.is_integer() and value.as_i64() <= 2147483647 and value.as_i64() >= -2147483648
         case 108: fits := value.is_number() and value.is_integer()
         case 100: fits := value.is_number()
         case 111

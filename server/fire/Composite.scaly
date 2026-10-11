@@ -94,7 +94,7 @@ function compare_decimals(a: Slice[u8], b: Slice[u8]) returns int
 {
     var result 0
     var power: i64 40
-    while power >= 0 - 40 and result = 0
+    while power >= -40 and result = 0
     {
         let x digit_at(a, power)
         let y digit_at(b, power)
@@ -103,7 +103,7 @@ function compare_decimals(a: Slice[u8], b: Slice[u8]) returns int
             if x > y
                 result := 1
             else
-                result := 0 - 1
+                result := -1
         }
         power := power - 1
     }
@@ -131,7 +131,7 @@ function compare_decimals(a: Slice[u8], b: Slice[u8]) returns int
     if a_sign_negative and b_sign_negative
         return 0 - result
     if a_sign_negative
-        return 0 - 1
+        return -1
     if b_sign_negative
         return 1
     result

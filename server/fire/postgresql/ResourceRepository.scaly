@@ -341,11 +341,11 @@ procedure lock_current(mutable c: ref[PgConn], type: Slice[u8], id: Slice[u8]) r
     put_table(&sql, type)
     put_bytes(&sql, " WHERE id = $1 FOR UPDATE")
     if c.prepare(name.as_slice(), sql.as_slice()) = false
-        return 0 - 1
+        return -1
     c.start(name.as_slice())
     c.param_text(id)
     if c.run() = false
-        return 0 - 1
+        return -1
     if c.next_row() = false
         return 0
     c.column_int(0)

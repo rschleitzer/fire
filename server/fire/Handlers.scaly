@@ -621,7 +621,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     parse_pairs(req.query, &asked_text, &asked_cells)
     var known total
     if first_value(text, cells, "_total").equals("none")
-        known := 0 - 1
+        known := -1
     w.key("link")
     page_links(&w, base.as_slice(), req.query, asked_text.as_slice(), asked_cells.as_slice(), known, count, offset)
     if first_value(text, cells, "_total").equals("none") = false
