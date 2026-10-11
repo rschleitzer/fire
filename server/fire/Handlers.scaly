@@ -27,6 +27,7 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.put(pattern(page, type, "/{id}"), &resource_put)
         app.delete(pattern(page, type, "/{id}"), &resource_remove)
         app.put(pattern(page, type, ""), &resource_put_conditional)
+        app.patch(pattern(page, type, "/{id}"), &resource_patch)
         app.delete(pattern(page, type, ""), &resource_remove_conditional)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
         i := i + 1

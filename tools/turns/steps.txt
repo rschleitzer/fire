@@ -27,3 +27,38 @@ GET Patient?identifier=urn:steps|zz{S}-cu
 DELETE Patient?identifier=urn:steps|zz{S}-named,urn:steps|zz{S}-cu
 GET Patient/zz{S}-named
 GET Patient/zz{S}-named/_history
+
+# PATCH: a JSON Patch on a resource of the server's own
+PUT Patient/zz{S}-patch steps/patient-patch.json
+PATCH Patient/zz{S}-patch steps/patch/replace.json
+PATCH Patient/zz{S}-patch steps/patch/many.json
+PATCH Patient/zz{S}-patch steps/patch/test-fail.json
+PATCH Patient/zz{S}-patch steps/patch/test-missing.json
+PATCH Patient/zz{S}-patch steps/patch/no-op.json
+PATCH Patient/zz{S}-patch steps/patch/null-op.json
+PATCH Patient/zz{S}-patch steps/patch/no-path.json
+PATCH Patient/zz{S}-patch steps/patch/unknown.json
+PATCH Patient/zz{S}-patch steps/patch/no-value.json
+PATCH Patient/zz{S}-patch steps/patch/no-from.json
+PATCH Patient/zz{S}-patch steps/patch/pointer.json
+PATCH Patient/zz{S}-patch steps/patch/empty-path.json
+PATCH Patient/zz{S}-patch steps/patch/index.json
+PATCH Patient/zz{S}-patch steps/patch/index-deep.json
+PATCH Patient/zz{S}-patch steps/patch/bounds.json
+PATCH Patient/zz{S}-patch steps/patch/bounds-remove.json
+PATCH Patient/zz{S}-patch steps/patch/bounds-negative.json
+PATCH Patient/zz{S}-patch steps/patch/not-found.json
+PATCH Patient/zz{S}-patch steps/patch/not-found-deep.json
+PATCH Patient/zz{S}-patch steps/patch/not-found-replace.json
+PATCH Patient/zz{S}-patch steps/patch/scalar.json
+PATCH Patient/zz{S}-patch steps/patch/scalar-end.json
+PATCH Patient/zz{S}-patch steps/patch/half.json
+PATCH Patient/zz{S}-patch steps/patch/object.json
+PATCH Patient/zz{S}-patch steps/patch/broken.json
+PATCH Patient/zz{S}-patch steps/patch/empty.json
+GET Patient/zz{S}-patch
+GET Patient/zz{S}-patch/_history
+GET Patient?identifier=urn:steps|zz{S}-patch&gender=female&death-date=1980-01-02
+PATCH Patient/zz{S}-nobody steps/patch/replace.json
+DELETE Patient/zz{S}-patch
+PATCH Patient/zz{S}-patch steps/patch/replace.json

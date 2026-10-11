@@ -38,6 +38,7 @@ define fire
     module Metadata
     module Handlers
     module SystemHistory
+    module Patch
     module Bundle
 }
 
