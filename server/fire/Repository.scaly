@@ -27,6 +27,15 @@ procedure resource_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns in
     FAILED
 }
 
+; $autocomplete: the values of `property` among what `param` finds; count
+; and offset -1 where the request names none.
+procedure resource_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    if database_in_use() = DATABASE_POSTGRESQL
+        return postgresql_autocomplete(type, param, value, property, count, offset, text, cells)
+    FAILED
+}
+
 ; Does the database answer?
 procedure database_ready() returns bool mutable pg_pool
 {

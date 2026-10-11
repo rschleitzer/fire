@@ -1,0 +1,183 @@
+; $autocomplete on PostgreSQL, as upstream's AutocompleteAsync: the values of
+; one search parameter (`property`) among the resources another (`param`)
+; finds by the beginning of its value. A parameter is known here when it has
+; a string, token or date table (upstream's ResolveSearchTable).
+
+use pg.Conn.PgConn
+
+; The column autocomplete reads of a parameter's table; empty when the
+; parameter has none it knows.
+function autocomplete_column(line: Slice[u8]) returns Slice[u8]
+{
+    if line.length = 0
+        return ""
+    let kind line[0]
+    if kind = 115 or kind = 116
+        return "value"
+    if kind = 100
+        return "TO_CHAR(value_low, 'YYYY-MM-DD')"
+    ""
+}
+
+; The condition on a parameter's table into sql, its values into `values`
+; (one a line): a token given as system|code by what it names, anything
+; else by its beginning without regard to case.
+procedure autocomplete_condition(mutable sql: ref[Array[u8]], mutable values: ref[Array[u8]], line: Slice[u8], value: Slice[u8])
+{
+    let column autocomplete_column(line)
+    var pipe: size_t 0
+    while pipe < value.length
+    {
+        let c value[pipe]
+        if c = 124
+            break
+        pipe := pipe + 1
+    }
+    let kind line[0]
+    if kind = 116 and pipe < value.length
+    {
+        var named 0
+        if pipe > 0
+        {
+            put_bytes(sql, "system = $1")
+            put_bytes(values, value.slice_to(pipe))
+            values.add(10 as u8)
+            named := 1
+        }
+        if pipe + 1 < value.length
+        {
+            if named = 1
+                put_bytes(sql, " AND value = $2")
+            else
+                put_bytes(sql, "value = $1")
+            put_bytes(values, value.slice_from(pipe + 1))
+            values.add(10 as u8)
+        }
+        return
+    }
+    put_bytes(sql, column)
+    put_bytes(sql, " IS NOT NULL AND LOWER(")
+    put_bytes(sql, column)
+    put_bytes(sql, ") LIKE LOWER($1::text) || '%'")
+    put_bytes(values, value)
+    values.add(10 as u8)
+}
+
+; The answers into text and cells. STORED, FAILED when the database does
+; not answer, BROKEN for a statement it refuses (upstream's exception).
+procedure postgresql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool
+{
+    let property_line search_line(type, property)
+    let property_column autocomplete_column(property_line)
+    let by_id property.equals("_id")
+    if property_column.length = 0 and by_id = false
+        return STORED
+    var sql Array[u8]()
+    var values Array[u8]()
+    var paging Array[u8]()
+    if count >= 0
+    {
+        put_bytes(&paging, " LIMIT ")
+        put_decimal(&paging, count)
+        if offset <> -1
+        {
+            put_bytes(&paging, " OFFSET ")
+            put_decimal(&paging, offset)
+        }
+    }
+    else if offset <> -1
+    {
+        put_bytes(&paging, " LIMIT -1 OFFSET ")
+        put_decimal(&paging, offset)
+    }
+
+    if param.equals("_id") and property_column.length > 0
+    {
+        put_bytes(&sql, "SELECT DISTINCT ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, " FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(property_line, 32, 1))
+        put_bytes(&sql, " WHERE resource_id = $1 AND ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, " IS NOT NULL")
+        put_bytes(&values, value)
+        values.add(10 as u8)
+    }
+    else if by_id
+    {
+        let param_line search_line(type, param)
+        if autocomplete_column(param_line).length = 0
+            return STORED
+        put_bytes(&sql, "SELECT DISTINCT resource_id FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(param_line, 32, 1))
+        put_bytes(&sql, " WHERE ")
+        autocomplete_condition(&sql, &values, param_line, value)
+        put_bytes(&sql, " ORDER BY resource_id")
+        put_bytes(&sql, paging.as_slice())
+    }
+    else if param.equals(property)
+    {
+        put_bytes(&sql, "SELECT DISTINCT ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, " FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(property_line, 32, 1))
+        put_bytes(&sql, " WHERE ")
+        autocomplete_condition(&sql, &values, property_line, value)
+        put_bytes(&sql, " ORDER BY ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, paging.as_slice())
+    }
+    else
+    {
+        let param_line search_line(type, param)
+        if autocomplete_column(param_line).length = 0
+            return STORED
+        put_bytes(&sql, "SELECT DISTINCT ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, " FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(property_line, 32, 1))
+        put_bytes(&sql, " WHERE resource_id IN (SELECT resource_id FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".")
+        put_bytes(&sql, entry(param_line, 32, 1))
+        put_bytes(&sql, " WHERE ")
+        autocomplete_condition(&sql, &values, param_line, value)
+        put_bytes(&sql, ") AND ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, " IS NOT NULL ORDER BY ")
+        put_bytes(&sql, property_column)
+        put_bytes(&sql, paging.as_slice())
+    }
+
+    let got scoped(0)
+    if got = null
+        return FAILED
+    var c got as ref[PgConn]
+    var ok c.prepare_unnamed(sql.as_slice())
+    if ok
+    {
+        c.start("")
+        var at: size_t 0
+        while at < values.length
+        {
+            let one line_from(values.as_slice(), at)
+            c.param_text(one)
+            at := at + one.length + 1
+        }
+        ok := c.run()
+        while ok and c.next_row()
+            cell(text, cells, c.column(0))
+    }
+    give_back(c, 0)
+    if ok = false
+        return BROKEN
+    STORED
+}

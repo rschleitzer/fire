@@ -20,6 +20,7 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.get(pattern(page, type, ""), &resource_search_get)
         app.post(pattern(page, type, "/_search"), &resource_search_post)
         app.post(pattern(page, type, ""), &resource_post)
+        app.get(pattern(page, type, "/$autocomplete"), &resource_autocomplete_get)
         app.get(pattern(page, type, "/{id}"), &resource_read)
         app.get(pattern(page, type, "/{id}/_history/{vid}"), &resource_vread)
         app.get(pattern(page, type, "/{id}/_history"), &resource_history_get)
@@ -446,6 +447,154 @@ procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Respon
     }
     res.set_status(204)
     res.send("", "")
+}
+
+; A string as ASP.NET's Results.Json writes it (System.Text.Json with the
+; relaxed encoder, not the one a resource is written with): the quote and
+; the backslash behind a backslash, a control character by its short form
+; or \u00XX, what lies beyond the basic plane as its two surrogates --
+; everything else as it is.
+procedure put_relaxed(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    let hex: Slice[u8] "0123456789ABCDEF"
+    out.add(34 as u8)
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        if c = 34 or c = 92
+        {
+            out.add(92 as u8)
+            out.add(c)
+            i := i + 1
+            continue
+        }
+        if c < 32 or c = 127
+        {
+            out.add(92 as u8)
+            if c = 8
+                out.add(98 as u8)
+            else if c = 9
+                out.add(116 as u8)
+            else if c = 10
+                out.add(110 as u8)
+            else if c = 12
+                out.add(102 as u8)
+            else if c = 13
+                out.add(114 as u8)
+            else
+            {
+                put_bytes(out, "u00")
+                out.add(hex[(c / 16) as size_t])
+                out.add(hex[(c % 16) as size_t])
+            }
+            i := i + 1
+            continue
+        }
+        if c = 194 and i + 1 < s.length
+        {
+            ; U+0080 to U+009F: the second set of control characters
+            let second s[i + 1]
+            if second < 160
+            {
+                put_bytes(out, "\\u00")
+                out.add(hex[(second / 16) as size_t])
+                out.add(hex[(second % 16) as size_t])
+                i := i + 2
+                continue
+            }
+        }
+        if c >= 240 and i + 3 < s.length
+        {
+            let b1 s[i + 1]
+            let b2 s[i + 2]
+            let b3 s[i + 3]
+            let point (((c as i64) - 240) * 262144) + (((b1 as i64) - 128) * 4096) + (((b2 as i64) - 128) * 64) + ((b3 as i64) - 128) - 65536
+            let high 55296 + (point / 1024)
+            let low 56320 + (point % 1024)
+            put_bytes(out, "\\u")
+            out.add(hex[((high / 4096) % 16) as size_t])
+            out.add(hex[((high / 256) % 16) as size_t])
+            out.add(hex[((high / 16) % 16) as size_t])
+            out.add(hex[(high % 16) as size_t])
+            put_bytes(out, "\\u")
+            out.add(hex[((low / 4096) % 16) as size_t])
+            out.add(hex[((low / 256) % 16) as size_t])
+            out.add(hex[((low / 16) % 16) as size_t])
+            out.add(hex[(low % 16) as size_t])
+            i := i + 4
+            continue
+        }
+        out.add(c)
+        i := i + 1
+    }
+    out.add(34 as u8)
+}
+
+; GET /fire/<type>/$autocomplete?<param>=<beginning>[&_autocomplete=<property>]:
+; the values of the property (the parameter itself when none is named)
+; among the resources the parameter finds, as a plain JSON array.
+procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var count: i64 -1
+    var offset: i64 -1
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_count"))
+    {
+        count := whole_value(first_value(text.as_slice(), cells.as_slice(), "_count"))
+        if count < 0
+            count := 0
+    }
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+        offset := whole_value(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+    var param: Slice[u8] ""
+    var value: Slice[u8] ""
+    var property: Slice[u8] ""
+    var named false
+    var chosen false
+    var i: size_t 0
+    while i < pair_count(cells.as_slice())
+    {
+        let key pair_key(text.as_slice(), cells.as_slice(), i)
+        if key.equals("_autocomplete")
+        {
+            if named = false
+                property := pair_value(text.as_slice(), cells.as_slice(), i)
+            named := true
+        }
+        else if chosen = false and key.equals("_count") = false and key.equals("_offset") = false
+        {
+            param := key
+            value := pair_value(text.as_slice(), cells.as_slice(), i)
+            chosen := true
+        }
+        i := i + 1
+    }
+    if chosen = false
+        return send_error(res, "required", "A search parameter is required", 400)
+    if named = false
+        property := param
+    var found Array[u8]()
+    var rows Array[i64]()
+    let status resource_autocomplete(type, param, value, property, count, offset, &found, &rows)
+    ; a statement the database refuses is upstream's DbException: unavailable
+    if status <> STORED
+        return send_unavailable(res)
+    var out Array[u8]()
+    put_bytes(&out, "[")
+    var r: size_t 0
+    while r * 2 < rows.length
+    {
+        if r > 0
+            put_bytes(&out, ",")
+        put_relaxed(&out, found.as_slice().subslice(rows[r * 2] as size_t, (rows[r * 2] + rows[r * 2 + 1]) as size_t))
+        r := r + 1
+    }
+    put_bytes(&out, "]")
+    res.send("application/json; charset=utf-8", out.as_slice())
 }
 
 ; DELETE /fire/<type>/{id}

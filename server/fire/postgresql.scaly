@@ -6,4 +6,5 @@ define postgresql
     module DatabaseProvider
     module SearchQueryBuilder
     module ResourceRepository
+    module Autocomplete
 }
