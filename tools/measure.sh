@@ -297,6 +297,8 @@ asks() {
       GET) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" "$BASE/fire/$path" > "$out.status" ;;
       POST) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
               -H 'Content-Type: application/x-www-form-urlencoded' --data "$rest" "$BASE/fire/$path" > "$out.status" ;;
+      PUT) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X PUT \
+              -H 'Content-Type: application/fhir+json' --data-binary @"$ROOT/tools/turns/$rest" "$BASE/fire/$path" > "$out.status" ;;
       BUNDLE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
               -H 'Content-Type: application/fhir+json' --data-binary @"$ROOT/tools/turns/bundles/$path" "$BASE/fire" > "$out.status" ;;
     esac

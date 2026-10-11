@@ -323,7 +323,7 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
     if stored.status = UNREADABLE
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status = NOT_FOUND
     {
         ; update as create: a PUT to an id that is not there creates it

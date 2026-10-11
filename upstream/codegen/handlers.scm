@@ -364,6 +364,14 @@ public static class "rn"Handlers
         {
             return FhirResult.Error(ctx, \"error\", \"conflict\", \"Version conflict\", 409);
         }
+        // what the repository refuses of the content is the client's, as on a create
+        catch (System.Data.Common.DbException) { throw; }
+        catch (System.Net.Sockets.SocketException) { throw; }
+        catch (TimeoutException) { throw; }
+        catch (Exception ex)
+        {
+            return FhirResult.Error(ctx, \"error\", \"invalid\", ex.Message, 400);
+        }
     }
 
 "))

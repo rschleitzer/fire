@@ -2,6 +2,8 @@
 # answers must be the same, status and body. {A} and {B} are the ids of the
 # two Patients of the first turns.
 #   GET <path>            POST <path> <form>            BUNDLE <file of bundles/>
+#   PUT <path> <file of tools/turns/>  (one that both refuse: the second server
+#                                        is asked on what the first left)
 GET Patient
 GET Patient?_count=3
 GET Patient?_count=3&_offset=3
@@ -220,3 +222,7 @@ GET Provenance?agent-role=witness
 GET Provenance?agent-role=urn:role|signer
 GET Provenance?signature-type=s2
 GET Provenance?signature-type=urn:sig|
+PUT Binary/b9 refused/Binary.base64.json
+PUT Binary/b10 refused/Binary.base64.json
+GET Binary/b9
+GET Binary/b10
