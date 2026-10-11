@@ -216,3 +216,7 @@ GET Patient?_id=p1&_elements=identifier&_summary=text
 GET Patient?_id=p1&_elements=name&_include=Patient:general-practitioner
 GET Observation?_id=o1&_summary=true&_include=Observation:subject
 GET Patient?_count=2&_summary=text&_sort=birthdate
+GET Provenance?agent-role=witness
+GET Provenance?agent-role=urn:role|signer
+GET Provenance?signature-type=s2
+GET Provenance?signature-type=urn:sig|

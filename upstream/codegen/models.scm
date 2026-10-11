@@ -134,7 +134,26 @@
                  (cond ((null? ps) #f)
                        ((path-is-cast? (car ps)) #t)
                        (else (loop (cdr ps))))))
-        (search-has-concept-paths? search)))
+        (search-has-concept-paths? search)
+        (search-ends-in-concept-list? search)))
+
+; A token search through a backbone LIST to a LIST of concepts or codings
+; (Provenance.agent.role, Provenance.signature.type): walked as well --
+; the extractor by category takes the inner list for one concept. (A list
+; of codings below a single element, meta.security, it reads rightly.)
+(define (search-ends-in-concept-list? search)
+    (and (string=? "token" (% "type" search))
+         (let* ((paths (search-path-nodes search))
+                (parts (if (null? paths) '() (path-part-nodes (car paths))))
+                (first-prop (if (null? parts) #f (part-property (car parts))))
+                (last-prop (if (null? parts) #f (part-property (car (reverse parts))))))
+             (and (> (length parts) 1)
+                  first-prop
+                  (true? "iscollection" first-prop)
+                  last-prop
+                  (true? "iscollection" last-prop)
+                  (member (downcase-string (cast-path-leaf (car paths))) '("codeableconcept" "coding"))
+                  #t))))
 
 ; A token search with SEVERAL paths, each ending at a CodeableConcept or a
 ; Coding (Observation.code | Observation.component.code): read the same
