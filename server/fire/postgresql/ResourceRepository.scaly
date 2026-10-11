@@ -799,7 +799,7 @@ procedure postgresql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells:
 ; TOMBSTONE beside its row. At most `count` from `offset` on, each as four
 ; cells in rows (id, the time it is from, what it is, content); the answer's
 ; version_id is how many there are in all.
-procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool
 {
     let one id.length > 0
     var of_id: Slice[u8] ""
@@ -823,7 +823,7 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
     put_bytes(&counting, and_id)
     put_bytes(&counting, ")")
     var listing Array[u8]()
-    put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content, h.version_id FROM ((SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")
+    put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content, h.version_id, (EXTRACT(EPOCH FROM h.last_updated) * 1000000)::bigint FROM ((SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")
     put_table(&listing, type)
     put_bytes(&listing, of_id)
     put_bytes(&listing, ") UNION ALL (SELECT id, version_id, last_updated, content, history_operation FROM ")
@@ -878,6 +878,7 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
                     cell(&read, &read_cells, c.column(2))
                     cell(&read, &read_cells, c.column(3))
                     versions.add(c.column_int(4))
+                    keys.add(c.column_int(5))
                 }
                 if ok
                     ok := restore_all(c, type, read.as_slice(), read_cells.as_slice(), versions.as_slice(), 4, found, rows)
@@ -890,6 +891,7 @@ procedure postgresql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: 
                     cell(found, rows, c.column(1))
                     cell(found, rows, c.column(2))
                     cell(found, rows, c.column(3))
+                    keys.add(c.column_int(5))
                 }
             }
         }

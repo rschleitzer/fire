@@ -1,0 +1,304 @@
+; GET /fire/_history: the history of every type in one Bundle, as upstream's
+; SystemHistoryHandler answers it -- the rows of every type's history (ten
+; thousand each at most) put together, ordered by their time, the page cut
+; from that.
+;
+; Two things are upstream's and kept, because the answer must be the same:
+; the addresses say /fhir, whatever the server's own path; and the rows are
+; ordered by List.Sort, which is .NET's introsort and not stable -- rows of
+; one instant (a deletion's tombstone and the version it ended) come out in
+; the order THAT sort leaves them in, so it is that sort here.
+
+use http.Request.Request
+use http.Response.Response
+use json.Writer.JsonWriter
+
+; b.lastUpdated.CompareTo(a.lastUpdated): the later row first.
+function history_compare(keys: Slice[i64], a: i64, b: i64) returns int
+{
+    let ka keys[a as size_t]
+    let kb keys[b as size_t]
+    if kb < ka
+        return -1
+    if kb > ka
+        return 1
+    0
+}
+
+procedure history_swap(mutable order: ref[Array[i64]], i: size_t, j: size_t)
+{
+    let held order[i]
+    order.put(i, order[j])
+    order.put(j, held)
+}
+
+procedure history_swap_if_greater(mutable order: ref[Array[i64]], keys: Slice[i64], i: size_t, j: size_t)
+{
+    if history_compare(keys, order[i], order[j]) > 0
+        history_swap(order, i, j)
+}
+
+procedure history_insertion_sort(mutable order: ref[Array[i64]], keys: Slice[i64], lo: size_t, n: size_t)
+{
+    var i: size_t 0
+    while i + 1 < n
+    {
+        let t order[lo + i + 1]
+        var j i as i64
+        while j >= 0
+        {
+            let other order[lo + (j as size_t)]
+            if history_compare(keys, t, other) >= 0
+                break
+            order.put(lo + (j as size_t) + 1, other)
+            j := j - 1
+        }
+        order.put(lo + ((j + 1) as size_t), t)
+        i := i + 1
+    }
+}
+
+procedure history_down_heap(mutable order: ref[Array[i64]], keys: Slice[i64], lo: size_t, start: size_t, n: size_t)
+{
+    var i start
+    let d order[lo + i - 1]
+    while i <= n / 2
+    {
+        var child 2 * i
+        if child < n
+        {
+            if history_compare(keys, order[lo + child - 1], order[lo + child]) < 0
+                child := child + 1
+        }
+        if history_compare(keys, d, order[lo + child - 1]) >= 0
+            break
+        order.put(lo + i - 1, order[lo + child - 1])
+        i := child
+    }
+    order.put(lo + i - 1, d)
+}
+
+procedure history_heap_sort(mutable order: ref[Array[i64]], keys: Slice[i64], lo: size_t, n: size_t)
+{
+    var i n / 2
+    while i >= 1
+    {
+        history_down_heap(order, keys, lo, i, n)
+        i := i - 1
+    }
+    i := n
+    while i > 1
+    {
+        history_swap(order, lo, lo + i - 1)
+        history_down_heap(order, keys, lo, 1, i - 1)
+        i := i - 1
+    }
+}
+
+procedure history_partition(mutable order: ref[Array[i64]], keys: Slice[i64], lo: size_t, n: size_t) returns size_t
+{
+    let hi n - 1
+    let middle hi / 2
+    history_swap_if_greater(order, keys, lo, lo + middle)
+    history_swap_if_greater(order, keys, lo, lo + hi)
+    history_swap_if_greater(order, keys, lo + middle, lo + hi)
+    let pivot order[lo + middle]
+    history_swap(order, lo + middle, lo + hi - 1)
+    var left: size_t 0
+    var right hi - 1
+    while left < right
+    {
+        left := left + 1
+        while history_compare(keys, order[lo + left], pivot) < 0
+            left := left + 1
+        right := right - 1
+        while history_compare(keys, pivot, order[lo + right]) < 0
+            right := right - 1
+        if left >= right
+            break
+        history_swap(order, lo + left, lo + right)
+    }
+    if left <> hi - 1
+        history_swap(order, lo + left, lo + hi - 1)
+    left
+}
+
+procedure history_intro_sort(mutable order: ref[Array[i64]], keys: Slice[i64], lo: size_t, n: size_t, depth_limit: int)
+{
+    var size n
+    var depth depth_limit
+    while size > 1
+    {
+        if size <= 16
+        {
+            if size = 2
+            {
+                history_swap_if_greater(order, keys, lo, lo + 1)
+                return
+            }
+            if size = 3
+            {
+                history_swap_if_greater(order, keys, lo, lo + 1)
+                history_swap_if_greater(order, keys, lo, lo + 2)
+                history_swap_if_greater(order, keys, lo + 1, lo + 2)
+                return
+            }
+            history_insertion_sort(order, keys, lo, size)
+            return
+        }
+        if depth = 0
+        {
+            history_heap_sort(order, keys, lo, size)
+            return
+        }
+        depth := depth - 1
+        let p history_partition(order, keys, lo, size)
+        history_intro_sort(order, keys, lo + p + 1, size - (p + 1), depth)
+        size := p
+    }
+}
+
+; The rows 0..n-1 in the order .NET's List.Sort leaves them in.
+procedure history_order(mutable order: ref[Array[i64]], keys: Slice[i64])
+{
+    var i: size_t 0
+    while i < keys.length
+    {
+        order.add(i as i64)
+        i := i + 1
+    }
+    if keys.length < 2
+        return
+    var log 0
+    var rest keys.length
+    while rest > 1
+    {
+        rest := rest / 2
+        log := log + 1
+    }
+    history_intro_sort(order, keys, 0, keys.length, 2 * (log + 1))
+}
+
+procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var count: i64 20
+    var offset: i64 0
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_count"))
+    {
+        count := whole_value(first_value(text.as_slice(), cells.as_slice(), "_count"))
+        if count > 1000
+            count := 1000
+    }
+    if whole_number(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+        offset := whole_value(first_value(text.as_slice(), cells.as_slice(), "_offset"))
+
+    ; every type's rows, one behind the other; where a type's begin
+    var found Array[u8]()
+    var rows Array[i64]()
+    var keys Array[i64]()
+    var begins Array[i64]()
+    var t: size_t 0
+    while entry(resource_types(), 32, t).length > 0
+    {
+        begins.add(keys.length as i64)
+        let result resource_history_keyed(0, entry(resource_types(), 32, t), "", 10000, 0, &found, &rows, &keys)
+        if result.status <> STORED
+            return send_unavailable(res)
+        t := t + 1
+    }
+    var order Array[i64]()
+    history_order(&order, keys.as_slice())
+    let total keys.length as i64
+
+    var base Array[u8]()
+    put_bytes(&base, "http://")
+    put_bytes(&base, trim(req.header("host")))
+    put_bytes(&base, "/fhir")
+    var address Array[u8]()
+    put_bytes(&address, base.as_slice())
+    put_bytes(&address, "/_history")
+
+    var w JsonWriter()
+    w.begin_object()
+    w.key("resourceType")
+    w.text("Bundle")
+    w.key("type")
+    w.text("history")
+    w.key("total")
+    w.integer(total)
+    w.key("link")
+    page_links(&w, address.as_slice(), req.query, text.as_slice(), cells.as_slice(), total, count, offset)
+    var from offset
+    if from < 0
+        from := 0
+    var until from + count
+    if until > total
+        until := total
+    if until > from
+    {
+        w.key("entry")
+        w.begin_array()
+        var at from
+        while at < until
+        {
+            let i order[at as size_t] as size_t
+            ; the type the row belongs to: the last one that begins at or before it
+            var type entry(resource_types(), 32, 0)
+            var k: size_t 1
+            while k < begins.length
+            {
+                let begin begins[k]
+                if begin > (i as i64)
+                    break
+                type := entry(resource_types(), 32, k)
+                k := k + 1
+            }
+            let row_id found.as_slice().subslice(rows[i * 8] as size_t, (rows[i * 8] + rows[i * 8 + 1]) as size_t)
+            let tombstone found.as_slice().subslice(rows[i * 8 + 4] as size_t, (rows[i * 8 + 4] + rows[i * 8 + 5]) as size_t).equals("TOMBSTONE")
+            var relative Array[u8]()
+            put_bytes(&relative, type)
+            put_bytes(&relative, "/")
+            put_bytes(&relative, row_id)
+            var full Array[u8]()
+            put_bytes(&full, base.as_slice())
+            put_bytes(&full, "/")
+            put_bytes(&full, relative.as_slice())
+            w.begin_object()
+            w.key("fullUrl")
+            w.text_dotnet(full.as_slice())
+            if tombstone = false
+            {
+                w.key("resource")
+                w.raw(found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
+            }
+            w.key("request")
+            w.begin_object()
+            w.key("method")
+            if tombstone
+                w.text("DELETE")
+            else
+                w.text("PUT")
+            w.key("url")
+            w.text_dotnet(relative.as_slice())
+            w.end_object()
+            w.key("response")
+            w.begin_object()
+            w.key("status")
+            if tombstone
+                w.text("204")
+            else
+                w.text("200")
+            w.key("lastModified")
+            w.text_dotnet(found.as_slice().subslice(rows[i * 8 + 2] as size_t, (rows[i * 8 + 2] + rows[i * 8 + 3]) as size_t))
+            w.end_object()
+            w.end_object()
+            at := at + 1
+        }
+        w.end_array()
+    }
+    w.end_object()
+    send_resource(res, w.bytes())
+}

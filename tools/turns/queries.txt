@@ -286,3 +286,9 @@ GET SearchParameter
 GET SearchParameter?base=Patient&base=Observation
 GET ../healthz
 GET ../readyz
+GET _history
+GET _history?_count=1000
+GET _history?_count=7&_offset=5
+GET _history?_count=3&_offset=100000
+GET _history?_count=0
+GET _history?_count=abc&_offset=2

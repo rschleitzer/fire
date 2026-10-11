@@ -60,8 +60,16 @@ procedure resource_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: S
 ; The versions of a resource or of a type (see postgresql_history).
 procedure resource_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
 {
+    var keys Array[i64]()
+    resource_history_keyed(scope, type, id, count, offset, found, rows, &keys)
+}
+
+; ... and with every row's time in microseconds in keys, for a caller that
+; orders the rows of several types among each other.
+procedure resource_history_keyed(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool
+{
     if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_history(scope, type, id, count, offset, found, rows)
+        return postgresql_history(scope, type, id, count, offset, found, rows, keys)
     StoreResult(FAILED, 0, 0)
 }
 
