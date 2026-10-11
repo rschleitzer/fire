@@ -2,6 +2,7 @@
 <!DOCTYPE style-sheet PUBLIC "-//James Clark//DTD DSSSL Style Sheet//EN" [
 
 <!-- The neutral parts are upstream's own files, included and not copied. -->
+<!ENTITY config         SYSTEM "../upstream/codegen/config.scm">
 <!ENTITY utilities      SYSTEM "../upstream/codegen/utilities.scm">
 <!ENTITY general        SYSTEM "../upstream/codegen/general.scm">
 <!ENTITY fhirmodel      SYSTEM "../upstream/codegen/fhirmodel.scm">
@@ -13,6 +14,7 @@
 
 ]>
 
+&config;
 &utilities;
 &general;
 &fhirmodel;
@@ -27,4 +29,10 @@
         (sosofo-append
             (scaly-program-file)
             (make directory path: (downcase-string (fhir-name))
-                (scaly-model-file)))))
+                (sosofo-append
+                    (scaly-model-file)
+                    (process-node-list (select-children "resources" (current-node))))))))
+
+; upstream's schema functions walk the children of the node they are called
+; at: the resources
+(element resources (scaly-script-files))

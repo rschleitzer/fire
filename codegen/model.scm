@@ -191,6 +191,16 @@ procedure model_write(mutable out: ref[Array[u8]])
 "}
 "))))
 
+; Each database's scripts, as upstream's provider has them -- written as
+; they are (schema-sql and its fellows answer what cannot be taken apart
+; here to be made a Scaly string; tools/schema.sh makes records of them).
+(define (scaly-script-files)
+    (make directory path: "sql"
+        (sosofo-append
+            (file "postgresql.schema.sql" (schema-sql 'PostgreSql))
+            (file "postgresql.indexes.create.sql" (create-indexes-sql 'PostgreSql))
+            (file "postgresql.indexes.drop.sql" (drop-indexes-sql 'PostgreSql)))))
+
 ; --- /metadata ---
 
 (define (scaly-capability-resource resource)
