@@ -245,8 +245,7 @@
            (apply $ (map (lambda (s) (line "u" s (scaly-cast-shape s))) (of "uri"))))))
 
 (define (scaly-searches resource) ($
-"    if name.equals(\"" (name-of resource) "\")
-        return \"" (scaly-search-lines resource) "\"
+"    record(out, \"@@S:" (name-of resource) "\\n" (scaly-search-lines resource) "\\n\")
 "))
 
 ; A resource's reference parameters, one a line: its name, the path of the
@@ -277,9 +276,8 @@
            "\\n")))
 
 (define (scaly-references resource active-names) ($
-"    if name.equals(\"" (name-of resource) "\")
-        return \""
+"    record(out, \"@@R:" (name-of resource) "\\n"
     (apply $ (map (lambda (s) (scaly-reference-line s active-names))
         (node-list->list (reference-searches-of resource))))
-"\"
+"\\n\")
 "))

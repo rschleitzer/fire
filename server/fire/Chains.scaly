@@ -13,7 +13,7 @@ use fire.Resource.StoreResult
 
 ; The line of the model for the reference parameter `name` of a type;
 ; empty when it has none.
-function reference_line(type: Slice[u8], name: Slice[u8]) returns Slice[u8]
+procedure reference_line(type: Slice[u8], name: Slice[u8]) returns Slice[u8]
 {
     let lines model_references(type)
     var at: size_t 0
@@ -28,7 +28,7 @@ function reference_line(type: Slice[u8], name: Slice[u8]) returns Slice[u8]
 }
 
 ; Is type one the server stores?
-function known_type(type: Slice[u8]) returns bool
+procedure known_type(type: Slice[u8]) returns bool
 {
     let types resource_types()
     var i: size_t 0

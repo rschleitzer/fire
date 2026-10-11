@@ -1,0 +1,145 @@
+; The model at run time. The generated program writes it as ONE text of
+; records (Model.scaly's head says what they are); here it is indexed once,
+; at the server's start, and asked by kind and key from every thread.
+;
+; The index lies on a page that lives as long as the program, and its
+; address in a shared atomic cell: an ordinary global would be each
+; thread's own.
+
+define ModelIndex
+(
+    text: Slice[u8]
+    cells: Slice[i64]       ; of every record: its key (offset, length) and its value
+)
+
+shared atomic model_index: u64 0
+
+; Does a record begin at `at` (the text's start, or behind a line feed)?
+function record_at(text: Slice[u8], at: size_t) returns bool
+{
+    if at + 4 > text.length
+        return false
+    let a text[at]
+    let b text[at + 1]
+    if a <> 64 or b <> 64
+        return false
+    if at = 0
+        return true
+    let before text[at - 1]
+    before = 10
+}
+
+; Index the model's text; it and the index stay on `page`.
+procedure model_install(page: ref[Page], text: Slice[u8])
+{
+    var count: size_t 0
+    var at: size_t 0
+    while at < text.length
+    {
+        if record_at(text, at)
+            count := count + 1
+        at := at + 1
+    }
+    var cells allocate_slice[i64]^page(page, count * 4)
+    var n: size_t 0
+    at := 0
+    while at < text.length
+    {
+        if record_at(text, at) = false
+        {
+            at := at + 1
+            continue
+        }
+        ; the key: up to the line's end
+        var end at + 2
+        while end < text.length
+        {
+            let c text[end]
+            if c = 10
+                break
+            end := end + 1
+        }
+        cells.put(n * 4, (at + 2) as i64)
+        cells.put(n * 4 + 1, (end - (at + 2)) as i64)
+        ; the value: up to the line feed before the next record
+        var next end + 1
+        while next < text.length and record_at(text, next) = false
+            next := next + 1
+        var last next
+        if last > end + 1
+            last := last - 1
+        cells.put(n * 4 + 2, (end + 1) as i64)
+        cells.put(n * 4 + 3, (last - (end + 1)) as i64)
+        n := n + 1
+        at := next
+    }
+    let index &ModelIndex^page(text, cells)
+    scaly_atomic_store_u64(&model_index, index as u64)
+}
+
+; The value of the record of that kind and key; empty when there is none.
+procedure model_value(kind: u8, name: Slice[u8]) returns Slice[u8]
+{
+    let index (scaly_atomic_load_u64(&model_index) as size_t) as ref[ModelIndex]
+    let cells index.cells
+    var i: size_t 0
+    while i < cells.length
+    {
+        if (cells[i + 1] as size_t) = name.length + 2
+        {
+            let key index.text.subslice(cells[i] as size_t, (cells[i] + cells[i + 1]) as size_t)
+            let first key[0]
+            if first = kind and key.slice_from(2).equals(name)
+                return index.text.subslice(cells[i + 2] as size_t, (cells[i + 2] + cells[i + 3]) as size_t)
+        }
+        i := i + 4
+    }
+    index.text.slice_to(0)
+}
+
+; The members of the type `name`: the name of its variable, then one line
+; per member. Empty for a type the model does not have.
+procedure model_type(name: Slice[u8]) returns Slice[u8]
+    model_value(84, name)
+
+; The values of the code set `id`, one per line.
+procedure model_codes(id: Slice[u8]) returns Slice[u8]
+    model_value(67, id)
+
+; The search tables of the resource type `name`, one per line.
+procedure model_searches(name: Slice[u8]) returns Slice[u8]
+    model_value(83, name)
+
+; Its reference parameters, one per line.
+procedure model_references(name: Slice[u8]) returns Slice[u8]
+    model_value(82, name)
+
+; The columns it keeps beside its content.
+procedure model_columns(name: Slice[u8]) returns Slice[u8]
+    model_value(75, name)
+
+; The members a resource of it must have.
+procedure model_required(name: Slice[u8]) returns Slice[u8]
+    model_value(81, name)
+
+; Its search parameters as a searchset Bundle; the empty Bundle for a name
+; that has none.
+procedure model_search_parameters(name: Slice[u8]) returns Slice[u8]
+{
+    let found model_value(80, name)
+    if found.length > 0
+        return found
+    "{\"resourceType\":\"Bundle\",\"type\":\"searchset\",\"total\":0,\"entry\":[]}"
+}
+
+procedure model_types() returns Slice[u8]
+    model_value(61, "types")
+
+procedure model_route() returns Slice[u8]
+    model_value(61, "route")
+
+procedure model_version() returns Slice[u8]
+    model_value(61, "version")
+
+procedure model_capability() returns Slice[u8]
+    model_value(61, "capability")

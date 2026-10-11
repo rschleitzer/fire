@@ -289,7 +289,7 @@ procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e
 
 ; The first member a resource of the type must have (the model's) that it
 ; has not; empty when it has them all.
-function missing_member(type: Slice[u8], resource: JsonValue) returns Slice[u8]
+procedure missing_member(type: Slice[u8], resource: JsonValue) returns Slice[u8]
 {
     let needed model_required(type)
     var k: size_t 0

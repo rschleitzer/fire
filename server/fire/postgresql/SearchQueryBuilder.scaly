@@ -779,7 +779,7 @@ procedure inline_condition(mutable q: ref[SearchQuery], alias: int, column: Slic
 
 ; The line of the model for the parameter `key` of a type; empty when the
 ; type has none of that name.
-function search_line(type: Slice[u8], key: Slice[u8]) returns Slice[u8]
+procedure search_line(type: Slice[u8], key: Slice[u8]) returns Slice[u8]
 {
     let lines model_searches(type)
     var at: size_t 0

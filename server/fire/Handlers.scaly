@@ -71,7 +71,7 @@ procedure pattern(page: ref[Page], type: Slice[u8], rest: Slice[u8]) returns Sli
 }
 
 ; The resource type a request's path names: /fire/<type>...
-function type_of(req: ref[Request]) returns Slice[u8]
+procedure type_of(req: ref[Request]) returns Slice[u8]
 {
     let path req.path
     let from model_route().length + 1

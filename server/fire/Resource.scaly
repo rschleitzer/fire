@@ -23,12 +23,12 @@ define StoreResult (status: int, version_id: i64, seconds: i64)
 
 ; The resource types the server stores, separated by blanks (the model's,
 ; written by the generator).
-function resource_types() returns Slice[u8]
+procedure resource_types() returns Slice[u8]
     model_types()
 
 ; The columns a type keeps beside its content, in the model's order, as
 ; column:member:kind separated by commas (the model's).
-function inline_columns(type: Slice[u8]) returns Slice[u8]
+procedure inline_columns(type: Slice[u8]) returns Slice[u8]
     model_columns(type)
 
 ; The i-th entry of a list separated by `separator`; empty past its end.

@@ -121,7 +121,7 @@ procedure conforms_kind(kind: u8, class: Slice[u8], clr: Slice[u8], in_list: boo
 
 ; What the class of `type` declares for the member `name`: its line in the
 ; model, empty when it has none. A resource has its common members too.
-function declared(type: Slice[u8], name: Slice[u8], resource: bool) returns Slice[u8]
+procedure declared(type: Slice[u8], name: Slice[u8], resource: bool) returns Slice[u8]
 {
     if resource
     {

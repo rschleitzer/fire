@@ -25,6 +25,7 @@ define fire
     module FhirResult
     module Resource
     module Model
+    module Tables
     module Validator
     module Binary
     module Search
@@ -47,6 +48,9 @@ define fire
 procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool
 {
     let page Page.allocate_page()
+    var model Array[u8]()
+    model_write(&model)
+    model_install(page, model.as_slice())
     let database_type setting_or("DatabaseType", "PostgreSql")
     let connection_string setting_or("ConnectionString", "Host=localhost;Database=Fire;Username=postgres")
     let port port_of(setting("Kestrel__Endpoints__MyHttpEndpoint__Url"), 5080)
