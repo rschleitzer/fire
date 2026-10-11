@@ -921,7 +921,12 @@ procedure put_sort_column(mutable out: ref[Array[u8]], type: Slice[u8], key: Sli
     put_table(out, type)
     out.add(46 as u8)
     out.add(entry(line, 32, 1))
-    put_bytes(out, " x WHERE x.resource_id = r2.id LIMIT 1)")
+    put_bytes(out, " x WHERE x.resource_id = r2.id")
+    ; a date of a list has a row for every item: the first one is the key
+    let shape entry(line, 32, 2)
+    if shape.equals("dates") or shape.equals("periods")
+        put_bytes(out, " ORDER BY x.id")
+    put_bytes(out, " LIMIT 1)")
     true
 }
 

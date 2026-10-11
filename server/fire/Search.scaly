@@ -594,10 +594,10 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
                 s := s + 1
             }
         }
-        if shape.equals("first") and date_cells(text, cells, item.get(second), true, true)
-            return
-        if shape.equals("firstperiod") and date_cells(text, cells, item.get(second).get("start"), true, true)
-            return
+        if shape.equals("dates")
+            date_cells(text, cells, item.get(second), true, true)
+        if shape.equals("periods")
+            period_cells(text, cells, item.get(second))
     }
 }
 

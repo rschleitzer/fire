@@ -166,6 +166,15 @@
                    (else (let ((keys (cast-path-keys (car ps))))
                              (loop (cdr ps) (if (member keys seen) seen (cons keys seen)))))))))
 
+; A date search through a LIST (Conversation.message.timestamp,
+; Practitioner.qualification.period): every item that has one is indexed,
+; a row each. (Only the first was; the repository asks this too.)
+(define (search-is-date-list? search)
+    (and (string=? "date" (% "type" search))
+         (let* ((parts (search-path-parts search))
+                (first-prop (if (null? parts) #f (part-property (car parts)))))
+             (and (> (length parts) 1) first-prop (true? "iscollection" first-prop) #t))))
+
 ; The JSON keys of a path, first to last; a choice property under its name
 ; for the type the path is cast to (value[x] as CodeableConcept:
 ; valueCodeableConcept).
@@ -1178,37 +1187,43 @@ namespace " (project-name) ".Search;
            (last-ref (if last-prop (% "ref" last-prop) #f))
            (is-period (and last-ref (string=? "period" last-ref))))
         (cond
-            ; Collection first part, Period last part: iterate, read period.start
+            ; Collection first part, Period last part: the period of every item,
+            ; from its start to its end (search-is-date-list?)
             ((and first-collection is-period)
             ($
-"    public static (DateTime low, DateTime high)? " method-name "(JsonNode content)
+"    public static List<""(DateTime low, DateTime high)> " method-name "(JsonNode content)
     {
+        var results = new List<""(DateTime low, DateTime high)>();
         var items = content[\"" first-field "\"]?.AsArray();
-        if (items == null) return null;
+        if (items == null) return results;
         foreach (var item in items)
         {
             var period = item?[\"" last-field "\"];
             if (period == null) continue;
             var start = period[\"start\"]?.GetValue<""string>();
-            if (start != null) return FhirDateHelper.ParseFhirDateRange(start);
+            var end = period[\"end\"]?.GetValue<""string>();
+            if (start == null && end == null) continue;
+            results.Add((start != null ? FhirDateHelper.ParseFhirDateRange(start).low : DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc),
+                         end != null ? FhirDateHelper.ParseFhirDateRange(end).high : DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc)));
         }
-        return null;
+        return results;
     }
 
 "))
-            ; Collection first part, plain date last part: iterate, read field
+            ; Collection first part, plain date last part: the date of every item
             (first-collection
             ($
-"    public static (DateTime low, DateTime high)? " method-name "(JsonNode content)
+"    public static List<""(DateTime low, DateTime high)> " method-name "(JsonNode content)
     {
+        var results = new List<""(DateTime low, DateTime high)>();
         var items = content[\"" first-field "\"]?.AsArray();
-        if (items == null) return null;
+        if (items == null) return results;
         foreach (var item in items)
         {
             var bd = item?[\"" last-field "\"]?.GetValue<""string>();
-            if (bd != null) return FhirDateHelper.ParseFhirDateRange(bd);
+            if (bd != null) results.Add(FhirDateHelper.ParseFhirDateRange(bd));
         }
-        return null;
+        return results;
     }
 
 "))

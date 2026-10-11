@@ -32,7 +32,8 @@
             "                \"_lastUpdated\" => \"r.last_updated\",
 "
             (apply $ (map (lambda (s)
-                ($"                \"" (% "name" s)"\" => \"("(db-select-top1 db)" d.value_low FROM " (tbl schema (search-table-name s) db)" d WHERE d.resource_id = r.id"(db-trailing-limit1 db)")\",
+                ; (a date of a list has a row for every item: the first one is the key)
+                ($"                \"" (% "name" s)"\" => \"("(db-select-top1 db)" d.value_low FROM " (tbl schema (search-table-name s) db)" d WHERE d.resource_id = r.id"(if (search-is-date-list? s) " ORDER BY d.id" "")(db-trailing-limit1 db)")\",
 "))
                 date-searches))
             (apply $ (map (lambda (s)

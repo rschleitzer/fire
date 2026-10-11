@@ -971,7 +971,16 @@
 
                 <sect2 xml:id="querylimitations"><title>Limitations</title>
 
-                    <para>TBD</para>
+                    <para>Known limitations of the search:</para>
+
+                    <itemizedlist>
+                        <listitem><para>The search parameter <literal>phonetic</literal> (Patient,
+                        Practitioner and every other resource with a name) does no phonetic matching.
+                        It is indexed and answered exactly like <literal>name</literal>: a
+                        case-insensitive match on the beginning of any part of the name. A search for
+                        <literal>phonetic=Meier</literal> finds what <literal>name=Meier</literal>
+                        finds, and does not find <quote>Mayer</quote> or <quote>Maier</quote>.</para></listitem>
+                    </itemizedlist>
 
                 </sect2>
 

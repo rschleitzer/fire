@@ -253,3 +253,10 @@ GET Binary/b11/_history/3
 GET Patient/pg1/_history
 GET Patient/pg1/_history/2
 GET metadata
+GET Practitioner?qualification-period=2003
+GET Practitioner?qualification-period=ge2011
+GET Practitioner?qualification-period=lt1999-04-01
+GET Practitioner?qualification-period=2010-06-01&family=Listed
+GET Practitioner?_sort=qualification-period
+GET Practitioner?_sort=-qualification-period
+GET Practitioner?qualification-period:missing=true

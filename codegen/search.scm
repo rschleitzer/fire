@@ -23,8 +23,8 @@
 ;                      p a period from its start to its end)
 ;   date F             the date F
 ;   period F           the period F, from its start to its end
-;   first F p          the first date at p in the items of the array F
-;   firstperiod F p    the first start of a period p in the items of F
+;   dates F p          the date at p of every item of the array F
+;   periods F p        the period p of every item of F, from start to end
 ;   path F p           the date at F.p
 ;   pathperiod F p     the period at F.p, from its start to its end
 ;   ref F              the reference F, or every one of the array F
@@ -151,8 +151,8 @@
                        (last-field (if last-prop (% "name" last-prop) sn))
                        (last-ref (if last-prop (% "ref" last-prop) #f))
                        (period (and last-ref (string=? "period" last-ref))))
-                    ($ (cond ((and first-coll period) "firstperiod ")
-                             (first-coll "first ")
+                    ($ (cond ((and first-coll period) "periods ")
+                             (first-coll "dates ")
                              (period "pathperiod ")
                              (else "path "))
                        first-field " " last-field)))

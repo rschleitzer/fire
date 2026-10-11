@@ -1,0 +1,1 @@
+{"resourceType":"Practitioner","id":"gp3","name":[{"family":"Listed","given":["Quali"]}],"qualification":[{"code":{"text":"a"},"period":{"start":"2001-01-01","end":"2005-12-31"}},{"code":{"text":"b"}},{"code":{"text":"c"},"period":{"start":"2010-06-01"}},{"code":{"text":"d"},"period":{"end":"1999-03"}}]}

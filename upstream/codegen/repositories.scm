@@ -498,6 +498,7 @@ public interface I"rn"Repository
                         (repo-delete-search-indexes schema all-table-search-list db)
                         (repo-insert-helpers schema db)
                         (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
+                        (if (null? (filter search-is-date-list? all-table-search-list)) "" (repo-insert-date-list-helper schema db))
                         (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
                         (repo-db-class-helpers db)
                         "}
@@ -2228,10 +2229,13 @@ public class "rn"Repository : I"rn"Repository
         (("date")
             (let ((method ($ "Extract"(kebab-to-pascal sn)))
                   (var-name (string-replace sn "-" "_")))
+            (if (search-is-date-list? search)
+            ($"                    await InsertDateListIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor."method"(content));
+")
             ($"                    var "var-name" = "rn"SearchExtractor."method"(content);
                     if ("var-name".HasValue)
                         await InsertDateIndexAsync(conn, tx!, \""tn"\", id, "var-name".Value.low, "var-name".Value.high);
-")))
+"))))
         (("reference")
             (let ((parts (search-path-parts search)))
             (if (and (<= (length parts) 1) (not (search-is-cast? search)))
@@ -2578,6 +2582,26 @@ public class "rn"Repository : I"rn"Repository
         ($"        await InsertQuantityIndexAsync(conn, tx, \"" tn "\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
 ")))
 
+; The insert helper of a date table with a row for every item of a list:
+; emitted for a repository that has one (search-is-date-list?).
+(define (repo-insert-date-list-helper schema db)
+    ($
+"    private static async Task InsertDateListIndexAsync(ConnType conn, TxType tx, string table, string resourceId, List<""(DateTime low, DateTime high)> values)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            await using var cmd = new CmdType(
+                $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value_low, value_high) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)})\", conn, tx);
+            cmd.Parameters.Add(NewParam(1, i));
+            cmd.Parameters.Add(NewParam(2, resourceId));
+            cmd.Parameters.Add(NewTsParam(3, values[i].low));
+            cmd.Parameters.Add(NewTsParam(4, values[i].high));
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+"))
+
 ; The insert helper of a quantity table: emitted for a repository that has one.
 (define (repo-insert-quantity-helper schema db)
     ($
@@ -2642,10 +2666,14 @@ public class "rn"Repository : I"rn"Repository
            (tn (search-table-name search))
            (method ($ "Extract"(kebab-to-pascal sn)))
            (var-name (string-replace sn "-" "_")))
+        (if (search-is-date-list? search)
+            ; a list: a row for every item that has a date
+            ($"        await InsertDateListIndexAsync(conn, tx, \"" tn "\", resourceId, "rn"SearchExtractor." method "(content));
+")
         ($"        var " var-name " = "rn"SearchExtractor." method "(content);
         if (" var-name ".HasValue)
             await InsertDateIndexAsync(conn, tx, \"" tn "\", resourceId, " var-name ".Value.low, " var-name ".Value.high);
-")))
+"))))
 
 ; Reference index line for InsertSearchIndexesAsync
 (define (repo-reference-index-line rn search)
