@@ -320,6 +320,32 @@ asks() {
   ASKED=$n
 }
 
+# What a server does when it WRITES: every line of tools/turns/steps.txt, in
+# its own turn. `zz{S}` in a path, a form or a body file is the server's own
+# mark (zzs, zzc), so that each works on resources of its own; the answers
+# are compared without it, without ids and times.
+#   steps <server: s or c>
+steps() {
+  local n=0 method path rest out body
+  while read -r method path rest; do
+    case "$method" in ''|'#'*) continue ;; esac
+    n=$((n+1)); out="$WORK/turns.$1.step.$n"
+    path=${path//\{S\}/$1}
+    body="$WORK/turns.$1.step.body.json"
+    if [ -n "$rest" ]; then sed "s/zz{S}/zz$1/g" "$ROOT/tools/turns/$rest" > "$body"; else : > "$body"; fi
+    case "$method" in
+      GET|DELETE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X "$method" "$BASE/fire/$path" > "$out.status" ;;
+      *) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X "$method" \
+           -H 'Content-Type: application/fhir+json' --data-binary @"$body" "$BASE/fire/$path" > "$out.status" ;;
+    esac
+    echo "$method $path $rest" > "$out.request"
+  done < "$ROOT/tools/turns/steps.txt"
+  STEPPED=$n
+}
+
+# A step's answer without what differs by nature.
+step_neutral() { sed -E 's/zz[sc]/zz?/g; s/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/<id>/g; s/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+(\\u002B|[+-])[0-9:]+/<time>/g' "$1"; }
+
 # What must not be stored: every file of tools/turns/refused/, named
 # <Type>.<case>.json, is POSTed and must be answered with 400.
 refusals() {
@@ -385,6 +411,7 @@ turns() {
   call s.vread-b2 200 GET "Patient/$b/_history/2";       same s.vread-b2 c.update
   call s.recreate 201 PUT "Patient/$b" patient.json
   others read s c
+  steps s
   stop_server
 
   echo "turns: 4 csharp  -- finds A deleted, reads its last version; reads B as created again; creates A again"
@@ -393,6 +420,7 @@ turns() {
   call c.vread-a3 200 GET "Patient/$a/_history/3";       same c.vread-a3 c.update-a
   call c.read-b 200 GET "Patient/$b";                    same c.read-b s.recreate
   call c.recreate 201 PUT "Patient/$a" patient.json
+  steps c
   stop_server
 
   echo "turns: 5 scaly   -- answers the $(grep -vc '^#' "$ROOT/tools/turns/queries.txt") requests of tools/turns/queries.txt"
@@ -409,6 +437,16 @@ turns() {
     if ! cmp -s "$WORK/turns.s.ask.$n.status" "$WORK/turns.c.ask.$n.status" || ! cmp -s "$WORK/turns.s.ask.$n.body" "$WORK/turns.c.ask.$n.body"; then
       different=$((different+1))
       echo "turns: FAIL -- $(cat "$WORK/turns.s.ask.$n.request"): scaly $(cat "$WORK/turns.s.ask.$n.status"), csharp $(cat "$WORK/turns.c.ask.$n.status") (diff $WORK/turns.s.ask.$n.body $WORK/turns.c.ask.$n.body)"
+      TURNS_FAILED=1
+    fi
+    n=$((n+1))
+  done
+
+  # what one does when it writes the other does
+  n=1
+  while [ $n -le "${STEPPED:-0}" ]; do
+    if ! cmp -s "$WORK/turns.s.step.$n.status" "$WORK/turns.c.step.$n.status" || [ "$(step_neutral "$WORK/turns.s.step.$n.body")" != "$(step_neutral "$WORK/turns.c.step.$n.body")" ]; then
+      echo "turns: FAIL -- step $(cat "$WORK/turns.s.step.$n.request"): scaly $(cat "$WORK/turns.s.step.$n.status"), csharp $(cat "$WORK/turns.c.step.$n.status") (diff $WORK/turns.s.step.$n.body $WORK/turns.c.step.$n.body)"
       TURNS_FAILED=1
     fi
     n=$((n+1))
@@ -466,7 +504,7 @@ turns() {
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1
   done
   [ -z "$TURNS_FAILED" ] || { echo "turns: FAILED"; exit 1; }
-  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words; $ASKED requests (searches, histories, bundles) answered the same by both"
+  echo "turns: passed -- Patient through four turns (20 requests, 9 answers the same bytes across the servers, 7 rows as expected); Binary, Observation, Practitioner and Provenance created, updated and read across (32 requests, 16 answers the same bytes, the rows of both servers equal); a Binary's bytes stored and answered alike; $SEARCH_ROWS rows of the search tables equal; $(ls "$ROOT"/tools/turns/refused/*.json | wc -l | tr -d ' ') invalid resources refused by both in the same words; $ASKED requests (searches, histories, bundles) answered the same by both; ${STEPPED:-0} writing steps answered alike"
   exit 0
 }
 

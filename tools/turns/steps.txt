@@ -1,0 +1,29 @@
+# What both servers do when they WRITE, each in its own turn and on resources
+# of its own: zz{S} is the server's mark (tools/measure.sh, steps). The
+# answers must be alike -- the status, and the body without the mark, the
+# ids and the times.
+#   METHOD <path> [<body file of tools/turns/>]
+
+# the conditional update
+PUT Patient steps/patient-cu.json
+PUT Patient?identifier=urn:steps|zz{S}-cu steps/broken.json
+PUT Patient?identifier=urn:steps|zz{S}-cu observation.json
+PUT Patient?identifier=urn:steps|zz{S}-cu refused/Patient.calendar.json
+PUT Patient?identifier=urn:steps|zz{S}-cu steps/patient-cu.json
+GET Patient?identifier=urn:steps|zz{S}-cu
+PUT Patient?identifier=urn:steps|zz{S}-cu steps/patient-cu2.json
+GET Patient?identifier=urn:steps|zz{S}-cu
+PUT Patient?identifier=urn:steps|zz{S}-named steps/patient-named.json
+GET Patient/zz{S}-named
+PUT Patient?identifier=urn:steps| steps/patient-cu.json
+PUT Patient?nonsense=1 steps/patient-cu.json
+
+# the conditional delete
+DELETE Patient
+DELETE Patient?nonsense=1
+DELETE Patient?identifier=urn:steps|zz{S}-nobody
+DELETE Patient?identifier=urn:steps|zz{S}-cu
+GET Patient?identifier=urn:steps|zz{S}-cu
+DELETE Patient?identifier=urn:steps|zz{S}-named,urn:steps|zz{S}-cu
+GET Patient/zz{S}-named
+GET Patient/zz{S}-named/_history

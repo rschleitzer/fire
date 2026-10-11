@@ -26,6 +26,8 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.get(pattern(page, type, "/_history"), &resource_history_get)
         app.put(pattern(page, type, "/{id}"), &resource_put)
         app.delete(pattern(page, type, "/{id}"), &resource_remove)
+        app.put(pattern(page, type, ""), &resource_put_conditional)
+        app.delete(pattern(page, type, ""), &resource_remove_conditional)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
         i := i + 1
     }
@@ -339,6 +341,110 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
         return send_unavailable(res)
     version_fields(res, "", type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
+}
+
+; PUT /fire/<type>?<criteria>: the conditional update -- the one resource the
+; criteria find is replaced, with none the resource is created, more than
+; one is refused. As upstream's ConditionalUpdate; what it lets fail
+; without an answer of its own (a search it refuses, data that is no
+; base64) is the unexpected error here too.
+procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    if req.query.length = 0
+        return send_error(res, "invalid", "Conditional update requires search parameters", 400)
+    let parsed JsonValue.parse(req.body)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "invalid", "Invalid JSON", 400)
+    let root parsed.value
+    if root.get("resourceType").text().equals(type) = false
+        return type_mismatch(res, type, root.get("resourceType").text())
+    var outcome Array[u8]()
+    if acceptable(type, root, &outcome) = false
+    {
+        res.set_status(400)
+        return send_resource(res, outcome.as_slice())
+    }
+
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var found Array[u8]()
+    var rows Array[i64]()
+    var problem Array[u8]()
+    let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
+    if matches.status = FAILED
+        return send_unavailable(res)
+    if matches.status <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    if matches.version_id > 1
+        return send_error(res, "multiple-matches", "Multiple matches found for conditional update", 412)
+
+    var content Array[u8]()
+    if matches.version_id = 1
+    {
+        var existing Array[u8]()
+        put_bytes(&existing, found.as_slice().subslice(rows[0] as size_t, (rows[0] + rows[1]) as size_t))
+        let stored resource_update(0, type, root, existing.as_slice(), version_of(trim(req.header("if-match"))), &content)
+        if stored.status = CONFLICT
+            return send_error(res, "conflict", "Version conflict", 409)
+        if stored.status = FAILED
+            return send_unavailable(res)
+        if stored.status <> STORED
+            return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        version_fields(res, "", type, existing.as_slice(), stored.version_id, stored.seconds)
+        return send_stored(req, res, content.as_slice())
+    }
+
+    ; no match: created, under the id the resource names or a new one
+    var id_bytes u8[36]
+    var id Slice[u8](36, &id_bytes[0])
+    var named false
+    if root.get("id").is_text()
+    {
+        id := root.get("id").text()
+        named := true
+    }
+    else if new_uuid(id) = false
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    let stored resource_create(0, type, root, id, named, &content)
+    if stored.status = FAILED
+        return send_unavailable(res)
+    if stored.status <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    res.set_status(201)
+    version_fields(res, trim(req.header("host")), type, id, stored.version_id, stored.seconds)
+    send_stored(req, res, content.as_slice())
+}
+
+; DELETE /fire/<type>?<criteria>: the conditional delete -- everything the
+; criteria find is deleted. As upstream's ConditionalDelete.
+procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    if req.query.length = 0
+        return send_error(res, "invalid", "Conditional delete requires search parameters", 400)
+    var text Array[u8]()
+    var cells Array[i64]()
+    parse_pairs(req.query, &text, &cells)
+    var found Array[u8]()
+    var rows Array[i64]()
+    var problem Array[u8]()
+    let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2147483647, 0, &found, &rows, &problem)
+    if matches.status = FAILED
+        return send_unavailable(res)
+    if matches.status <> STORED
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    var i: size_t 0
+    while i * 4 < rows.length
+    {
+        let id found.as_slice().subslice(rows[i * 4] as size_t, (rows[i * 4] + rows[i * 4 + 1]) as size_t)
+        if resource_delete(0, type, id) = FAILED
+            return send_unavailable(res)
+        i := i + 1
+    }
+    res.set_status(204)
+    res.send("", "")
 }
 
 ; DELETE /fire/<type>/{id}
