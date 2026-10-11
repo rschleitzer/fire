@@ -79,12 +79,13 @@ build_scaly() {
   mkdir -p "$ROOT/server/build"
   if [ -n "${FIRE_SCALY_HOME:-}" ]; then
     echo "measure: scaly -- built with the checkout $FIRE_SCALY_HOME, not the installed toolchain"
-    (cd "$ROOT/server" && SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build fire.scaly -o build/fire) > "$WORK/scaly.build.log" 2>&1 \
+    (cd "$ROOT" && SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build server/fire.scaly -o server/build/fire) > "$WORK/scaly.build.log" 2>&1 \
       || { cat "$WORK/scaly.build.log" >&2; die "the Scaly server does not build"; }
     return
   fi
   command -v scaly > /dev/null || die "scaly is not on the PATH"
-  (cd "$ROOT/server" && env -u SCALY_HOME scaly build fire.scaly -o build/fire) > "$WORK/scaly.build.log" 2>&1 \
+  # from the repository's root: the package fhir is looked for in ./packages
+  (cd "$ROOT" && env -u SCALY_HOME scaly build server/fire.scaly -o server/build/fire) > "$WORK/scaly.build.log" 2>&1 \
     || { cat "$WORK/scaly.build.log" >&2; die "the Scaly server does not build"; }
 }
 

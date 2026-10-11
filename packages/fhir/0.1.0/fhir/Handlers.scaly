@@ -7,7 +7,7 @@ use http.Response.Response
 use http.Router.Router
 use json.Value.JsonValue
 use json.Writer.JsonWriter
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 ; The routes of every resource type; the patterns lie on page.
 procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])

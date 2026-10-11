@@ -24,5 +24,7 @@
 
 (element fhir
     (make directory path: "server"
-        (make directory path: "fire"
-            (scaly-model-file))))
+        (sosofo-append
+            (scaly-program-file)
+            (make directory path: (downcase-string (fhir-name))
+                (scaly-model-file)))))

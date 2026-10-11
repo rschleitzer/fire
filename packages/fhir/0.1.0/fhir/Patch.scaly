@@ -11,7 +11,7 @@ use http.Request.Request
 use http.Response.Response
 use json.Value.JsonValue
 use json.Writer.JsonWriter
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 define PATCH_ADD: int 1
 define PATCH_REMOVE: int 2

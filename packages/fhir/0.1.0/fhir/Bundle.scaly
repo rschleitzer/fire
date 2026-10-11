@@ -8,7 +8,7 @@ use http.Request.Request
 use http.Response.Response
 use json.Value.JsonValue
 use json.Writer.JsonWriter
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 ; {"response":{"status":s[,"location":l]}[,"resource":r]} -- r as it stands.
 procedure answer_entry(mutable e: ref[JsonWriter], status: Slice[u8], location: Slice[u8], resource: Slice[u8])

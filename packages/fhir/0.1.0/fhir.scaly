@@ -1,0 +1,45 @@
+; fhir -- the runtime of a FHIR R5 server that is a drop-in replacement of
+; the C# server upstream's generator writes: the same URLs, the same
+; settings, the same database. It knows no resource type. A server is a
+; small program a generator writes from a model (codegen/ in the repository
+; this package lives in): the model as one text of records, and a main that
+; hands it to `serve_model`.
+;
+; The settings come from the environment under the names upstream's
+; configuration has (fhir/Config.scaly). The database layer is cut as
+; upstream cuts it: one provider per database (fhir/postgresql), behind
+; fhir/Database.scaly.
+
+package scaly 0.1.0
+package http 0.1.0
+package json 0.1.1
+package pg 0.2.0
+
+define fhir
+{
+    module Config
+    module Json
+    module Instant
+    module Uuid
+    module FhirResult
+    module Resource
+    module Tables
+    module Validator
+    module Binary
+    module Search
+    module Query
+    module postgresql
+    module Database
+    module Repository
+    module Chains
+    module Composite
+    module Subset
+    module Metadata
+    module Handlers
+    module SystemHistory
+    module Patch
+    module Seed
+    module Admin
+    module Bundle
+    module Server
+}

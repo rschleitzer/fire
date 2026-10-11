@@ -4,7 +4,7 @@
 ; scope stands for (transaction_begin).
 
 use json.Value.JsonValue
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 procedure resource_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
 {
@@ -69,8 +69,8 @@ procedure database_indexes(create: bool) returns bool mutable pg_pool
     if database_in_use() <> DATABASE_POSTGRESQL
         return false
     if create
-        return postgresql_script(postgresql_create_indexes())
-    postgresql_script(postgresql_drop_indexes())
+        return postgresql_script(model_value(61, "postgresql.indexes.create"))
+    postgresql_script(model_value(61, "postgresql.indexes.drop"))
 }
 
 ; A search parameter's table made and filled, or dropped (see the

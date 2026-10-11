@@ -1,56 +1,15 @@
-; fire -- a FHIR R5 server, the drop-in replacement of the generated C#
-; server under upstream/: the same URLs, the same settings, the same
-; database.
-;
-;   scaly build fire.scaly -o build/fire
-;
-; The settings come from the environment under the names upstream's
-; configuration has (see fire/Config.scaly). The database layer is cut as
-; upstream cuts it: one provider per database (fire/postgresql), behind
-; fire/Database.scaly.
-
-package scaly 0.1.0
-package http 0.1.0
-package json 0.1.1
-package pg 0.2.0
+; The server itself: the model installed, the database reached, the routes
+; set, and then it listens until it is ended. `model` is the text the
+; generated program wrote (fhir/Tables.scaly) and must outlive the call.
+; 0 when it ended in order; 2 an unsupported database, 3 a database that
+; cannot be reached or prepared, 4 a port that cannot be listened on.
 
 use http.Router.Router
 
-define fire
-{
-    module Config
-    module Json
-    module Instant
-    module Uuid
-    module FhirResult
-    module Resource
-    module Model
-    module Tables
-    module Validator
-    module Binary
-    module Search
-    module Query
-    module postgresql
-    module Database
-    module Repository
-    module Chains
-    module Composite
-    module Subset
-    module Metadata
-    module Handlers
-    module SystemHistory
-    module Patch
-    module Seed
-    module Admin
-    module Bundle
-}
-
-procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool
+procedure serve_model(model: Slice[u8]) returns int mutable pg_pool
 {
     let page Page.allocate_page()
-    var model Array[u8]()
-    model_write(&model)
-    model_install(page, model.as_slice())
+    model_install(page, model)
     let database_type setting_or("DatabaseType", "PostgreSql")
     let connection_string setting_or("ConnectionString", "Host=localhost;Database=Fire;Username=postgres")
     let port port_of(setting("Kestrel__Endpoints__MyHttpEndpoint__Url"), 5080)

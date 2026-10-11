@@ -6,9 +6,9 @@
 use pg.Conn.PgConn
 use json.Value.JsonValue
 use json.Writer.JsonWriter
-use fire.Instant.Instant
-use fire.Resource.StoreResult
-use fire.postgresql.SearchQueryBuilder.SearchQuery
+use fhir.Instant.Instant
+use fhir.Resource.StoreResult
+use fhir.postgresql.SearchQueryBuilder.SearchQuery
 
 ; The statement `what` of a type: its name on the connection.
 procedure statement_name(mutable name: ref[Array[u8]], type: Slice[u8], what: Slice[u8])

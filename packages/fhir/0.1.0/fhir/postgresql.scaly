@@ -2,7 +2,6 @@
 
 define postgresql
 {
-    module Schema
     module DatabaseProvider
     module SearchQueryBuilder
     module ResourceRepository

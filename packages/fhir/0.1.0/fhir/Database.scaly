@@ -1,7 +1,7 @@
 ; The database layer's neutral side: the provider, one case per database,
 ; and what the server does with it at its start.
 
-use fire.postgresql.DatabaseProvider.PostgreSqlProvider
+use fhir.postgresql.DatabaseProvider.PostgreSqlProvider
 
 ; The version of the schema this software is written for (upstream's
 ; Database.SoftwareVersion).

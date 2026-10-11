@@ -4,7 +4,8 @@ obj/
 # the Scaly server's build output
 /server/build/
 
-# what tools/generate.sh writes: the model (codegen/scaly.dsl) and
-# upstream's schema (tools/schema.sh) as Scaly sources
-/server/fire/Model.scaly
-/server/fire/*/Schema.scaly
+# what tools/generate.sh writes: the program, the model (codegen/scaly.dsl)
+# and upstream's schema (tools/schema.sh) as Scaly sources. The runtime is
+# packages/fhir and is NOT generated.
+/server/*.scaly
+/server/*/

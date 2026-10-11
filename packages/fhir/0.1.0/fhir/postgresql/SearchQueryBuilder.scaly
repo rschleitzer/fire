@@ -3,7 +3,7 @@
 ; search tables, conditions, the values as parameters. The SQL need not be
 ; upstream's letter for letter -- its rows must be.
 
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 ; What a search is made of. The parameters are cells of `text` (as
 ; fire/Search.scaly's rows), in the order of their numbers.

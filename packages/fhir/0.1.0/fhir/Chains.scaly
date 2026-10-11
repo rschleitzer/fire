@@ -9,7 +9,7 @@
 ; A set of strings here is a text of lines.
 
 use json.Value.JsonValue
-use fire.Resource.StoreResult
+use fhir.Resource.StoreResult
 
 ; The line of the model for the reference parameter `name` of a type;
 ; empty when it has none.
