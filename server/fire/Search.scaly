@@ -246,6 +246,57 @@ procedure quantity_rows(mutable text: ref[Array[u8]], mutable cells: ref[Array[i
     text_cell(text, cells, node.get("unit"))
 }
 
+; What the rest of `path` (from its part `at`) reaches below node, arrays
+; flattened, each read as `leaf` says: s a string, r a reference, c the
+; codings of a concept, g a coding, v a plain value as a token.
+procedure reached_rows(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], node: JsonValue, path: Slice[u8], at: size_t, leaf: u8)
+{
+    if node.is_null()
+        return
+    if node.is_array()
+    {
+        var i: size_t 0
+        while i < node.length()
+        {
+            reached_rows(text, cells, node.item(i), path, at, leaf)
+            i := i + 1
+        }
+        return
+    }
+    if entry(path, 46, at).length > 0
+    {
+        if node.is_object()
+            reached_rows(text, cells, node.get(entry(path, 46, at)), path, at + 1, leaf)
+        return
+    }
+    if leaf = 115
+        return text_row(text, cells, false, node)
+    if leaf = 118
+    {
+        if node.is_text()
+            return value_row(text, cells, true, node.text())
+        if node.is_bool()
+        {
+            if node.as_bool()
+                return value_row(text, cells, true, "true")
+            return value_row(text, cells, true, "false")
+        }
+        return
+    }
+    if node.is_object() = false
+        return
+    if leaf = 114
+        return reference_row(text, cells, node)
+    if leaf = 99
+    {
+        if node.get("coding").is_array()
+            coding_rows(text, cells, node.get("coding"))
+        return
+    }
+    text_cell(text, cells, node.get("system"))
+    text_cell(text, cells, node.get("code"))
+}
+
 ; The text upstream's ToString gives a value of a choice.
 procedure choice_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], value: JsonValue)
 {
@@ -381,6 +432,17 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
         }
         if first.is_number()
             cell(text, cells, first.number_text())
+        return
+    }
+    if shape.equals("reach")
+    {
+        var k: size_t 3
+        while entry(line, 32, k).length > 0
+        {
+            let reached entry(line, 32, k)
+            reached_rows(text, cells, root, entry(reached, 58, 0), 0, entry(reached, 58, 1)[0])
+            k := k + 1
+        }
         return
     }
     if shape.equals("quantity")

@@ -2193,6 +2193,9 @@ public class "rn"Repository : I"rn"Repository
 "))
         (("token")
             (cond
+                ((search-is-cast? search)
+                    ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
+"))
                 ((and (search-is-contactpoint? search) (string=? "telecom" sn))
                     ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.ExtractTelecom(content));
 "))
@@ -2218,7 +2221,7 @@ public class "rn"Repository : I"rn"Repository
 ")))
         (("reference")
             (let ((parts (search-path-parts search)))
-            (if (<= (length parts) 1)
+            (if (and (<= (length parts) 1) (not (search-is-cast? search)))
                 (let* ((prop (search-property search))
                        (fhir-field (if prop (% "name" prop) sn)))
                 ($"                    await InsertReferenceIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.ExtractReference(content, \""fhir-field"\"));
@@ -2585,6 +2588,10 @@ public class "rn"Repository : I"rn"Repository
     (let* ((sn (% "name" search))
            (tn (search-table-name search)))
         (cond
+            ; One type of a choice: a list, as the others at the end
+            ((search-is-cast? search)
+                ($"        await InsertTokenIndexAsync(conn, tx, \"" tn "\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
+"))
             ; ContactPoint/telecom (no filter)
             ((and (search-is-contactpoint? search) (string=? "telecom" sn))
                 ($"        await InsertTokenIndexAsync(conn, tx, \"" tn "\", resourceId, "rn"SearchExtractor.ExtractTelecom(content));
@@ -2622,7 +2629,7 @@ public class "rn"Repository : I"rn"Repository
     (let* ((sn (% "name" search))
            (tn (search-table-name search))
            (parts (search-path-parts search)))
-        (if (<= (length parts) 1)
+        (if (and (<= (length parts) 1) (not (search-is-cast? search)))
             ; Direct reference → ExtractReference(content, "fhirFieldName")
             (let* ((prop (search-property search))
                    (fhir-field (if prop (% "name" prop) sn)))

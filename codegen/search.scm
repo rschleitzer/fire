@@ -32,6 +32,10 @@
 ;   refin2 F s p       the reference p of every item of s of every item of F
 ;   number F           the number F, or every one of the array F
 ;   quantity p ...     every quantity the paths p (a.b) reach
+;   reach p:k ...      what the paths p (a.b) reach, each read as k says
+;                      (s a string, r a reference, c a concept's codings,
+;                      g a coding, v a plain value) -- a search on one type
+;                      of a choice (models.scm, search-is-cast?)
 ;   none               nothing (upstream writes none either)
 ; A parameter that is a column of the resource's own table has a line too,
 ;   i table inline column kind
@@ -195,6 +199,21 @@
                    (let ((path (scaly-joined (quantity-path-keys (car ps)))))
                        (loop (cdr ps) (if (member path seen) seen (cons path seen)))))))))
 
+; The shape of a search on one type of a choice (model-cast-section): its
+; paths, each once, with what stands at their end.
+(define (scaly-cast-shape s)
+    ($ "reach"
+       (let loop ((ps (search-path-nodes s)) (seen '()))
+           (if (null? ps) (apply $ (map (lambda (p) ($ " " p)) (reverse seen)))
+               (let ((path ($ (scaly-joined (cast-path-keys (car ps))) ":"
+                              (case (cast-path-adder s (car ps))
+                                  (("AddReachedText") "s")
+                                  (("AddReachedReference") "r")
+                                  (("AddReachedConcept") "c")
+                                  (("AddReachedCoding") "g")
+                                  (else "v")))))
+                   (loop (cdr ps) (if (member path seen) seen (cons path seen))))))))
+
 ; The lines of a resource's search tables.
 (define (scaly-search-lines resource)
     (let* ((searches (node-list->list (table-searches resource)))
@@ -217,10 +236,10 @@
                             (("decimal") "m")
                             (else "t"))))))
                 (node-list->list (inline-searches resource))))
-           (apply $ (map (lambda (s) (line "s" s (scaly-string-shape s hn-all addr-fields))) strings))
-           (apply $ (map (lambda (s) (line "t" s (scaly-token-shape s contactpoints))) tokens))
+           (apply $ (map (lambda (s) (line "s" s (if (search-is-cast? s) (scaly-cast-shape s) (scaly-string-shape s hn-all addr-fields)))) strings))
+           (apply $ (map (lambda (s) (line "t" s (if (search-is-cast? s) (scaly-cast-shape s) (scaly-token-shape s contactpoints)))) tokens))
            (apply $ (map (lambda (s) (line "d" s (scaly-date-shape s))) dates))
-           (apply $ (map (lambda (s) (line "r" s (scaly-reference-shape s))) (of "reference")))
+           (apply $ (map (lambda (s) (line "r" s (if (search-is-cast? s) (scaly-cast-shape s) (scaly-reference-shape s)))) (of "reference")))
            (apply $ (map (lambda (s) (line "n" s (scaly-number-shape s))) (of "number")))
            (apply $ (map (lambda (s) (line "q" s (scaly-quantity-shape s))) (of "quantity"))))))
 

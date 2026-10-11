@@ -3038,16 +3038,25 @@
               <parts>
                 <part ref="adverseevent.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="adverseevent.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="adverseevent.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Timing"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -8763,16 +8772,25 @@
               <parts>
                 <part ref="chargeitem.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="chargeitem.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="chargeitem.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Timing"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -14758,11 +14776,17 @@
               <parts>
                 <part ref="communicationrequest.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="communicationrequest.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17461,11 +17485,17 @@
               <parts>
                 <part ref="condition.abatement"/>
               </parts>
+              <casts>
+                <cast to="Age"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="condition.abatement"/>
               </parts>
+              <casts>
+                <cast to="Range"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17475,11 +17505,17 @@
               <parts>
                 <part ref="condition.abatement"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="condition.abatement"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17489,6 +17525,9 @@
               <parts>
                 <part ref="condition.abatement"/>
               </parts>
+              <casts>
+                <cast to="string"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17705,11 +17744,17 @@
               <parts>
                 <part ref="condition.onset"/>
               </parts>
+              <casts>
+                <cast to="Age"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="condition.onset"/>
               </parts>
+              <casts>
+                <cast to="Range"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17719,11 +17764,17 @@
               <parts>
                 <part ref="condition.onset"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="condition.onset"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -17733,6 +17784,9 @@
               <parts>
                 <part ref="condition.onset"/>
               </parts>
+              <casts>
+                <cast to="string"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -21355,11 +21409,17 @@
               <parts>
                 <part ref="detectedissue.identified"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="detectedissue.identified"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -22015,7 +22075,7 @@
             </path>
             <path>
               <parts>
-                <part ref="device.identifier"/>
+                <part ref="device.identifier" property="type" type="SNO"/>
               </parts>
             </path>
           </paths>
@@ -24772,11 +24832,17 @@
               <parts>
                 <part ref="diagnosticreport.effective"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="diagnosticreport.effective"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -38856,6 +38922,9 @@
                 <part ref="ingredient.substance.strength"/>
                 <part ref="ingredient.substance.strength.concentration"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -38867,6 +38936,9 @@
                 <part ref="ingredient.substance.strength"/>
                 <part ref="ingredient.substance.strength.presentation"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -38917,6 +38989,9 @@
                 <part ref="ingredient.substance.strength"/>
                 <part ref="ingredient.substance.strength.concentration"/>
               </parts>
+              <casts>
+                <cast to="Ratio"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -38928,6 +39003,9 @@
                 <part ref="ingredient.substance.strength"/>
                 <part ref="ingredient.substance.strength.presentation"/>
               </parts>
+              <casts>
+                <cast to="Ratio"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -45629,11 +45707,17 @@
               <parts>
                 <part ref="medicationadministration.occurence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="medicationadministration.occurence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -47612,11 +47696,17 @@
               <parts>
                 <part ref="medicationstatement.effective"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="medicationstatement.effective"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -47936,12 +48026,18 @@
                 <part ref="medicinalproductdefinition.characteristic"/>
                 <part ref="medicinalproductdefinition.characteristic.value"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="medicinalproductdefinition.characteristic"/>
                 <part ref="medicinalproductdefinition.characteristic.value"/>
               </parts>
+              <casts>
+                <cast to="CodeableConcept"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -48419,6 +48515,9 @@
               <parts>
                 <part ref="messagedefinition.event"/>
               </parts>
+              <casts>
+                <cast to="Coding"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -48684,11 +48783,17 @@
               <parts>
                 <part ref="messageheader.event"/>
               </parts>
+              <casts>
+                <cast to="Coding"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="messageheader.event"/>
               </parts>
+              <casts>
+                <cast to="canonical"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -50442,11 +50547,17 @@
               <parts>
                 <part ref="nutritionintake.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="nutritionintake.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51563,21 +51674,33 @@
               <parts>
                 <part ref="observation.effective"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.effective"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.effective"/>
               </parts>
+              <casts>
+                <cast to="Timing"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.effective"/>
               </parts>
+              <casts>
+                <cast to="instant"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51655,12 +51778,18 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="CodeableConcept"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="CodeableConcept"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51670,23 +51799,35 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="SampledData"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="SampledData"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51717,6 +51858,9 @@
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="canonical"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51727,6 +51871,9 @@
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="CodeableConcept"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51737,12 +51884,18 @@
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="SampledData"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -51753,6 +51906,9 @@
                 <part ref="observation.component"/>
                 <part ref="observation.component.value"/>
               </parts>
+              <casts>
+                <cast to="Reference"/>
+              </casts>
               <targets>
                 <target resource="MolecularSequence"/>
               </targets>
@@ -52076,6 +52232,9 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="canonical"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -52085,6 +52244,9 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="CodeableConcept"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -52094,11 +52256,17 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -52108,10 +52276,14 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="markdown"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.value"/>
+                <part ref="codeableconcept.text"/>
               </parts>
               <casts>
                 <cast to="CodeableConcept"/>
@@ -52125,11 +52297,17 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="Quantity"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="SampledData"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -52139,6 +52317,9 @@
               <parts>
                 <part ref="observation.value"/>
               </parts>
+              <casts>
+                <cast to="Reference"/>
+              </casts>
               <targets>
                 <target resource="MolecularSequence"/>
               </targets>
@@ -53715,7 +53896,7 @@
             <path>
               <parts>
                 <part ref="organizationaffiliation.contact"/>
-                <part ref="extendedcontactdetail.telecom"/>
+                <part ref="extendedcontactdetail.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -53782,7 +53963,7 @@
             <path>
               <parts>
                 <part ref="organizationaffiliation.contact"/>
-                <part ref="extendedcontactdetail.telecom"/>
+                <part ref="extendedcontactdetail.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -54595,7 +54776,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="patient.telecom"/>
+                <part ref="patient.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -54701,7 +54882,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="patient.telecom"/>
+                <part ref="patient.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -56112,7 +56293,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="person.telecom"/>
+                <part ref="person.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -56130,7 +56311,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="person.telecom"/>
+                <part ref="person.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -57953,6 +58134,9 @@
                 <part ref="plandefinition.action"/>
                 <part ref="plandefinition.action.definition"/>
               </parts>
+              <casts>
+                <cast to="canonical"/>
+              </casts>
               <targets>
                 <target resource="ObservationDefinition"/>
                 <target resource="ActivityDefinition"/>
@@ -57967,6 +58151,9 @@
                 <part ref="plandefinition.action"/>
                 <part ref="plandefinition.action.definition"/>
               </parts>
+              <casts>
+                <cast to="uri"/>
+              </casts>
               <targets>
                 <target resource="ObservationDefinition"/>
                 <target resource="ActivityDefinition"/>
@@ -58220,7 +58407,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="practitioner.telecom"/>
+                <part ref="practitioner.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -58258,7 +58445,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="practitioner.telecom"/>
+                <part ref="practitioner.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -58440,7 +58627,7 @@
             <path>
               <parts>
                 <part ref="practitionerrole.contact"/>
-                <part ref="extendedcontactdetail.telecom"/>
+                <part ref="extendedcontactdetail.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -58450,7 +58637,7 @@
             <path>
               <parts>
                 <part ref="practitionerrole.contact"/>
-                <part ref="extendedcontactdetail.telecom"/>
+                <part ref="extendedcontactdetail.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -58865,16 +59052,25 @@
               <parts>
                 <part ref="procedure.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="procedure.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="procedure.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Timing"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -60534,6 +60730,9 @@
               <parts>
                 <part ref="questionnaireresponse.item"/>
               </parts>
+              <casts>
+                <cast to="Reference"/>
+              </casts>
               <targets>
                 <target resource="Account"/>
                 <target resource="ActivityDefinition"/>
@@ -61322,7 +61521,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="relatedperson.telecom"/>
+                <part ref="relatedperson.telecom" property="system" type="email"/>
               </parts>
             </path>
           </paths>
@@ -61340,7 +61539,7 @@
           <paths>
             <path>
               <parts>
-                <part ref="relatedperson.telecom"/>
+                <part ref="relatedperson.telecom" property="system" type="phone"/>
               </parts>
             </path>
           </paths>
@@ -62114,6 +62313,9 @@
                 <part ref="requestorchestration.action.participant"/>
                 <part ref="requestorchestration.action.participant.actor"/>
               </parts>
+              <casts>
+                <cast to="Reference"/>
+              </casts>
               <targets>
                 <target resource="CareTeam"/>
                 <target resource="Device"/>
@@ -62136,6 +62338,9 @@
                 <part ref="requestorchestration.action.participant"/>
                 <part ref="requestorchestration.action.participant.actor"/>
               </parts>
+              <casts>
+                <cast to="canonical"/>
+              </casts>
               <targets>
                 <target resource="CareTeam"/>
                 <target resource="Device"/>
@@ -63526,6 +63731,9 @@
                 <part ref="riskassessment.prediction"/>
                 <part ref="riskassessment.prediction.probability"/>
               </parts>
+              <casts>
+                <cast to="decimal"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -64485,16 +64693,25 @@
               <parts>
                 <part ref="servicerequest.occurrence"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="servicerequest.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="servicerequest.occurrence"/>
               </parts>
+              <casts>
+                <cast to="Timing"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -65101,12 +65318,18 @@
                 <part ref="specimen.collection"/>
                 <part ref="specimen.collection.collected"/>
               </parts>
+              <casts>
+                <cast to="dateTime"/>
+              </casts>
             </path>
             <path>
               <parts>
                 <part ref="specimen.collection"/>
                 <part ref="specimen.collection.collected"/>
               </parts>
+              <casts>
+                <cast to="Period"/>
+              </casts>
             </path>
           </paths>
         </search>
@@ -69620,6 +69843,9 @@
                 <part ref="task.output"/>
                 <part ref="task.output.value"/>
               </parts>
+              <casts>
+                <cast to="Reference"/>
+              </casts>
               <targets>
                 <target resource="Account"/>
                 <target resource="ActivityDefinition"/>

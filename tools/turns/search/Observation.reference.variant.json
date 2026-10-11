@@ -1,0 +1,1 @@
+{"resourceType":"Observation","status":"final","code":{"coding":[{"system":"urn:local","code":"sequence"}]},"subject":{"reference":"Patient/p2"},"valueReference":{"reference":"MolecularSequence/m1"}}

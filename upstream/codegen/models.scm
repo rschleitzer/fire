@@ -86,6 +86,79 @@
 (define (path-middle-access parts)
     (apply $ (map (lambda (part) ($ "[\"" (part-field-name part) "\"]?")) (path-middle-parts parts))))
 
+; -------------------------------------------------------------------
+; A search on ONE type of a choice property: its expression narrows
+; value[x] by ofType, which the model keeps as the cast of the path.
+; String, token and reference searches of that kind are read by walking
+; every path (model-cast-section); the predicates are here because the
+; repository asks them too.
+; -------------------------------------------------------------------
+
+(define (search-path-nodes search)
+    (let ((paths-node (select-children "paths" search)))
+        (if (node-list-empty? paths-node) '()
+            (node-list->list (select-children "path" (node-list-first paths-node))))))
+
+(define (path-part-nodes path)
+    (let ((parts-node (select-children "parts" path)))
+        (if (node-list-empty? parts-node) '()
+            (node-list->list (select-children "part" (node-list-first parts-node))))))
+
+(define (part-property part)
+    (let ((ref (% "ref" part)))
+        (if ref
+            (let ((prop (element-with-id ref)))
+                (if (and prop (not (node-list-empty? prop))) prop #f))
+            #f)))
+
+; The type a path is cast to, or #f.
+(define (path-cast path)
+    (let ((casts-node (select-children "casts" path)))
+        (if (node-list-empty? casts-node) #f
+            (let ((cast-nodes (select-children "cast" (node-list-first casts-node))))
+                (if (node-list-empty? cast-nodes) #f
+                    (% "to" (node-list-first cast-nodes)))))))
+
+(define (path-is-cast? path)
+    (and (path-cast path)
+         (let loop ((ps (path-part-nodes path)))
+             (cond ((null? ps) #f)
+                   ((let ((prop (part-property (car ps))))
+                        (and prop (property-has-variants? prop))) #t)
+                   (else (loop (cdr ps)))))))
+
+(define (search-is-cast? search)
+    (and (member (% "type" search) '("string" "token" "reference"))
+         (let loop ((ps (search-path-nodes search)))
+             (cond ((null? ps) #f)
+                   ((path-is-cast? (car ps)) #t)
+                   (else (loop (cdr ps)))))))
+
+; The JSON keys of a path, first to last; a choice property under its name
+; for the type the path is cast to (value[x] as CodeableConcept:
+; valueCodeableConcept).
+(define (cast-path-keys path)
+    (let ((cast (path-cast path)))
+        (map (lambda (part)
+                (let* ((prop (part-property part))
+                       (nm (if prop (% "name" prop) "")))
+                    (if (and prop cast (property-has-variants? prop))
+                        ($ nm (first-letter-upcase cast))
+                        nm)))
+             (path-part-nodes path))))
+
+; What stands at the end of a path: the type cast to when the path ends at
+; the choice, else the last property's own.
+(define (cast-path-leaf path)
+    (let* ((parts (path-part-nodes path))
+           (last-prop (if (null? parts) #f (part-property (car (reverse parts)))))
+           (cast (path-cast path)))
+        (cond
+            ((and last-prop cast (property-has-variants? last-prop)) cast)
+            ((and last-prop (% "ref" last-prop)) (% "ref" last-prop))
+            ((and last-prop (% "type" last-prop)) (% "type" last-prop))
+            (else "string"))))
+
 ; Get the last property in a multi-part path
 (define (search-property-last search)
     (let ((parts (search-path-parts search)))
@@ -158,10 +231,11 @@ namespace " (project-name) ".Search;
 
 (define (model-search-extractor rn resource inline-list all-searches has-history)
     (let* ((table-search-list (node-list->list (table-searches resource)))
-           (string-searches (filter (lambda (s) (string=? "string" (% "type" s))) table-search-list))
-           (token-searches (filter (lambda (s) (and (string=? "token" (% "type" s)) (not (search-is-inline? s)))) table-search-list))
+           (cast-searches (filter (lambda (s) (and (search-is-cast? s) (not (search-is-inline? s)))) table-search-list))
+           (string-searches (filter (lambda (s) (and (string=? "string" (% "type" s)) (not (search-is-cast? s)))) table-search-list))
+           (token-searches (filter (lambda (s) (and (string=? "token" (% "type" s)) (not (search-is-inline? s)) (not (search-is-cast? s)))) table-search-list))
            (date-searches (filter (lambda (s) (and (string=? "date" (% "type" s)) (not (search-is-inline-instant? s)))) table-search-list))
-           (ref-searches (filter (lambda (s) (string=? "reference" (% "type" s))) table-search-list))
+           (ref-searches (filter (lambda (s) (and (string=? "reference" (% "type" s)) (not (search-is-cast? s)))) table-search-list))
            (number-searches (filter (lambda (s) (string=? "number" (% "type" s))) table-search-list))
            (quantity-searches (filter (lambda (s) (string=? "quantity" (% "type" s))) table-search-list)))
         ($"public static class " rn "SearchExtractor
@@ -174,6 +248,7 @@ namespace " (project-name) ".Search;
     (model-ref-section rn ref-searches)
     (model-number-section rn number-searches)
     (model-quantity-section rn quantity-searches)
+    (model-cast-section rn cast-searches)
     (model-helpers rn)
 "}
 ")))
@@ -1312,6 +1387,111 @@ namespace " (project-name) ".Search;
 
     private static string? QuantityText(JsonNode? node) =>
         node is JsonValue text && text.TryGetValue(out string? s) ? s : null;
+
+")))
+
+; -------------------------------------------------------------------
+; Searches on one type of a choice property (search-is-cast?): every path
+; walked, backbone arrays flattened, and what stands at its end read as a
+; string, a reference, or a token -- the codings of a CodeableConcept, a
+; Coding, or a plain value.
+; -------------------------------------------------------------------
+
+(define (cast-path-adder search path)
+    (let ((leaf (downcase-string (cast-path-leaf path))))
+        (case (% "type" search)
+            (("string") "AddReachedText")
+            (("reference") "AddReachedReference")
+            (else (cond ((string=? "codeableconcept" leaf) "AddReachedConcept")
+                        ((string=? "coding" leaf) "AddReachedCoding")
+                        (else "AddReachedCode"))))))
+
+; The statements of a search, one for each path, each once.
+(define (cast-path-statements search)
+    (let loop ((ps (search-path-nodes search)) (seen '()))
+        (if (null? ps) (reverse seen)
+            (let ((line ($"        foreach (var node in Reach(content, " (quantity-path-literal (cast-path-keys (car ps))) "))
+            " (cast-path-adder search (car ps)) "(results, node);
+")))
+                (loop (cdr ps) (if (member line seen) seen (cons line seen)))))))
+
+(define (model-cast-section rn searches)
+    (if (null? searches) ""
+        ($"    // -- Search params on one type of a choice --
+
+"
+            (apply $ (map (lambda (s)
+                (let* ((sn (% "name" s))
+                       (method-name ($ "Extract" (kebab-to-pascal sn)))
+                       (string? (string=? "string" (% "type" s))))
+                    ($"    public static List<""" (if string? "string" "(string?, string?)") "> " method-name "(JsonNode content)
+    {
+        var results = new List<""" (if string? "string" "(string?, string?)") ">();
+"
+                        (apply $ (cast-path-statements s))
+"        return results;
+    }
+
+")))
+                searches))
+"    private static List<""JsonNode> Reach(JsonNode? node, string[] path)
+    {
+        var found = new List<""JsonNode>();
+        Reach(node, path, 0, found);
+        return found;
+    }
+
+    private static void Reach(JsonNode? node, string[] path, int at, List<""JsonNode> found)
+    {
+        if (node == null) return;
+        if (node is JsonArray arr)
+        {
+            foreach (var item in arr)
+                Reach(item, path, at, found);
+            return;
+        }
+        if (at == path.Length)
+        {
+            found.Add(node);
+            return;
+        }
+        if (node is JsonObject obj)
+            Reach(obj[path[at]], path, at + 1, found);
+    }
+
+    private static string? ReachedText(JsonNode? node) =>
+        node is JsonValue text && text.TryGetValue(out string? s) ? s : null;
+
+    private static void AddReachedText(List<""string> results, JsonNode node)
+    {
+        var text = ReachedText(node);
+        if (text != null) results.Add(text);
+    }
+
+    private static void AddReachedReference(List<""(string?, string?)> results, JsonNode node)
+    {
+        if (node is JsonObject) AddReference(results, node);
+    }
+
+    private static void AddReachedConcept(List<""(string?, string?)> results, JsonNode node)
+    {
+        if (node is not JsonObject concept || concept[\"coding\"] is not JsonArray codings) return;
+        foreach (var coding in codings)
+            if (coding != null) AddReachedCoding(results, coding);
+    }
+
+    private static void AddReachedCoding(List<""(string?, string?)> results, JsonNode node)
+    {
+        if (node is JsonObject coding)
+            results.Add((ReachedText(coding[\"system\"]), ReachedText(coding[\"code\"])));
+    }
+
+    private static void AddReachedCode(List<""(string?, string?)> results, JsonNode node)
+    {
+        if (node is not JsonValue value) return;
+        if (value.TryGetValue(out string? text)) results.Add((null, text));
+        else if (value.TryGetValue(out bool flag)) results.Add((null, flag ? \"true\" : \"false\"));
+    }
 
 ")))
 

@@ -1164,6 +1164,23 @@ class Program
         return paths;
     }
 
+    static string StripOuterParentheses(string expr)
+    {
+        expr = expr.Trim();
+        while (expr.Length >= 2 && expr[0] == '(')
+        {
+            int depth = 0, close = -1;
+            for (int i = 0; i < expr.Length; i++)
+            {
+                if (expr[i] == '(') depth++;
+                else if (expr[i] == ')' && --depth == 0) { close = i; break; }
+            }
+            if (close != expr.Length - 1) break;
+            expr = expr[1..^1].Trim();
+        }
+        return expr;
+    }
+
     static SearchPath? ParseSinglePath(
         string expr, string resourceName,
         SearchParameterDef sp, Dictionary<string, Property> dictProperty)
@@ -1173,8 +1190,9 @@ class Program
         string? targetResourceType = null;
         var currentPath = resourceName.ToLower();
 
-        // Handle parentheses
-        expr = expr.Trim('(', ')');
+        // Handle parentheses: the pairs around the whole expression, and no
+        // other -- the one that closes an ofType(...) at its end stays
+        expr = StripOuterParentheses(expr);
 
         // Strip .where(resolve() is ResourceType) pattern
         var whereResolveIdx = expr.IndexOf(".where(resolve() is ");
@@ -1196,12 +1214,19 @@ class Program
         var asMethodIdx = expr.IndexOf(".as(");
         var asSpaceIdx = expr.IndexOf(" as ");
 
+        // What follows the cast (`.text` in value.ofType(CodeableConcept).text)
+        // is a path into the type cast to
+        string castTail = "";
         if (ofTypeIdx >= 0)
         {
             var baseExpr2 = expr[..ofTypeIdx];
             var castStart = ofTypeIdx + 8;
             var castEnd = expr.IndexOf(')', castStart);
-            if (castEnd >= 0) castType = expr[castStart..castEnd];
+            if (castEnd >= 0)
+            {
+                castType = expr[castStart..castEnd];
+                castTail = expr[(castEnd + 1)..];
+            }
             expr = baseExpr2;
         }
         else if (asMethodIdx >= 0)
@@ -1209,7 +1234,11 @@ class Program
             var baseExpr2 = expr[..asMethodIdx];
             var castStart = asMethodIdx + 4;
             var castEnd = expr.IndexOf(')', castStart);
-            if (castEnd >= 0) castType = expr[castStart..castEnd];
+            if (castEnd >= 0)
+            {
+                castType = expr[castStart..castEnd];
+                castTail = expr[(castEnd + 1)..];
+            }
             expr = baseExpr2;
         }
         else if (asSpaceIdx >= 0)
@@ -1312,7 +1341,17 @@ class Program
         }
 
         if (castType != null)
+        {
             castVec.Add(new Cast { To = castType });
+            var castPath = castType.ToLower();
+            foreach (var tail in castTail.Split('.', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var tailId = $"{castPath}.{tail.ToLower()}";
+                if (!dictProperty.ContainsKey(tailId)) break;
+                parts.Add(new Part { RefAttr = tailId });
+                castPath = tailId;
+            }
+        }
 
         var casts = castVec.Count > 0 ? castVec : null;
 
