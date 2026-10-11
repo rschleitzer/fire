@@ -1337,7 +1337,6 @@ public class "rn"Repository : I"rn"Repository
         }
 ") "")
 "
-
         // Find the most recent history entry - the DELETE row included, because it is the
         // version the resource stood in when it was deleted.
         "rn"Resource? previous = null;
