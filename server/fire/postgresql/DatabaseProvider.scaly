@@ -64,7 +64,7 @@ define PostgreSqlProvider
     ; own text when the database is empty -- at a version this software
     ; knows. Then every thread's pool is told where the server is. False
     ; when any of it fails.
-    procedure initialize(mutable this, software_version: Slice[u8]) returns bool
+    procedure initialize(this, software_version: Slice[u8]) returns bool
     {
         var reason Array[u8]()
         var h String(host)
