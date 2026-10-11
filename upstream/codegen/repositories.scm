@@ -1407,17 +1407,21 @@ public class "rn"Repository : I"rn"Repository
 "
     (open-conn-tx db)"
 
-        // Check resource doesn't already exist
+        // Check resource doesn't already exist. The reader is closed before the
+        // rollback: rolling back under an open reader threw, and a resource that
+        // is there was answered with 503 instead of not-found.
+        bool exists;
         await using (var cmd = "(new-cmd db)"
             \""(db-select-top1 db)" 1 FROM "(tbl-public rn db)" WHERE id = "(pp 1 db) (db-trailing-limit1 db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                if (txScope == null) await tx.RollbackAsync();
-                return null; // Already exists, not deleted
-            }
+            exists = await reader.ReadAsync();
+        }
+        if (exists)
+        {
+            if (txScope == null) await tx.RollbackAsync();
+            return null; // Already exists, not deleted
         }
 
         // Find the latest history entry, the DELETE row included: it carries the state the

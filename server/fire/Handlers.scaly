@@ -29,6 +29,8 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.delete(pattern(page, type, "/{id}"), &resource_remove)
         app.put(pattern(page, type, ""), &resource_put_conditional)
         app.patch(pattern(page, type, "/{id}"), &resource_patch)
+        app.post(pattern(page, type, "/{id}/$undelete"), &resource_undelete)
+        app.put(pattern(page, type, "/_history/{id}"), &resource_import)
         app.delete(pattern(page, type, ""), &resource_remove_conditional)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
         i := i + 1
@@ -595,6 +597,71 @@ procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response
     }
     put_bytes(&out, "]")
     res.send("application/json; charset=utf-8", out.as_slice())
+}
+
+; POST /fire/<type>/{id}/$undelete: a deleted resource back, as upstream's
+; UndeleteAsync -- the state its last history row holds (the DELETE row has
+; what it was when it was deleted) as a new version. A resource that is
+; there, or that never was, is not found.
+procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    let id req.param("id")
+    var message Array[u8]()
+    message.add(type)
+    put_bytes(&message, "/")
+    message.add(id)
+    put_bytes(&message, " not found or not deleted")
+    var current Array[u8]()
+    let there resource_select(0, type, id, 0, &current)
+    if there.status = FAILED
+        return send_unavailable(res)
+    if there.status = STORED
+        return send_error(res, "not-found", message.as_slice(), 404)
+    var found Array[u8]()
+    var rows Array[i64]()
+    let last resource_history(0, type, id, 1, 0, &found, &rows)
+    if last.status <> STORED
+        return send_unavailable(res)
+    if rows.length = 0
+        return send_error(res, "not-found", message.as_slice(), 404)
+    let parsed JsonValue.parse(found.as_slice().subslice(rows[6] as size_t, (rows[6] + rows[7]) as size_t))
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+    var content Array[u8]()
+    let stored resource_create(0, type, parsed.value, id, true, &content)
+    if stored.status <> STORED
+        return send_unavailable(res)
+    version_fields(res, "", type, id, stored.version_id, stored.seconds)
+    send_resource(res, content.as_slice())
+}
+
+; PUT /fire/<type>/_history/{id}: a version taken in as it comes, as
+; upstream's ImportVersion -- created under the id when there is none, else
+; the next version. Nothing of it is checked; the answer is empty.
+procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+{
+    let type type_of(req)
+    let id req.param("id")
+    let parsed JsonValue.parse(req.body)
+    if parsed.ok() = false or parsed.value.is_object() = false
+        return send_error(res, "invalid", "Invalid JSON", 400)
+    var current Array[u8]()
+    let there resource_select(0, type, id, 0, &current)
+    if there.status = FAILED
+        return send_unavailable(res)
+    var content Array[u8]()
+    var stored StoreResult(FAILED, 0, 0)
+    if there.status = STORED
+        stored := resource_update(0, type, parsed.value, id, version_of(""), &content)
+    else
+        stored := resource_create(0, type, parsed.value, id, true, &content)
+    if stored.status = UNREADABLE
+        return send_error(res, "exception", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 500)
+    if stored.status <> STORED
+        return send_unavailable(res)
+    res.set_status(200)
+    res.send("", "")
 }
 
 ; DELETE /fire/<type>/{id}

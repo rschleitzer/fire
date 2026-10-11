@@ -62,3 +62,24 @@ GET Patient?identifier=urn:steps|zz{S}-patch&gender=female&death-date=1980-01-02
 PATCH Patient/zz{S}-nobody steps/patch/replace.json
 DELETE Patient/zz{S}-patch
 PATCH Patient/zz{S}-patch steps/patch/replace.json
+
+# $undelete
+PUT Patient/zz{S}-undel steps/patient-undel.json
+POST Patient/zz{S}-undel/$undelete
+PUT Patient/zz{S}-undel steps/patient-undel2.json
+DELETE Patient/zz{S}-undel
+POST Patient/zz{S}-undel/$undelete
+GET Patient/zz{S}-undel
+GET Patient/zz{S}-undel/_history
+GET Patient?identifier=urn:steps|zz{S}-undel&gender=female
+POST Patient/zz{S}-undel/$undelete
+POST Patient/zz{S}-never/$undelete
+
+# a version taken in: PUT <Type>/_history/{id}
+PUT Patient/_history/zz{S}-imp steps/patient-imp.json
+GET Patient/zz{S}-imp
+PUT Patient/_history/zz{S}-imp steps/patient-undel2.json
+GET Patient/zz{S}-imp
+PUT Patient/_history/zz{S}-imp steps/broken.json
+PUT Patient/_history/zz{S}-imp observation.json
+GET Patient/zz{S}-imp/_history
