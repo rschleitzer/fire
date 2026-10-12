@@ -438,3 +438,10 @@ FILE /nope
 FILE /css/../index.html
 FILE /fire/index.html
 FILE /healthz
+FILE /patient.html
+FILE /resourcelist.html
+FILE /documentation.html
+FILE /design.html
+FILE /js/OperationOutcome.js
+FILE /js/Observation.js
+FILE /css/project.css

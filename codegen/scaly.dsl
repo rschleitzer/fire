@@ -10,6 +10,11 @@
 <!ENTITY migration      SYSTEM "../upstream/codegen/migration.scm">
 <!ENTITY dbupgrade      SYSTEM "../upstream/codegen/dbupgrade.scm">
 <!ENTITY models         SYSTEM "../upstream/codegen/models.scm">
+<!-- the pages and scripts of the web root: the same whatever serves them -->
+<!ENTITY boilerplate    SYSTEM "../upstream/codegen/boilerplate.scm">
+<!ENTITY bundlejs       SYSTEM "../upstream/codegen/bundlejs.scm">
+<!ENTITY js             SYSTEM "../upstream/codegen/js.scm">
+<!ENTITY html           SYSTEM "../upstream/codegen/html.scm">
 <!ENTITY model          SYSTEM "model.scm">
 <!ENTITY search         SYSTEM "search.scm">
 
@@ -23,6 +28,10 @@
 &migration;
 &dbupgrade;
 &models;
+&boilerplate;
+&bundlejs;
+&js;
+&html;
 &model;
 &search;
 
@@ -33,8 +42,31 @@
             (make directory path: (downcase-string (fhir-name))
                 (sosofo-append
                     (scaly-model-file)
-                    (process-node-list (select-children "resources" (current-node))))))))
+                    (process-node-list (select-children "resources" (current-node)))))
+            (with-mode webroot
+                (process-node-list (select-children "resources" (current-node)))))))
 
 ; upstream's schema functions walk the children of the node they are called
 ; at: the resources
 (element resources (scaly-script-files))
+
+; The web root, as upstream's rules lay it out: the scripts every page
+; loads, a script and a page for each active resource, the list of them.
+(mode webroot
+    (element resources
+        (make directory path: "wwwroot"
+            (sosofo-append
+                (make directory path: "js"
+                    (sosofo-append
+                        (bundle-js)
+                        (operationoutcome-js)
+                        (js-elements-file)))
+                (html-resourcelist-file)
+                (process-children))))
+    (element resource
+        (if (active? (current-node))
+            (sosofo-append
+                (make directory path: "js" (js-resource-file))
+                (html-documentation-file))
+            (empty-sosofo)))
+    (default (empty-sosofo)))

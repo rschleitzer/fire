@@ -150,11 +150,11 @@ start_server() {
   # the seed data both servers load into a database they create, and the
   # secret of the reseed route
   export SeedDataPath="$ROOT/tools/turns/seed"
-  export ASPNETCORE_WEBROOT="$ROOT/upstream/server/wwwroot"
   export ReseedSecret=turns-secret
   export externalUrl="$BASE/fire"
   if [ "$1" = scaly ]; then
-    "$ROOT/server/build/fire" > "$WORK/$1.server.log" 2>&1 &
+    # each server its own web root, written by its own generator
+    ASPNETCORE_WEBROOT="$ROOT/server/wwwroot" "$ROOT/server/build/fire" > "$WORK/$1.server.log" 2>&1 &
   else
     (cd "$ROOT/upstream/server" && exec dotnet bin/Debug/net10.0/Fire.dll) > "$WORK/$1.server.log" 2>&1 &
   fi
