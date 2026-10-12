@@ -430,28 +430,28 @@
 
 ; Helper to get DROP INDEX prefix with schema for a given db
 (define (drop-index-prefix schema db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($"DROP INDEX IF EXISTS \"" schema "\"."))
         ((SqlServer) ($"DROP INDEX IF EXISTS [" schema "]."))
-        ((Sqlite) ($"DROP INDEX IF EXISTS " schema "_"))))
+        ((Sqlite) ($"DROP INDEX IF EXISTS " schema "_"))))))
 
 ; Drop a public-table index
 (define (drop-public-ix ix-name rn db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite) ($"DROP INDEX IF EXISTS " ix-name ";
 "))
         ((SqlServer) ($"DROP INDEX IF EXISTS " ix-name " ON " (db-public-table rn db) ";
-"))))
+"))))))
 
 ; Drop a schema-table index
 (define (drop-schema-ix ix-name schema table db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($"DROP INDEX IF EXISTS \"" schema "\"." ix-name ";
 "))
         ((Sqlite) ($"DROP INDEX IF EXISTS " ix-name ";
 "))
         ((SqlServer) ($"DROP INDEX IF EXISTS " ix-name " ON [" schema "].[" table "];
-"))))
+"))))))
 
 ; Generate CREATE INDEX SQL for all resources
 (define (create-indexes-sql db)

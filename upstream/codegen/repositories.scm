@@ -15,57 +15,65 @@
 
 ; Parameter placeholder: $1 or @p1
 (define (pp n db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($ "$"(number->string n)))
-        ((SqlServer Sqlite) ($ "@p"(number->string n)))))
+        ((SqlServer Sqlite) ($ "@p"(number->string n)))))))
 
 ; Parameter prefix for C# interpolated strings: $ or @p
 (define (pp-prefix db)
-    (case db ((PostgreSql)"$") ((SqlServer Sqlite)"@p")))
+    (db3 db (lambda (db) (case db ((PostgreSql)"$") ((SqlServer Sqlite)"@p")))))
 
 ; Table name: schema.table or schema_table (with quoting escaped for C# strings)
 (define (tbl schema table db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($ "\\\"" schema "\\\"." table))
         ((SqlServer) ($ "[" schema "]." table))
-        ((Sqlite) ($ schema "_" table))))
+        ((Sqlite) ($ schema "_" table))))))
 
 ; Public table name: quoted resource name (escaped for C# strings)
 (define (tbl-public rn db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite) ($ "\\\""rn"\\\""))
-        ((SqlServer) ($ "["rn"]"))))
+        ((SqlServer) ($ "["rn"]"))))))
 
 ; Table name for C# interpolated strings: schema.{var} or schema_{var}
 (define (tbl-interp schema var-name db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($ "\\\"" schema "\\\".{" var-name "}"))
         ((SqlServer) ($ "[" schema "].{" var-name "}"))
-        ((Sqlite) ($ schema "_{" var-name "}"))))
+        ((Sqlite) ($ schema "_{" var-name "}"))))))
 
 ; SELECT lock suffix
 (define (select-lock db)
-    (case db ((PostgreSql)" FOR UPDATE") ((SqlServer Sqlite)"")))
+    (db3 db (lambda (db) (case db ((PostgreSql)" FOR UPDATE") ((SqlServer Sqlite)"")))))
 
 ; Connection opening
 (define (open-conn db)
-    (case db
+    (case db ((Any)
+        "        await using var conn = await Db.OpenAsync();")
+    (else (case db
         ((PostgreSql)"        await using var conn = await _dataSource.OpenConnectionAsync();")
         ((SqlServer)"        await using var conn = new SqlConnection(_connectionString);
         await conn.OpenAsync();")
         ((Sqlite)"        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();")))
+        await conn.OpenAsync();")))))
+
+; The same where the generator wrote the alias: new CmdType(
+(define (new-cmd-alias db)
+    (case db ((Any) "Db.Cmd(") (else "new CmdType(")))
 
 ; New command: new XxxCommand(
 (define (new-cmd db)
-    ($ "new "(db-command-type db)"("))
+    (case db ((Any)
+        "Db.Cmd(")
+    (else ($ "new "(db-command-type db)"("))))
 
 ; Param type name
 (define (param-type db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql)"NpgsqlParameter")
         ((SqlServer)"SqlParameter")
-        ((Sqlite)"SqliteParameter")))
+        ((Sqlite)"SqliteParameter")))))
 
 ; New param: new NpgsqlParameter { Value = xxx }
 (define (new-param value-expr db)
@@ -73,39 +81,48 @@
 
 ; New timestamp param
 (define (new-ts-param value-expr db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($ "new NpgsqlParameter { Value = " value-expr ", NpgsqlDbType = NpgsqlDbType.TimestampTz }"))
         ((SqlServer) ($ "new SqlParameter { Value = " value-expr ", SqlDbType = SqlDbType.DateTimeOffset }"))
-        ((Sqlite) ($ "new SqliteParameter { Value = " value-expr " }"))))
+        ((Sqlite) ($ "new SqliteParameter { Value = " value-expr " }"))))))
 
 ; Param type copy in search (for reusing params in count vs select query)
 (define (param-copy-typed db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql) ($"
                 if (parameters[i].NpgsqlDbType != NpgsqlDbType.Unknown)
                     p.NpgsqlDbType = parameters[i].NpgsqlDbType;"))
-        ((SqlServer Sqlite)"")))
+        ((SqlServer Sqlite)"")))))
 
 ; AddWithValue call - positional for PG, named for others
 (define (awv n expr db)
-    (case db
+    (case db ((Any)
+        ($"
+            Db.Add(cmd, "(number->string n)", " expr ");"))
+    (else (case db
         ((PostgreSql) ($"
             cmd.Parameters.AddWithValue(" expr ");"))
         ((SqlServer Sqlite) ($"
-            cmd.Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+            cmd.Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
 
 ; Reader type name
 (define (reader-type db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql)"NpgsqlDataReader")
         ((SqlServer)"SqlDataReader")
-        ((Sqlite)"SqliteDataReader")))
+        ((Sqlite)"SqliteDataReader")))))
 
 ; Connection + transaction opening. Inside a DbTransactionScope (transaction bundle) the method
 ; uses the connection and transaction of the scope and owns neither; every commit and rollback in
 ; such a method is guarded with txScope == null, the scope commits or rolls back once at the end.
 (define (open-conn-tx db)
-    (case db
+    (case db ((Any)
+        "        var txScope = DbTransactionScope.Current;
+        await using var ownConn = txScope == null ? await Db.OpenAsync() : null;
+        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
+        await using var ownTx = txScope == null ? await conn.BeginTransactionAsync() : null;
+        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")
+    (else (case db
         ((PostgreSql)"        var txScope = DbTransactionScope.Current;
         await using var ownConn = txScope == null ? await _dataSource.OpenConnectionAsync() : null;
         var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
@@ -122,14 +139,19 @@
         if (ownConn != null) await ownConn.OpenAsync();
         var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
         using var ownTx = txScope == null ? conn.BeginTransaction() : null;
-        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")))
+        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")))))
 
 ; Connection opening for the reads a transaction bundle can reach (read, version read, search,
 ; delete without history). Inside a DbTransactionScope they run on its connection and within its
 ; transaction, so they see the writes of earlier bundle entries; SqlClient and Microsoft.Data.Sqlite
 ; also reject a command without the pending transaction. Outside a scope tx is null.
 (define (open-conn-scoped db)
-    ($"        var txScope = DbTransactionScope.Current;
+    (case db ((Any)
+        "        var txScope = DbTransactionScope.Current;
+        await using var ownConn = txScope == null ? await Db.OpenAsync() : null;
+        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
+        var tx = (TxType?)txScope?.Transaction;")
+    (else ($"        var txScope = DbTransactionScope.Current;
 "
     (case db
         ((PostgreSql)"        await using var ownConn = txScope == null ? await _dataSource.OpenConnectionAsync() : null;
@@ -141,77 +163,83 @@
         if (ownConn != null) await ownConn.OpenAsync();
 "))
 "        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
-        var tx = (TxType?)txScope?.Transaction;"))
+        var tx = (TxType?)txScope?.Transaction;"))))
 
 ; Table-level lock hint (goes after table name in SQL Server)
 (define (table-lock-hint db)
-    (case db ((SqlServer)" WITH (UPDLOCK, ROWLOCK)") (else "")))
+    (db3 db (lambda (db) (case db ((SqlServer)" WITH (UPDLOCK, ROWLOCK)") (else "")))))
 
 ; Transaction type name
 (define (db-transaction-type db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql)"NpgsqlTransaction")
         ((SqlServer)"SqlTransaction")
-        ((Sqlite)"SqliteTransaction")))
+        ((Sqlite)"SqliteTransaction")))))
 
 ; Single AddWithValue line (no leading newline), with configurable command name
 (define (add-param-line-for cmd-name n expr db)
-    (case db
+    (case db ((Any)
+        ($"            Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
+    (else (case db
         ((PostgreSql) ($"            " cmd-name ".Parameters.AddWithValue(" expr ");"))
         ; SQL Server: through AddValue, which keeps a time's precision
         ((SqlServer) ($"            AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"            " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ((Sqlite) ($"            " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
 
 (define (add-param-line n expr db) (add-param-line-for "cmd" n expr db))
 
 ; 8-space indent version for non-block contexts (Read, VRead, etc.)
 (define (add-param-8-for cmd-name n expr db)
-    (case db
+    (case db ((Any)
+        ($"        Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
+    (else (case db
         ((PostgreSql) ($"        " cmd-name ".Parameters.AddWithValue(" expr ");"))
         ((SqlServer) ($"        AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"        " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ((Sqlite) ($"        " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
 
 (define (add-param-8 n expr db) (add-param-8-for "cmd" n expr db))
 
 
 ; Bind parameters from a runtime list of objects — positional for PG, named for others
 (define (bind-args-list cmd-name args-name db)
-    (case db
+    (case db ((Any)
+        ($"            for (int __i = 0; __i < " args-name ".Count; __i++) Db.Add(" cmd-name ", __i + 1, " args-name "[__i]);"))
+    (else (case db
         ((PostgreSql)
             ($"            foreach (var __a in " args-name ") " cmd-name ".Parameters.AddWithValue(__a);"))
         ((SqlServer Sqlite)
-            ($"            for (int __i = 0; __i < " args-name ".Count; __i++) " cmd-name ".Parameters.AddWithValue($\"@p{__i + 1}\", " args-name "[__i]);"))))
+            ($"            for (int __i = 0; __i < " args-name ".Count; __i++) " cmd-name ".Parameters.AddWithValue($\"@p{__i + 1}\", " args-name "[__i]);"))))))
 
 ; Pagination: LIMIT/OFFSET vs OFFSET/FETCH
 ; count-expr and offset-expr are C# interpolation expressions like "count" or "offset"
 (define (db-paginate count-expr offset-expr db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite) ($ "LIMIT {" count-expr "} OFFSET {" offset-expr "}"))
-        ((SqlServer) ($ "OFFSET {" offset-expr "} ROWS FETCH NEXT {" count-expr "} ROWS ONLY"))))
+        ((SqlServer) ($ "OFFSET {" offset-expr "} ROWS FETCH NEXT {" count-expr "} ROWS ONLY"))))))
 
 ; Pagination for SQL params (e.g. $1, @p1)
 (define (db-paginate-params count-param offset-param db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite) ($ "LIMIT " count-param " OFFSET " offset-param))
-        ((SqlServer) ($ "OFFSET " offset-param " ROWS FETCH NEXT " count-param " ROWS ONLY"))))
+        ((SqlServer) ($ "OFFSET " offset-param " ROWS FETCH NEXT " count-param " ROWS ONLY"))))))
 
 ; Simple LIMIT 1 (used after ORDER BY)
 (define (db-limit-1 db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite)"LIMIT 1")
-        ((SqlServer)"OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY")))
+        ((SqlServer)"OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY")))))
 
 ; SELECT [TOP 1] prefix for subqueries without ORDER BY
 (define (db-select-top1 db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite)"SELECT")
-        ((SqlServer)"SELECT TOP 1")))
+        ((SqlServer)"SELECT TOP 1")))))
 
 ; Trailing LIMIT 1 for subqueries without ORDER BY (empty for SqlServer since TOP 1 is used)
 (define (db-trailing-limit1 db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((PostgreSql Sqlite)" LIMIT 1")
-        ((SqlServer)"")))
+        ((SqlServer)"")))))
 
 ; ===================================================================
 ; Helper functions
@@ -260,7 +288,13 @@
 
 ; AddWithValue calls for inline params
 (define (repo-addwithvalue inline-list var-prefix start-idx db)
-    (let loop ((items inline-list) (idx start-idx))
+    (case db ((Any)
+        (let loop ((items inline-list) (idx start-idx))
+            (if (null? items)""
+                ($"
+            Db.AddValue(cmd, "(number->string idx)", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"
+                    (loop (cdr items) (+ idx 1))))))
+    (else (let loop ((items inline-list) (idx start-idx))
         (if (null? items)""
             ($ (case db
                 ((PostgreSql) ($"
@@ -269,7 +303,7 @@
             AddValue(cmd, \""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
                 ((Sqlite) ($"
             cmd.Parameters.AddWithValue(\""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);")))
-                (loop (cdr items) (+ idx 1))))))
+                (loop (cdr items) (+ idx 1))))))))
 
 ; Reader column fields for inline params (starting at index 4)
 (define (repo-reader-fields inline-list has-history)
@@ -404,7 +438,16 @@ public interface I"rn"Repository
 ; ===================================================================
 
 (define (repo-db-class-helpers db)
-    ($
+    (case db ((Any)
+        "    // -- DB helpers --
+
+    private static string P(int n) => Db.P(n);
+    private static ParamType NewParam(int index, object value) => Db.Param(index, value);
+    private static ParamType NewTsParam(int index, DateTime value) => Db.TsParam(index, value);
+    private static ParamType CopyParam(ParamType source) => Db.CopyParam(source);
+
+")
+    (else ($
 "    // -- DB helpers --
 
     private static string P(int n) => $\""
@@ -446,11 +489,30 @@ public interface I"rn"Repository
     private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value);
     private static ParamType CopyParam(ParamType source) => new ParamType(source.ParameterName, source.Value);
 
-"))))
+"))))))
 
 ; ===================================================================
 ; Main repository function
 ; ===================================================================
+
+; A resource has ONE repository, for every database (Db picks the dialect when the server
+; starts) -- but Binary, whose bytes lie in a table of their own on PostgreSQL alone: its
+; repositories differ in more than their SQL and are written for each database as before.
+(define (single-repository? rn) (not (string=? rn "Binary")))
+
+(define (repo-folder db content)
+    (case db ((Any) content) (else (make directory path: (db-folder db) content))))
+
+; For the program: Db told which database it is, and a resource's repository made for it.
+; `source` is the C# expression the repositories of db are made with (a data source on
+; PostgreSQL, the connection string elsewhere).
+(define (repo-db-use db source)
+    ($"        " (project-name) ".Repositories.Db.Use" (db-namespace db) "(" source ");
+"))
+(define (repo-new rn db source)
+    (if (single-repository? rn)
+        ($ "new " (project-name) ".Repositories." rn "Repository()")
+        ($ "new " (project-name) ".Repositories." (db-namespace db) "." rn "Repository(" source ")")))
 
 (define (repository)
     (let* ((resource (current-node))
@@ -485,7 +547,7 @@ public interface I"rn"Repository
         (apply sosofo-append
             (repo-interface rn inline-list has-history)
             (map (lambda (db)
-                (make directory path: (db-folder db)
+                (repo-folder db
                 (file ($ rn "Repository.cs")
                     ($
                         (repo-header rn schema inline-list db)
@@ -517,14 +579,33 @@ public interface I"rn"Repository
                         (repo-db-class-helpers db)
                         "}
 "
-                    )))) target-databases)))))
+                    )))) (if (single-repository? rn) '(Any) target-databases))))))
 
 ; ===================================================================
 ; Section: Header + class open + constructor
 ; ===================================================================
 
 (define (repo-header rn schema inline-list db)
-    ($
+    (case db ((Any)
+        ($
+"using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using "(project-name)".Search;
+using "(project-name)".Repositories;
+using ConnType = System.Data.Common.DbConnection;
+using TxType = System.Data.Common.DbTransaction;
+using CmdType = System.Data.Common.DbCommand;
+using ReaderType = System.Data.Common.DbDataReader;
+using ParamType = System.Data.Common.DbParameter;
+
+namespace "(project-name)".Repositories;
+
+// One class for every database: the dialect is Db's, chosen when the server starts.
+public class "rn"Repository : I"rn"Repository
+{
+"))
+    (else ($
 "using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -577,7 +658,7 @@ public class "rn"Repository : I"rn"Repository
         _connectionString = connectionString;
     }
 
-")))))
+")))))))
 
 ; ===================================================================
 ; Section: CreateAsync
@@ -1760,7 +1841,7 @@ public class "rn"Repository : I"rn"Repository
 "
     (open-conn-scoped db)
 "
-        await using (var cmd = new CmdType(countSql, conn, tx))
+        await using (var cmd = "(new-cmd-alias db)"countSql, conn, tx))
         {
             for (int i = 0; i < parameters.Count; i++)
                 cmd.Parameters.Add(parameters[i]);
@@ -1788,7 +1869,7 @@ public class "rn"Repository : I"rn"Repository
         }
 
         var resources = new List<"rn"Resource>();
-        await using (var cmd = new CmdType(selectSql, conn, tx))
+        await using (var cmd = "(new-cmd-alias db)"selectSql, conn, tx))
         {
             for (int i = 0; i < parameters.Count; i++)
                 cmd.Parameters.Add(CopyParam(parameters[i]));
@@ -1957,7 +2038,7 @@ public class "rn"Repository : I"rn"Repository
     (open-conn db)
 "
         int total;
-        await using (var cmd = new CmdType(
+        await using (var cmd = "(new-cmd-alias db)"
             \"SELECT (SELECT COUNT(*) FROM "(tbl-public rn db)" WHERE id = "(pp 1 db)") + (SELECT COUNT(*) FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db)") + (SELECT COUNT(*) FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db)" AND history_operation = 'DELETE')\", conn))
         {
 "(add-param-8 1 "id" db)"
@@ -1978,7 +2059,7 @@ public class "rn"Repository : I"rn"Repository
                   \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db)" AND history_operation = 'DELETE'"(db-union-close db)" \" +
                   \"ORDER BY version_id DESC, history_operation DESC "(db-paginate-params (pp 2 db) (pp 3 db) db) "\""))";
 
-        await using var cmd2 = new CmdType(sql, conn);
+        await using var cmd2 = "(new-cmd-alias db)"sql, conn);
 "(add-param-8-for "cmd2" 1 "id" db)"
 "(add-param-8-for "cmd2" 2 "count" db)"
 "(add-param-8-for "cmd2" 3 "offset" db)
@@ -2014,7 +2095,7 @@ public class "rn"Repository : I"rn"Repository
 "       (open-conn db)
 "
         int total;
-        await using (var cmd = new CmdType(
+        await using (var cmd = "(new-cmd-alias db)"
             \"SELECT (SELECT COUNT(*) FROM "(tbl-public rn db)") + (SELECT COUNT(*) FROM "(tbl schema "resource_history" db)") + (SELECT COUNT(*) FROM "(tbl schema "resource_history" db)" WHERE history_operation = 'DELETE')\", conn))
         {
             total = Convert.ToInt32(await cmd.ExecuteScalarAsync());
@@ -2034,7 +2115,7 @@ public class "rn"Repository : I"rn"Repository
                   \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM "(tbl schema "resource_history" db)" WHERE history_operation = 'DELETE'"(db-union-close db)" \" +
                   \"ORDER BY last_updated DESC, history_operation DESC "(db-paginate-params (pp 1 db) (pp 2 db) db) "\""))";
 
-        await using var cmd2 = new CmdType(sql, conn);
+        await using var cmd2 = "(new-cmd-alias db)"sql, conn);
 "(add-param-8-for "cmd2" 1 "count" db)"
 "(add-param-8-for "cmd2" 2 "offset" db)
 "
@@ -2102,10 +2183,10 @@ public class "rn"Repository : I"rn"Repository
             token-searches))
         (apply $ (map (lambda (s)
             ($"            \""(% "name" s)"\" => \""
-                (case db
+                (db3 db (lambda (db) (case db
                     ((PostgreSql) "TO_CHAR(value_low, 'YYYY-MM-DD')")
                     ((Sqlite)     "STRFTIME('%Y-%m-%d', value_low)")
-                    ((SqlServer)  "FORMAT(value_low, 'yyyy-MM-dd')"))
+                    ((SqlServer)  "FORMAT(value_low, 'yyyy-MM-dd')"))))
                 "\",
 "))
             date-searches))
@@ -2139,15 +2220,10 @@ public class "rn"Repository : I"rn"Repository
 
         if (param == \"_id\" && propTable != null)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
 "
-    (case db
-        ((PostgreSql Sqlite)
-            ($"                $\"SELECT DISTINCT {propColumn} FROM "(tbl-interp schema "propTable" db)" WHERE resource_id = {P(1)} AND {propColumn} IS NOT NULL\", conn);
-"))
-        ((SqlServer)
-            ($"                $\"SELECT DISTINCT {propColumn} FROM "(tbl-interp schema "propTable" db)" WHERE resource_id = {P(1)} AND {propColumn} IS NOT NULL\", conn);
-")))
+    ($"                $\"SELECT DISTINCT {propColumn} FROM "(tbl-interp schema "propTable" db)" WHERE resource_id = {P(1)} AND {propColumn} IS NOT NULL\", conn);
+")
     (add-param-8-for "cmd" 1 "value" db)
 "
             var results = new List<""string>();
@@ -2160,25 +2236,25 @@ public class "rn"Repository : I"rn"Repository
         var paging = (count, offset) switch
         {
             (not null, not null) => "
-    (case db
-        ((PostgreSql Sqlite)
-            ($" $\" LIMIT {count} OFFSET {offset}\","))
-        ((SqlServer)
-            ($" $\" OFFSET {offset} ROWS FETCH NEXT {count} ROWS ONLY\",")))
+    " $\""
+    (db3 db (lambda (db) (case db
+        ((PostgreSql Sqlite) " LIMIT {count} OFFSET {offset}")
+        ((SqlServer) " OFFSET {offset} ROWS FETCH NEXT {count} ROWS ONLY"))))
+    "\","
 "
             (not null, null) => "
-    (case db
-        ((PostgreSql Sqlite)
-            ($" $\" LIMIT {count}\","))
-        ((SqlServer)
-            ($" $\" OFFSET 0 ROWS FETCH NEXT {count} ROWS ONLY\",")))
+    " $\""
+    (db3 db (lambda (db) (case db
+        ((PostgreSql Sqlite) " LIMIT {count}")
+        ((SqlServer) " OFFSET 0 ROWS FETCH NEXT {count} ROWS ONLY"))))
+    "\","
 "
             (null, not null) => "
-    (case db
-        ((PostgreSql Sqlite)
-            ($" $\" LIMIT -1 OFFSET {offset}\","))
-        ((SqlServer)
-            ($" $\" OFFSET {offset} ROWS\",")))
+    " $\""
+    (db3 db (lambda (db) (case db
+        ((PostgreSql Sqlite) " LIMIT -1 OFFSET {offset}")
+        ((SqlServer) " OFFSET {offset} ROWS"))))
+    "\","
 "
             _ => \"\"
         };
@@ -2206,7 +2282,7 @@ public class "rn"Repository : I"rn"Repository
                 whereArgs0.Add($\"{value.ToLowerInvariant()}%\");
             }
 
-            await using var cmd4 = new CmdType(
+            await using var cmd4 = "(new-cmd-alias db)"
                 $\"SELECT DISTINCT resource_id FROM "(tbl-interp schema "paramTable0" db)" WHERE {whereSql0} ORDER BY resource_id{paging}\", conn);
 "
     (bind-args-list "cmd4" "whereArgs0" db)
@@ -2238,7 +2314,7 @@ public class "rn"Repository : I"rn"Repository
                 whereArgs1.Add($\"{value.ToLowerInvariant()}%\");
             }
 
-            await using var cmd2 = new CmdType(
+            await using var cmd2 = "(new-cmd-alias db)"
                 $\"SELECT DISTINCT {propColumn} FROM "(tbl-interp schema "propTable" db)" WHERE {whereSql1} ORDER BY {propColumn}{paging}\", conn);
 "
     (bind-args-list "cmd2" "whereArgs1" db)
@@ -2271,7 +2347,7 @@ public class "rn"Repository : I"rn"Repository
             whereArgs2.Add($\"{value.ToLowerInvariant()}%\");
         }
 
-        await using var cmd3 = new CmdType(
+        await using var cmd3 = "(new-cmd-alias db)"
             $\"SELECT DISTINCT {propColumn} FROM "(tbl-interp schema "propTable" db)" WHERE resource_id IN (SELECT resource_id FROM "(tbl-interp schema "paramTable" db)" WHERE {whereSql2}) AND {propColumn} IS NOT NULL ORDER BY {propColumn}{paging}\", conn);
 "
     (bind-args-list "cmd3" "whereArgs2" db)
@@ -2392,10 +2468,12 @@ public class "rn"Repository : I"rn"Repository
 
 ; AddWithValue line at the indent of the backfill loop.
 (define (add-param-line-20 cmd-name n expr db)
-    (case db
+    (case db ((Any)
+        ($"                    Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
+    (else (case db
         ((PostgreSql) ($"                    " cmd-name ".Parameters.AddWithValue(" expr ");"))
         ((SqlServer) ($"                    AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"                    " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ((Sqlite) ($"                    " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
 
 ; An inline search parameter is a column on the resource table, so there is no table to create -
 ; the column comes with the schema or, for one added later, with the upgrade DDL. What is left is
@@ -2516,10 +2594,12 @@ public class "rn"Repository : I"rn"Repository
 ; last_updated: the DELETE row copies it from the live row, so it names the resource's last
 ; change, and a resource written once and deleted days later was purged at the next run.
 (define (purge-before-param db)
-    (case db
+    (case db ((Any)
+        "Db.TsParam(1, before.Value)")
+    (else (case db
         ((PostgreSql) "new NpgsqlParameter { Value = before.Value, NpgsqlDbType = NpgsqlDbType.TimestampTz }")
         ((SqlServer) "new SqlParameter(\"@p1\", before.Value) { SqlDbType = SqlDbType.DateTime2 }")
-        ((Sqlite) "new SqliteParameter(\"@p1\", before.Value)")))
+        ((Sqlite) "new SqliteParameter(\"@p1\", before.Value)")))))
 
 (define (repo-purge rn schema has-history db)
     (if has-history
@@ -2727,7 +2807,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value_low, value_high) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -2746,7 +2826,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value, system, code, unit) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)}, {P(5)}, {P(6)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -2852,7 +2932,7 @@ public class "rn"Repository : I"rn"Repository
 
         foreach (var table in tables)
         {
-            await using var cmd = new CmdType($\"DELETE FROM "(tbl-interp schema "table" db)" WHERE resource_id = {P(1)}\", conn, tx);
+            await using var cmd = "(new-cmd-alias db)"$\"DELETE FROM "(tbl-interp schema "table" db)" WHERE resource_id = {P(1)}\", conn, tx);
             cmd.Parameters.Add(NewParam(1, resourceId));
             await cmd.ExecuteNonQueryAsync();
         }
@@ -2870,7 +2950,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value) VALUES ({P(1)}, {P(2)}, {P(3)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -2883,7 +2963,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, system, value) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -2895,7 +2975,7 @@ public class "rn"Repository : I"rn"Repository
 
     private static async Task InsertDateIndexAsync(ConnType conn, TxType tx, string table, string resourceId, DateTime low, DateTime high)
     {
-        await using var cmd = new CmdType(
+        await using var cmd = "(new-cmd-alias db)"
             $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value_low, value_high) VALUES (0, {P(1)}, {P(2)}, {P(3)})\", conn, tx);
         cmd.Parameters.Add(NewParam(1, resourceId));
         cmd.Parameters.Add(NewTsParam(2, low));
@@ -2907,7 +2987,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, target_type, target_id, target_version) VALUES ({P(1)}, {P(2)}, {P(3)}, {P(4)}, {P(5)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -2922,7 +3002,7 @@ public class "rn"Repository : I"rn"Repository
     {
         for (int i = 0; i < values.Count; i++)
         {
-            await using var cmd = new CmdType(
+            await using var cmd = "(new-cmd-alias db)"
                 $\"INSERT INTO "(tbl-interp schema "table" db)" (id, resource_id, value) VALUES ({P(1)}, {P(2)}, {P(3)})\", conn, tx);
             cmd.Parameters.Add(NewParam(1, i));
             cmd.Parameters.Add(NewParam(2, resourceId));
@@ -3163,9 +3243,15 @@ public class "rn"Repository : I"rn"Repository
 ; Section: SearchQueryBuilder (one per backend, generated from resources)
 ; ===================================================================
 
+; The builder of the single repositories and Db beside it; a builder for each database is
+; written only for the resources that still have a repository for each (single-repository?).
 (define (search-query-builders)
     (make directory path: "Repositories"
     (apply sosofo-append
+        (file "Db.cs" (db-runtime-cs))
+        (file "SearchQueryBuilder.cs"
+            ($ (sqb-header 'Any) (sqb-body 'Any)"}
+"))
         (map (lambda (db)
             (make directory path: (db-folder db)
             (file "SearchQueryBuilder.cs"
@@ -3173,8 +3259,186 @@ public class "rn"Repository : I"rn"Repository
 "))))
             target-databases))))
 
+(define (db-runtime-cs) ($
+"using System.Data.Common;
+using System.Text;
+
+namespace "(project-name)".Repositories;
+
+public enum DbKind { PostgreSql, Sqlite, SqlServer }
+
+// The database the server runs on, chosen once when it starts. A repository is written once for
+// all three; what differs between them is asked here.
+//
+// Where the three want another TEXT inside an SQL string, the string holds all three between
+// marks --  postgresql  sqlite  sqlserver  -- and Sql takes the one of
+// this database when the command is made. So each database is sent exactly the text a repository
+// of its own would have sent.
+public static class Db
+{
+    public static DbKind Kind { get; private set; }
+    private static Npgsql.NpgsqlDataSource? _dataSource;
+    private static string _connectionString = \"\";
+    private static readonly string[] Named = Enumerable.Range(0, 257).Select(i => \"@p\" + i).ToArray();
+    private static readonly string[] Numbered = Enumerable.Range(0, 257).Select(i => \"$\" + i).ToArray();
+
+    public static void UsePostgreSql(Npgsql.NpgsqlDataSource dataSource) { Kind = DbKind.PostgreSql; _dataSource = dataSource; }
+    public static void UseSqlServer(string connectionString) { Kind = DbKind.SqlServer; _connectionString = connectionString; }
+    public static void UseSqlite(string connectionString) { Kind = DbKind.Sqlite; _connectionString = connectionString; }
+
+    public static async Task<""DbConnection> OpenAsync()
+    {
+        switch (Kind)
+        {
+            case DbKind.PostgreSql:
+                return await _dataSource!.OpenConnectionAsync();
+            case DbKind.SqlServer:
+            {
+                var conn = new Microsoft.Data.SqlClient.SqlConnection(_connectionString);
+                await conn.OpenAsync();
+                return conn;
+            }
+            default:
+            {
+                var conn = new Microsoft.Data.Sqlite.SqliteConnection(_connectionString);
+                await conn.OpenAsync();
+                return conn;
+            }
+        }
+    }
+
+    public static DbCommand Cmd(string sql, DbConnection conn, DbTransaction? tx = null) => Kind switch
+    {
+        DbKind.PostgreSql => new Npgsql.NpgsqlCommand(Sql(sql), (Npgsql.NpgsqlConnection)conn, (Npgsql.NpgsqlTransaction?)tx),
+        DbKind.SqlServer => new Microsoft.Data.SqlClient.SqlCommand(Sql(sql), (Microsoft.Data.SqlClient.SqlConnection)conn, (Microsoft.Data.SqlClient.SqlTransaction?)tx),
+        _ => new Microsoft.Data.Sqlite.SqliteCommand(Sql(sql), (Microsoft.Data.Sqlite.SqliteConnection)conn, (Microsoft.Data.Sqlite.SqliteTransaction?)tx)
+    };
+
+    // The n-th placeholder as the database writes it, and the name its parameter has.
+    public static string P(int n) => Kind == DbKind.PostgreSql
+        ? (n < Numbered.Length ? Numbered[n] : \"$\" + n)
+        : Name(n);
+    private static string Name(int n) => n < Named.Length ? Named[n] : \"@p\" + n;
+
+    // The n-th parameter of a command: by its place on PostgreSQL, by its name elsewhere.
+    public static void Add(DbCommand cmd, int n, object? value)
+    {
+        switch (Kind)
+        {
+            case DbKind.PostgreSql: ((Npgsql.NpgsqlCommand)cmd).Parameters.AddWithValue(value!); break;
+            case DbKind.SqlServer: ((Microsoft.Data.SqlClient.SqlCommand)cmd).Parameters.AddWithValue(Name(n), value); break;
+            default: ((Microsoft.Data.Sqlite.SqliteCommand)cmd).Parameters.AddWithValue(Name(n), value); break;
+        }
+    }
+
+    // The same - but on SQL Server a time as DATETIME2: AddWithValue alone takes a DateTime for
+    // the old DATETIME, whose steps are a 300th of a second, and last_updated and every instant
+    // in a column of its own were stored rounded to that.
+    public static void AddValue(DbCommand cmd, int n, object? value)
+    {
+        if (Kind != DbKind.SqlServer) { Add(cmd, n, value); return; }
+        var p = ((Microsoft.Data.SqlClient.SqlCommand)cmd).Parameters.AddWithValue(Name(n), value);
+        if (value is DateTime) p.SqlDbType = System.Data.SqlDbType.DateTime2;
+    }
+
+    public static DbParameter Param(int index, object value) => Kind switch
+    {
+        DbKind.PostgreSql => new Npgsql.NpgsqlParameter { Value = value },
+        DbKind.SqlServer => new Microsoft.Data.SqlClient.SqlParameter(Name(index), value),
+        _ => new Microsoft.Data.Sqlite.SqliteParameter(Name(index), value)
+    };
+
+    public static DbParameter TsParam(int index, DateTime value) => Kind switch
+    {
+        DbKind.PostgreSql => new Npgsql.NpgsqlParameter { Value = value, NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.TimestampTz },
+        DbKind.SqlServer => new Microsoft.Data.SqlClient.SqlParameter(Name(index), value) { SqlDbType = System.Data.SqlDbType.DateTime2 },
+        _ => new Microsoft.Data.Sqlite.SqliteParameter(Name(index), value)
+    };
+
+    public static DbParameter CopyParam(DbParameter source)
+    {
+        switch (Kind)
+        {
+            case DbKind.PostgreSql:
+            {
+                var from = (Npgsql.NpgsqlParameter)source;
+                var p = new Npgsql.NpgsqlParameter { Value = from.Value };
+                if (from.NpgsqlDbType != NpgsqlTypes.NpgsqlDbType.Unknown)
+                    p.NpgsqlDbType = from.NpgsqlDbType;
+                return p;
+            }
+            case DbKind.SqlServer:
+            {
+                var from = (Microsoft.Data.SqlClient.SqlParameter)source;
+                return new Microsoft.Data.SqlClient.SqlParameter(from.ParameterName, from.Value) { SqlDbType = from.SqlDbType };
+            }
+            default:
+                return new Microsoft.Data.Sqlite.SqliteParameter(source.ParameterName, source.Value);
+        }
+    }
+
+    // A table of a resource's schema; SQLite has no schemas, the schema is the front of the name.
+    public static string SchemaTable(string schema, string table) => Kind switch
+    {
+        DbKind.PostgreSql => \"\\\"\" + schema + \"\\\"\" + \".\" + table,
+        DbKind.SqlServer => \"[\" + schema + \"].\" + table,
+        _ => schema + \"_\" + table
+    };
+
+    private const char Open = '', Next = '', Close = '';
+
+    // sql with, of every marked place, the text of this database. A marked place may lie within
+    // another one's text (a placeholder inside a paging clause).
+    public static string Sql(string sql)
+    {
+        var at = sql.IndexOf(Open);
+        if (at < 0) return sql;
+        var which = (int)Kind;
+        var sb = new StringBuilder(sql.Length);
+        sb.Append(sql, 0, at);
+        Span<""int> part = stackalloc int[16];
+        int depth = 0, skipped = 0, from = at;
+        for (var i = at; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            if (c != Open && c != Next && c != Close) continue;
+            if (skipped == 0) sb.Append(sql, from, i - from);
+            from = i + 1;
+            if (c == Open)
+            {
+                part[depth++] = 0;
+                if (which != 0) skipped++;
+            }
+            else if (c == Next)
+            {
+                var was = part[depth - 1] == which;
+                var now = ++part[depth - 1] == which;
+                if (was && !now) skipped++;
+                else if (!was && now) skipped--;
+            }
+            else
+            {
+                if (part[depth - 1] != which) skipped--;
+                depth--;
+            }
+        }
+        sb.Append(sql, from, sql.Length - from);
+        return sb.ToString();
+    }
+}
+"))
+
 (define (sqb-header db)
-    ($
+    (case db ((Any)
+        ($
+"using ParamType = System.Data.Common.DbParameter;
+
+namespace "(project-name)".Repositories;
+
+internal static class SearchQueryBuilder
+{
+"))
+    (else ($
 "using "(db-using db)";
 "
     (case db
@@ -3191,7 +3455,7 @@ namespace "(project-name)".Repositories."(db-namespace db)";
 
 internal static class SearchQueryBuilder
 {
-"))
+"))))
 
 (define (sqb-body db)
     ($
@@ -3209,7 +3473,11 @@ internal static class SearchQueryBuilder
     (sqb-add-reference-search-or db)))
 
 (define (sqb-schema-table db)
-    (case db
+    (case db ((Any)
+        "    private static string SchemaTable(string schema, string table) => Db.SchemaTable(schema, table);
+
+")
+    (else (case db
         ((PostgreSql)
 "    private static string SchemaTable(string schema, string table) => $\"\\\"\" + schema + \"\\\"\" + \".\" + table;
 
@@ -3221,10 +3489,19 @@ internal static class SearchQueryBuilder
         ((Sqlite)
 "    private static string SchemaTable(string schema, string table) => $\"{schema}_{table}\";
 
-")))
+")))))
 
 (define (sqb-helpers db)
-    ($
+    (case db ((Any)
+        "    private static string P(int n) => Db.P(n);
+
+    private static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
+
+    private static ParamType NewParam(int index, object value) => Db.Param(index, value);
+    private static ParamType NewTsParam(int index, DateTime value) => Db.TsParam(index, value);
+
+")
+    (else ($
 "    private static string P(int n) => $\""
     (pp-prefix db)
     "{n}\";
@@ -3249,7 +3526,7 @@ internal static class SearchQueryBuilder
     private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
     private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value);
 
-"))))
+"))))))
 
 (define (sqb-add-string-search-or db)
     ($
@@ -3635,9 +3912,9 @@ internal static class SearchQueryBuilder
 
 ; The first n characters of a column, n written by the caller in C#.
 (define (db-left-cs column-cs count-cs db)
-    (case db
+    (db3 db (lambda (db) (case db
         ((Sqlite) ($ "SUBSTR(" column-cs ", 1, " count-cs ")"))
-        (else ($ "LEFT(" column-cs ", " count-cs ")"))))
+        (else ($ "LEFT(" column-cs ", " count-cs ")"))))))
 
 ; Uri search: the whole value, as it is written (no case folding, no
 ; prefix). :below takes what stands at or under the value, :above what the

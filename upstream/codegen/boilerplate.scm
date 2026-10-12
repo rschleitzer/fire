@@ -737,14 +737,16 @@ switch (dbType)
             ($"        var dataSource = Npgsql.NpgsqlDataSource.Create(connectionString);
         databaseProvider = new " (project-name) ".Repositories." (db-namespace db) ".DatabaseProvider(dataSource, connectionString);
 "
+            (repo-db-use db "dataSource")
             (for-active-resources (lambda (r)
-                ($"        builder.Services.AddSingleton<""I" (name-of r) "Repository>(new " (project-name) ".Repositories." (db-namespace db) "." (name-of r) "Repository(dataSource));
+                ($"        builder.Services.AddSingleton<""I" (name-of r) "Repository>(" (repo-new (name-of r) db "dataSource") ");
 ")))))
         ((SqlServer Sqlite)
             ($"        databaseProvider = new " (project-name) ".Repositories." (db-namespace db) ".DatabaseProvider(connectionString);
 "
+            (repo-db-use db "connectionString")
             (for-active-resources (lambda (r)
-                ($"        builder.Services.AddSingleton<""I" (name-of r) "Repository>(new " (project-name) ".Repositories." (db-namespace db) "." (name-of r) "Repository(connectionString));
+                ($"        builder.Services.AddSingleton<""I" (name-of r) "Repository>(" (repo-new (name-of r) db "connectionString") ");
 "))))))
 "        break;
     }

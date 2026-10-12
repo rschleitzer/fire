@@ -1,3 +1,20 @@
+;; ===================================================================
+;; One repository for every database
+;; ===================================================================
+;; A repository is written ONCE, for the pseudo database Any, and the server
+;; picks its dialect when it starts. Where the three databases want another
+;; TEXT inside an SQL string, all three are written into the string, between
+;; marks, and Db.Sql takes the one of the running database when the command
+;; is made (Db.Cmd):  postgresql  sqlite  sqlserver .
+;; So every database is sent exactly the text its own repository sent before.
+;; Where they want other CODE, the code asks Db.
+(define (any3 f)
+    (let ((a (f 'PostgreSql)) (b (f 'Sqlite)) (c (f 'SqlServer)))
+        (if (and (string=? a b) (string=? b c))
+            a
+            ($ "\\uE000" a "\\uE001" b "\\uE001" c "\\uE002"))))
+(define (db3 db f) (case db ((Any) (any3 f)) (else (f db))))
+
 (define (csharp-type fhir-type)
   (case fhir-type
     (("string" "code" "uri" "url" "canonical" "id" "markdown" "xhtml" "oid" "uuid") "string")
@@ -53,10 +70,10 @@
     (else "TEXT")))
 
 (define (db-type fhir-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) (postgres-type fhir-type))
     ((SqlServer) (sqlserver-type fhir-type))
-    ((Sqlite) (sqlite-type fhir-type))))
+    ((Sqlite) (sqlite-type fhir-type))))))
 
 ; String/code-ish FHIR types map to NVARCHAR(MAX) on SqlServer, which cannot be
 ; an index key. Inline search columns ARE indexed, so they need a bounded type.
@@ -69,114 +86,118 @@
 ; SqlServer string/code types are bounded to NVARCHAR(450) so they can be
 ; indexed (matches db-search-text-type used by the separate search tables).
 (define (db-inline-type fhir-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((SqlServer) (if (sqlserver-stringish-type? fhir-type) "NVARCHAR(450)" (sqlserver-type fhir-type)))
-    (else (db-type fhir-type db))))
+    (else (db-type fhir-type db))))))
 
 (define (db-now db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) "NOW()")
     ((SqlServer) "SYSUTCDATETIME()")
-    ((Sqlite) "(datetime('now'))")))
+    ((Sqlite) "(datetime('now'))")))))
 
 (define (db-content-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) "BYTEA")
     ((SqlServer) "VARBINARY(MAX)")
-    ((Sqlite) "BLOB")))
+    ((Sqlite) "BLOB")))))
 
 (define (db-timestamp-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) "TIMESTAMPTZ")
     ((SqlServer) "DATETIME2")
-    ((Sqlite) "TEXT")))
+    ((Sqlite) "TEXT")))))
 
 ;; (quoted on SQLite too: a resource may be named by a word of SQL -- Group)
 (define (db-public-table rn db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) ($ "\"" rn "\""))
-    ((SqlServer) ($ "[" rn "]"))))
+    ((SqlServer) ($ "[" rn "]"))))))
 
 (define (db-schema-prefix schema db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) ($ "\"" schema "\"."))
     ((SqlServer) ($ "[" schema "]."))
-    ((Sqlite) ($ schema "_"))))
+    ((Sqlite) ($ schema "_"))))))
 
 (define (db-schema-create schema db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) ($"CREATE SCHEMA IF NOT EXISTS \"" schema "\";
 "))
     ((SqlServer) ($"IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = '" schema "') EXEC('CREATE SCHEMA [" schema "]');
 "))
-    ((Sqlite) "")))
+    ((Sqlite) "")))))
 
 ;; Quote a column name for raw SQL (DDL, migration scripts)
 (define (db-quote-col col db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) ($ "\"" col "\""))
     ((SqlServer) ($ "[" col "]"))
-    ((Sqlite) col)))
+    ((Sqlite) col)))))
 
 ;; Quote a column name inside a C# string literal (needs escaped quotes)
 (define (db-quote-col-cs col db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql) ($ "\\\"" col "\\\""))
     ((SqlServer) ($ "[" col "]"))
-    ((Sqlite) col)))
+    ((Sqlite) col)))))
 
 (define (db-id-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql SqlServer) "VARCHAR(64)")
-    ((Sqlite) "TEXT")))
+    ((Sqlite) "TEXT")))))
 
 (define (db-create-table db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) "CREATE TABLE IF NOT EXISTS ")
-    ((SqlServer) "CREATE TABLE ")))
+    ((SqlServer) "CREATE TABLE ")))))
 
 (define (db-union-open db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql SqlServer) "(")
-    ((Sqlite) "")))
+    ((Sqlite) "")))))
 
 (define (db-union-close db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql SqlServer) ")")
-    ((Sqlite) "")))
+    ((Sqlite) "")))))
 
 (define (db-create-index db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) "CREATE INDEX IF NOT EXISTS ")
-    ((SqlServer) "CREATE INDEX ")))
+    ((SqlServer) "CREATE INDEX ")))))
 
 ;; The add-column clause of an ALTER TABLE. T-SQL has no COLUMN keyword there.
 (define (db-add-column db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) "ADD COLUMN ")
-    ((SqlServer) "ADD ")))
+    ((SqlServer) "ADD ")))))
 
 (define (db-search-text-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) "TEXT")
-    ((SqlServer) "NVARCHAR(450)")))
+    ((SqlServer) "NVARCHAR(450)")))))
 
 (define (db-search-display-type db)
-  (case db
+  (db3 db (lambda (db) (case db
     ((PostgreSql Sqlite) "TEXT")
-    ((SqlServer) "NVARCHAR(MAX)")))
+    ((SqlServer) "NVARCHAR(MAX)")))))
 
 (define (db-using db)
-  (case db
+    (case db ((Any)
+        "System.Data.Common")
+    (else (case db
     ((PostgreSql) "Npgsql")
     ((SqlServer) "Microsoft.Data.SqlClient")
-    ((Sqlite) "Microsoft.Data.Sqlite")))
+    ((Sqlite) "Microsoft.Data.Sqlite")))))
 
 (define (db-command-type db)
-  (case db
+    (case db ((Any)
+        "System.Data.Common.DbCommand")
+    (else (case db
     ((PostgreSql) "NpgsqlCommand")
     ((SqlServer) "SqlCommand")
-    ((Sqlite) "SqliteCommand")))
+    ((Sqlite) "SqliteCommand")))))
 
 (define (db-folder db)
   (case db
