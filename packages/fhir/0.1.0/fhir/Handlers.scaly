@@ -119,7 +119,7 @@ procedure version_fields(mutable res: ref[Response], host: Slice[u8], type: Slic
 ; Provenance whose one target is the resource just written, and created
 ; without a check. A field that is no JSON object, and a Provenance the
 ; store does not take, are passed over in silence.
-procedure record_provenance(req: ref[Request], content: Slice[u8]) mutable pg_pool, sqlite_thread
+procedure record_provenance(req: ref[Request], content: Slice[u8]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let field trim(req.header("x-provenance"))
     if field.length = 0 or known_type("Provenance") = false
@@ -152,7 +152,7 @@ procedure record_provenance(req: ref[Request], content: Slice[u8]) mutable pg_po
 
 ; The body of a write's answer, as the Prefer field asks for it -- after the
 ; Provenance the request brought along is recorded.
-procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Slice[u8]) mutable pg_pool, sqlite_thread
+procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Slice[u8]) mutable pg_pool, sqlite_thread, tds_pool
 {
     record_provenance(req, content)
     let prefer trim(req.header("prefer"))
@@ -204,7 +204,7 @@ procedure type_mismatch(mutable res: ref[Response], type: Slice[u8], got: Slice[
 }
 
 ; POST /fire/<type>
-procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let parsed JsonValue.parse(req.body)
@@ -265,7 +265,7 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
 }
 
 ; GET /fire/<type>/{id}
-procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -292,7 +292,7 @@ procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable p
 }
 
 ; GET /fire/<type>/{id}/_history/{vid}
-procedure resource_vread(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_vread(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -339,7 +339,7 @@ function valid_id(id: Slice[u8]) returns bool
 }
 
 ; PUT /fire/<type>/{id}
-procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -402,7 +402,7 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
 ; one is refused. As upstream's ConditionalUpdate; what it lets fail
 ; without an answer of its own (a search it refuses, data that is no
 ; base64) is the unexpected error here too.
-procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     if req.query.length = 0
@@ -476,7 +476,7 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
 
 ; DELETE /fire/<type>?<criteria>: the conditional delete -- everything the
 ; criteria find is deleted. As upstream's ConditionalDelete.
-procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     if req.query.length = 0
@@ -589,7 +589,7 @@ procedure put_relaxed(mutable out: ref[Array[u8]], s: Slice[u8])
 ; GET /fire/<type>/$autocomplete?<param>=<beginning>[&_autocomplete=<property>]:
 ; the values of the property (the parameter itself when none is named)
 ; among the resources the parameter finds, as a plain JSON array.
-procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     var text Array[u8]()
@@ -656,7 +656,7 @@ procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response
 ; UndeleteAsync -- the state its last history row holds (the DELETE row has
 ; what it was when it was deleted) as a new version. A resource that is
 ; there, or that never was, is not found.
-procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -679,7 +679,7 @@ procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutab
 
 ; A deleted resource back: the state of its last history row as a new
 ; version, into content. NOT_FOUND for one that is there or never was.
-procedure undelete(type: Slice[u8], id: Slice[u8], mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure undelete(type: Slice[u8], id: Slice[u8], mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var current Array[u8]()
     let there resource_select(0, type, id, 0, &current)
@@ -702,7 +702,7 @@ procedure undelete(type: Slice[u8], id: Slice[u8], mutable content: ref[Array[u8
 
 ; POST /fire/<type>/{id}/_rollback/{vid}: the current version undone, when it
 ; is the one named. As upstream's Rollback.
-procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -729,7 +729,7 @@ procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) 
 ; PUT /fire/<type>/_history/{id}: a version taken in as it comes, as
 ; upstream's ImportVersion -- created under the id when there is none, else
 ; the next version. Nothing of it is checked; the answer is empty.
-procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -755,7 +755,7 @@ procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable
 }
 
 ; DELETE /fire/<type>/{id}
-procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -821,7 +821,7 @@ procedure page_links(mutable w: ref[JsonWriter], address: Slice[u8], asked: Slic
 
 ; GET /fire/<type>/{id}/_history and GET /fire/<type>/_history: the
 ; versions as a history Bundle.
-procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     let id req.param("id")
@@ -930,7 +930,7 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
 ; The search of a type by the pairs in text and cells, answered as a
 ; searchset Bundle the way upstream's handler builds it. `asked` is the
 ; query string as it came.
-procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8], cells: Slice[i64]) mutable pg_pool, sqlite_thread
+procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8], cells: Slice[i64]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type type_of(req)
     var count: i64 20
@@ -1109,7 +1109,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
 }
 
 ; GET /fire/<type>?...
-procedure resource_search_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_search_get(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     var text Array[u8]()
     var cells Array[i64]()
@@ -1119,7 +1119,7 @@ procedure resource_search_get(req: ref[Request], mutable res: ref[Response]) mut
 
 ; POST /fire/<type>/_search: the parameters of the form, then those of the
 ; query string.
-procedure resource_search_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure resource_search_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     var text Array[u8]()
     var cells Array[i64]()

@@ -155,7 +155,7 @@ procedure collect_references(value: JsonValue, path: Slice[u8], at: size_t, muta
 ; Search a type for everything the pairs match (upstream asks for ten
 ; thousand). A type the server does not store has nothing. STORED, FAILED
 ; when the database does not answer, BROKEN for a search upstream fails on.
-procedure search_all(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure search_all(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     if known_type(type) = false
         return STORED
@@ -195,7 +195,7 @@ function chain_base(key: Slice[u8]) returns Slice[u8]
 ; references that match (as the value of the reference parameter), or an
 ; _id nothing has when none does. The answer is STORED, or what
 ; search_all answered.
-procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var i: size_t 0
     while i < pair_count(cells)
@@ -303,7 +303,7 @@ procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mu
 ; pairs in text and cells: when there are any, the _id of the pairs is the
 ; ids the chains leave -- or one nothing has. STORED, or what search_all
 ; answered.
-procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var ids Array[u8]()
     var any false
@@ -372,7 +372,7 @@ procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64],
 ; Add what the references at `path` in the resources of contents (cells of
 ; four: id, content -- or key, content) point to, each once (seen), read
 ; from its own type, to included (cells of four: type/id, content).
-procedure include_targets(contents: Slice[u8], content_cells: Slice[i64], path: Slice[u8], only_type: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure include_targets(contents: Slice[u8], content_cells: Slice[i64], path: Slice[u8], only_type: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var references Array[u8]()
     var r: size_t 0
@@ -423,7 +423,7 @@ procedure include_targets(contents: Slice[u8], content_cells: Slice[i64], path: 
 
 ; Add the resources of `searching` that refer through `parameter` to the
 ; references in `targets` (type/id, commas between), each once.
-procedure include_referrers(searching: Slice[u8], parameter: Slice[u8], targets: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure include_referrers(searching: Slice[u8], parameter: Slice[u8], targets: Slice[u8], mutable seen: ref[Array[u8]], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var one_text Array[u8]()
     var one_cells Array[i64]()
@@ -460,7 +460,7 @@ procedure include_referrers(searching: Slice[u8], parameter: Slice[u8], targets:
 ; What _include, _include:iterate, _revinclude and _revinclude:iterate of
 ; the request (its pairs) add to the resources found (cells of four: id,
 ; content): into included, cells of four (type/id, content).
-procedure resolve_includes(type: Slice[u8], text: Slice[u8], cells: Slice[i64], found: Slice[u8], rows: Slice[i64], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure resolve_includes(type: Slice[u8], text: Slice[u8], cells: Slice[i64], found: Slice[u8], rows: Slice[i64], mutable included: ref[Array[u8]], mutable included_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var seen Array[u8]()
     var p: size_t 0

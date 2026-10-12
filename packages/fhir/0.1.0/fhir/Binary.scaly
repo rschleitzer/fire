@@ -12,7 +12,8 @@ use json.Value.JsonValue
 ; Does the type keep its data apart?
 procedure keeps_data_apart(type: Slice[u8]) returns bool
 {
-    if database_in_use() = DATABASE_SQLITE
+    ; (upstream's data table is PostgreSQL's alone)
+    if database_in_use() <> DATABASE_POSTGRESQL
         return false
     type.equals("Binary")
 }

@@ -44,3 +44,4 @@ function port_of(url: Slice[u8], fallback: int) returns int
 ; database_in_use() (fhir/Database.scaly).
 define DATABASE_POSTGRESQL: u64 1
 define DATABASE_SQLITE: u64 2
+define DATABASE_SQLSERVER: u64 3

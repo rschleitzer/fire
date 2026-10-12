@@ -1,0 +1,133 @@
+; The SQL Server provider: where the server is, and how a connection to it
+; is opened.
+
+use tds.Conn.TdsConn
+use fhir.Db.DbConn
+
+define SqlServerProvider
+(
+    host: String
+    port: int
+    user: String
+    password: String
+    database: String
+)
+{
+    ; From a connection string of the form upstream takes
+    ; (Microsoft.Data.SqlClient's):
+    ; Server=localhost,1433;Database=Fire;User Id=sa;Password=...
+    ; The keywords are read without regard to case (Data Source and
+    ; Initial Catalog say the same as Server and Database); the port stands
+    ; behind a comma and defaults to 1433; `tcp:` before the host is passed
+    ; over. What else it names -- Encrypt, TrustServerCertificate -- is not
+    ; looked at: the session is not encrypted (the package tds says so).
+    procedure parse(page: ref[Page], text: Slice[u8]) returns SqlServerProvider
+    {
+        var host text.slice_to(0)
+        var user text.slice_to(0)
+        var password text.slice_to(0)
+        var database text.slice_to(0)
+        var port 1433
+        var at: size_t 0
+        while at < text.length
+        {
+            var end at
+            while end < text.length and text[end] <> 59
+                end := end + 1
+            let part text.subslice(at, end)
+            var eq: size_t 0
+            while eq < part.length and part[eq] <> 61
+                eq := eq + 1
+            if eq < part.length
+            {
+                let key trimmed(part.slice_to(eq))
+                var value trimmed(part.slice_from(eq + 1))
+                if keyword_is(key, "server") or keyword_is(key, "data source") or keyword_is(key, "address")
+                {
+                    if value.length > 4 and keyword_is(value.slice_to(4), "tcp:")
+                        value := value.slice_from(4)
+                    var comma: size_t 0
+                    while comma < value.length and value[comma] <> 44
+                        comma := comma + 1
+                    host := value.slice_to(comma)
+                    if comma < value.length
+                        port := digits_of(value.slice_from(comma + 1))
+                }
+                if keyword_is(key, "database") or keyword_is(key, "initial catalog")
+                    database := value
+                if keyword_is(key, "user id") or keyword_is(key, "uid") or keyword_is(key, "user")
+                    user := value
+                if keyword_is(key, "password") or keyword_is(key, "pwd")
+                    password := value
+            }
+            at := end + 1
+        }
+        SqlServerProvider(
+            String^page(host.data as pointer[const_char], host.length),
+            port,
+            String^page(user.data as pointer[const_char], user.length),
+            String^page(password.data as pointer[const_char], password.length),
+            String^page(database.data as pointer[const_char], database.length)
+        )
+    }
+
+    ; The work at the server's start, as upstream's Database does it: the
+    ; database is there -- made when it is not (EnsureDatabaseExists) --,
+    ; answers, and has the schema at a version this software knows. Then
+    ; every thread's pool is told where the server is. False when any of it
+    ; fails.
+    procedure initialize(this, software_version: Slice[u8]) returns bool
+    {
+        var reason Array[u8]()
+        ; the database itself, asked of `master`
+        var h String(host)
+        let first TdsConn.open(h, port, user.as_slice(), password.as_slice(), "master", &reason)
+        if first = null
+        {
+            Console.println("Cannot connect to SQL Server at `host`,`port`: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
+            return false
+        }
+        var m first as ref[TdsConn]
+        var there false
+        m.prepare_unnamed("SELECT DB_ID(@p1)")
+        m.start("")
+        m.param_text(database.as_slice())
+        if m.run() and m.next_row()
+            there := m.column_is_null(0) = false
+        if there = false
+        {
+            Console.println("Creating database `database`...")
+            var create Array[u8]()
+            create.append("CREATE DATABASE [")
+            create.append(database.as_slice())
+            create.append("]")
+            if m.execute(create.as_slice()) = false
+            {
+                let e m.error_message()
+                Console.println("Warning: Could not check/create database: `String(e.data as pointer[const_char], e.length)`")
+            }
+        }
+        m.close()
+
+        reason.length := 0
+        var h2 String(host)
+        let got TdsConn.open(h2, port, user.as_slice(), password.as_slice(), database.as_slice(), &reason)
+        if got = null
+        {
+            Console.println("Cannot connect to SQL Server at `host`,`port`, database `database`: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
+            return false
+        }
+        var c got as ref[TdsConn]
+        var held DbConn(DATABASE_SQLSERVER, null, null, got)
+        let ok prepare_schema(&held, software_version)
+        if ok = false
+        {
+            let e c.error_message()
+            Console.println("SQL Server refused: `String(e.data as pointer[const_char], e.length)`")
+        }
+        c.close()
+        if ok
+            tds_configure(host.as_slice(), port, user.as_slice(), password.as_slice(), database.as_slice())
+        ok
+    }
+}

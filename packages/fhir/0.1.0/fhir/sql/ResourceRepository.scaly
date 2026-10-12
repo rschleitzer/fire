@@ -91,8 +91,8 @@ procedure column_param(mutable c: ref[DbConn], column: Slice[u8], root: JsonValu
             c.param_null()
         else
         {
-            ; (SQLite has no boolean: upstream's provider writes 1 and 0)
-            if c.kind = DATABASE_SQLITE
+            ; (SQLite has no boolean, SQL Server a BIT: 1 and 0)
+            if c.kind <> DATABASE_POSTGRESQL
             {
                 if value.as_bool()
                     c.param_int(1)
@@ -330,13 +330,15 @@ procedure begin(mutable c: ref[DbConn], scope: u64) returns bool
         return true
     if c.kind = DATABASE_SQLITE
         return c.execute("BEGIN IMMEDIATE")
+    if c.kind = DATABASE_SQLSERVER
+        return c.execute("BEGIN TRANSACTION")
     c.execute("BEGIN")
 }
 
 ; End an operation: its own transaction is committed when ok, else rolled
 ; back, and its connection given back; within a scope nothing ends here,
 ; and what failed fails the scope.
-procedure end_transaction(mutable c: ref[DbConn], scope: u64, ok: bool) returns bool mutable pg_pool, sqlite_thread
+procedure end_transaction(mutable c: ref[DbConn], scope: u64, ok: bool) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     if scope <> 0
         return ok
@@ -350,7 +352,7 @@ procedure end_transaction(mutable c: ref[DbConn], scope: u64, ok: bool) returns 
 }
 
 ; Give the connection of an operation that only read back.
-procedure give_back(mutable c: ref[DbConn], scope: u64) mutable pg_pool, sqlite_thread
+procedure give_back(mutable c: ref[DbConn], scope: u64) mutable pg_pool, sqlite_thread, tds_pool
 {
     if scope = 0
         release_connection(c)
@@ -358,7 +360,7 @@ procedure give_back(mutable c: ref[DbConn], scope: u64) mutable pg_pool, sqlite_
 
 ; A transaction over several operations: its scope, 0 when the database
 ; does not answer.
-procedure sql_begin() returns u64 mutable pg_pool, sqlite_thread
+procedure sql_begin() returns u64 mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(0)
     if held.missing()
@@ -373,7 +375,7 @@ procedure sql_begin() returns u64 mutable pg_pool, sqlite_thread
 }
 
 ; End the transaction `scope`: commit it, or roll it back.
-procedure sql_end(scope: u64, commit: bool) returns bool mutable pg_pool, sqlite_thread
+procedure sql_end(scope: u64, commit: bool) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
@@ -397,6 +399,9 @@ procedure lock_current(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8]) r
     var sql Array[u8]()
     put_bytes(&sql, "SELECT version_id FROM ")
     put_table(&sql, type)
+    ; the row locked for the transaction: SQL Server says so behind the table
+    if c.kind = DATABASE_SQLSERVER
+        put_bytes(&sql, " WITH (UPDLOCK, ROWLOCK)")
     put_bytes(&sql, " WHERE id = $1 FOR UPDATE")
     if c.prepare(name.as_slice(), sql.as_slice()) = false
         return -1
@@ -435,7 +440,7 @@ procedure keep_history(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8], o
 ; Create the resource `id` from root; its stored bytes are appended to
 ; content. An id the client chose (after_delete) continues the versions its
 ; history holds.
-procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var data Array[u8]()
     var apart false
@@ -448,7 +453,7 @@ procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
     var c &held
     var version_id: i64 1
     var ok begin(c, scope)
-    if ok and c.kind = DATABASE_SQLITE
+    if ok and c.kind <> DATABASE_POSTGRESQL
         ok := instants_readable(type, root)
     if ok and after_delete and type_versioned(type)
     {
@@ -509,7 +514,7 @@ procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
 
 ; Replace the resource `id` by root; if_match is the version the client
 ; expects, 0 for none.
-procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var data Array[u8]()
     var apart false
@@ -536,7 +541,7 @@ procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
         return StoreResult(CONFLICT, current, 0)
     }
     var ok true
-    if c.kind = DATABASE_SQLITE
+    if c.kind <> DATABASE_POSTGRESQL
         ok := instants_readable(type, root)
     if ok and type_versioned(type)
         ok := keep_history(c, type, id, "UPDATE")
@@ -580,7 +585,7 @@ procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
 }
 
 ; Delete the resource `id`: STORED, NOT_FOUND or FAILED.
-procedure sql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool, sqlite_thread
+procedure sql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
@@ -636,7 +641,7 @@ procedure sql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mut
 }
 
 ; Does the server answer a query?
-procedure sql_ready() returns bool mutable pg_pool, sqlite_thread
+procedure sql_ready() returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(0)
     if held.missing()
@@ -712,7 +717,7 @@ procedure provenance_since(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8
 ; written for the undone version goes with it, without a trace. What the
 ; resource is afterwards -- or was last -- is appended to content;
 ; NOT_FOUND when the current version is not the one named.
-procedure sql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
@@ -834,49 +839,88 @@ procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: S
 {
     let table entry(line, 32, 1)
     let kind line[0]
-    put_bytes(sql, "CREATE TABLE IF NOT EXISTS ")
+    ; the words of upstream's schema for the database in use: PostgreSQL's ...
+    var create: Slice[u8] "CREATE TABLE IF NOT EXISTS "
+    var id: Slice[u8] "VARCHAR(64)"
+    var text: Slice[u8] "TEXT"
+    var long: Slice[u8] "TEXT"
+    var time: Slice[u8] "TIMESTAMPTZ"
+    var number: Slice[u8] "DECIMAL"
+    if database_in_use() = DATABASE_SQLITE
+    {
+        id := "TEXT"
+        time := "TEXT"
+        number := "REAL"
+    }
+    if database_in_use() = DATABASE_SQLSERVER
+    {
+        ; (which has no IF NOT EXISTS: a table that is there is refused,
+        ; as upstream's statement is)
+        create := "CREATE TABLE "
+        text := "NVARCHAR(450)"
+        long := "NVARCHAR(MAX)"
+        time := "DATETIME2"
+        number := "DECIMAL(18,6)"
+    }
+    put_bytes(sql, create)
     put_table(sql, type)
     put_bytes(sql, ".")
     put_bytes(sql, table)
-    ; (the types are those of upstream's schema for the database)
-    let lite database_in_use() = DATABASE_SQLITE
-    if lite
-        put_bytes(sql, " (id INT NOT NULL, resource_id TEXT NOT NULL REFERENCES ")
-    else
-        put_bytes(sql, " (id INT NOT NULL, resource_id VARCHAR(64) NOT NULL REFERENCES ")
+    put_bytes(sql, " (id INT NOT NULL, resource_id ")
+    put_bytes(sql, id)
+    put_bytes(sql, " NOT NULL REFERENCES ")
     put_table(sql, type)
     put_bytes(sql, "(id) ON DELETE CASCADE, ")
     var indexed: Slice[u8] "value"
     match kind as int
-        case 116: put_bytes(sql, "system TEXT, value TEXT, display TEXT")
+        case 116
+        {
+            put_bytes(sql, "system ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", value ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", display ")
+            put_bytes(sql, long)
+        }
         case 100
         {
-            if lite
-                put_bytes(sql, "value_low TEXT, value_high TEXT")
-            else
-                put_bytes(sql, "value_low TIMESTAMPTZ, value_high TIMESTAMPTZ")
+            put_bytes(sql, "value_low ")
+            put_bytes(sql, time)
+            put_bytes(sql, ", value_high ")
+            put_bytes(sql, time)
             indexed := "value_low"
         }
         case 114
         {
-            put_bytes(sql, "target_type TEXT, target_id TEXT, target_version TEXT")
+            put_bytes(sql, "target_type ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", target_id ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", target_version ")
+            put_bytes(sql, long)
             indexed := "reference"
         }
         case 110
         {
-            if lite
-                put_bytes(sql, "value REAL")
-            else
-                put_bytes(sql, "value DECIMAL")
+            put_bytes(sql, "value ")
+            put_bytes(sql, number)
         }
         case 113
         {
-            if lite
-                put_bytes(sql, "value REAL, system TEXT, code TEXT, unit TEXT")
-            else
-                put_bytes(sql, "value DECIMAL, system TEXT, code TEXT, unit TEXT")
+            put_bytes(sql, "value ")
+            put_bytes(sql, number)
+            put_bytes(sql, ", system ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", code ")
+            put_bytes(sql, text)
+            put_bytes(sql, ", unit ")
+            put_bytes(sql, text)
         }
-        else: put_bytes(sql, "value TEXT")
+        else
+        {
+            put_bytes(sql, "value ")
+            put_bytes(sql, text)
+        }
     put_bytes(sql, ", PRIMARY KEY (id, resource_id))")
     put_search_index(sql, type, table, indexed)
     if kind = 100
@@ -885,9 +929,13 @@ procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: S
         put_search_index(sql, type, table, "system")
 }
 
+; ... and an index of it.
 procedure put_search_index(mutable sql: ref[Array[u8]], type: Slice[u8], table: Slice[u8], what: Slice[u8])
 {
-    put_bytes(sql, "; CREATE INDEX IF NOT EXISTS ix_")
+    if database_in_use() = DATABASE_SQLSERVER
+        put_bytes(sql, "; CREATE INDEX ix_")
+    else
+        put_bytes(sql, "; CREATE INDEX IF NOT EXISTS ix_")
     put_bytes(sql, type)
     put_bytes(sql, "_")
     put_bytes(sql, table)
@@ -912,7 +960,7 @@ procedure put_search_index(mutable sql: ref[Array[u8]], type: Slice[u8], table: 
 ; upstream's CreateSearchAsync. REFUSED for a parameter the type has none
 ; of; FAILED also where the table holds rows already (upstream fails on the
 ; key, too).
-procedure sql_create_search(scope: u64, type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool, sqlite_thread
+procedure sql_create_search(scope: u64, type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     let line search_line(type, parameter)
     if line.length = 0
@@ -998,7 +1046,7 @@ procedure sql_create_search(scope: u64, type: Slice[u8], parameter: Slice[u8]) r
 
 ; A search parameter's table dropped, as upstream's DropSearchAsync.
 ; REFUSED for a parameter the type has no table of.
-procedure sql_drop_search(type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool, sqlite_thread
+procedure sql_drop_search(type: Slice[u8], parameter: Slice[u8]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     let line search_line(type, parameter)
     if line.length = 0 or line[0] = 105
@@ -1044,7 +1092,7 @@ procedure run_purge(mutable c: ref[DbConn], sql: Slice[u8], before: Slice[u8]) r
 ; instant with its zone, or empty; `shown` gets it as .NET's round-trip
 ; format writes it. REFUSED when the database does not take it for an
 ; instant.
-procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(0)
     if held.missing()
@@ -1055,7 +1103,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
     ; it), or as SQLite holds a time
     var limit: Slice[u8] before
     var lite_time Array[u8]()
-    if bounded and c.kind = DATABASE_SQLITE
+    if bounded and c.kind <> DATABASE_POSTGRESQL
     {
         if readable_date(before) = false
         {
@@ -1084,7 +1132,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
         }
         put_bytes(shown, "Z")
     }
-    if bounded and c.kind <> DATABASE_SQLITE
+    if bounded and c.kind = DATABASE_POSTGRESQL
     {
         var understood c.prepare_unnamed("SELECT to_char($1::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')")
         if understood
@@ -1144,7 +1192,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
 }
 
 ; The ids of a type that are in its history and not there, a line each.
-procedure sql_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread
+procedure sql_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(0)
     if held.missing()
@@ -1175,7 +1223,7 @@ procedure sql_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns 
 
 ; Everything of a type gone -- its search rows, a Binary's bytes, its
 ; history, its resources --, as upstream's ReseedTruncateSql.
-procedure sql_truncate(type: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
+procedure sql_truncate(type: Slice[u8]) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var sql Array[u8]()
     let tables model_searches(type)
@@ -1211,13 +1259,13 @@ procedure sql_truncate(type: Slice[u8]) returns bool mutable pg_pool, sqlite_thr
 
 ; A script sent as it is -- on the connection of the transaction `scope`,
 ; or (0) on one of its own.
-procedure sql_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
+procedure sql_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
         return false
     var c &held
-    let done c.execute(sql)
+    let done c.run_script(sql)
     if done = false
     {
         let m c.error_message()
@@ -1229,7 +1277,7 @@ procedure sql_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool, s
 
 ; The version the database is at, into `version`; false when it does not
 ; say.
-procedure sql_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool, sqlite_thread
+procedure sql_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(0)
     if held.missing()
@@ -1249,7 +1297,7 @@ procedure sql_version(mutable version: ref[Array[u8]]) returns bool mutable pg_p
 }
 
 ; Was the resource `id` deleted at some time?
-procedure sql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
+procedure sql_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
@@ -1281,7 +1329,9 @@ procedure select_row(mutable c: ref[DbConn], type: Slice[u8], what: Slice[u8], h
     var sql Array[u8]()
     if c.kind = DATABASE_SQLITE
         put_bytes(&sql, "SELECT version_id, CAST(strftime('%s', last_updated) AS INTEGER), content FROM ")
-    else
+    if c.kind = DATABASE_SQLSERVER
+        put_bytes(&sql, "SELECT version_id, DATEDIFF_BIG(SECOND, '1970-01-01', last_updated), content FROM ")
+    if c.kind = DATABASE_POSTGRESQL
         put_bytes(&sql, "SELECT version_id, FLOOR(EXTRACT(EPOCH FROM last_updated))::BIGINT, content FROM ")
     put_table(&sql, type)
     if history
@@ -1306,7 +1356,7 @@ procedure select_row(mutable c: ref[DbConn], type: Slice[u8], what: Slice[u8], h
 
 ; Read the resource `id` -- its current version, or version_id (not 0) from
 ; the current row or the history; the content is appended to `content`.
-procedure sql_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var held connection(scope)
     if held.missing()
@@ -1376,7 +1426,7 @@ procedure bind_parameters(mutable c: ref[DbConn], q: ref[SearchQuery])
 ; The answer's status is STORED and its version_id the number of ALL that
 ; match; REFUSED, with `problem`, for what upstream refuses, BROKEN for
 ; what it fails on, FAILED when the database does not answer.
-procedure sql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     var q SearchQuery()
     var i: size_t 0
@@ -1481,7 +1531,7 @@ procedure sql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[
 ; TOMBSTONE beside its row. At most `count` from `offset` on, each as four
 ; cells in rows (id, the time it is from, what it is, content); the answer's
 ; version_id is how many there are in all.
-procedure sql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool, sqlite_thread
+procedure sql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool, sqlite_thread, tds_pool
 {
     let one id.length > 0
     var of_id: Slice[u8] ""
@@ -1507,9 +1557,11 @@ procedure sql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, of
     var listing Array[u8]()
     ; the time as upstream's handler writes it (milliseconds, cut off), and
     ; in microseconds as the key the system's history orders by
+    if database_in_use() = DATABASE_SQLSERVER
+        put_bytes(&listing, "SELECT h.id, FORMAT(h.last_updated, 'yyyy-MM-ddTHH:mm:ss.fff') + '+00:00', h.history_operation, h.content, h.version_id, DATEDIFF_BIG(MICROSECOND, '1970-01-01', h.last_updated)")
     if database_in_use() = DATABASE_SQLITE
         put_bytes(&listing, "SELECT h.id, substr(h.last_updated, 1, 10) || 'T' || substr(h.last_updated, 12, 8) || '.' || substr(substr(h.last_updated, 21) || '000', 1, 3) || '+00:00', h.history_operation, h.content, h.version_id, CAST(strftime('%s', h.last_updated) AS INTEGER) * 1000000 + CAST(substr(substr(h.last_updated, 21) || '000000', 1, 6) AS INTEGER)")
-    else
+    if database_in_use() = DATABASE_POSTGRESQL
         put_bytes(&listing, "SELECT h.id, to_char(h.last_updated AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || '+00:00', h.history_operation, h.content, h.version_id, (EXTRACT(EPOCH FROM h.last_updated) * 1000000)::bigint")
     ; (the members of the union without parentheses: SQLite takes none)
     put_bytes(&listing, " FROM (SELECT id, version_id, last_updated, content, 'CURRENT' AS history_operation FROM ")

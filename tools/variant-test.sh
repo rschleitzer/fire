@@ -17,7 +17,10 @@ HERE="$ROOT/tools/variants/$VARIANT"
 [ -f "$HERE/model.py" ] || { echo "variant-test: no variant $VARIANT" >&2; exit 2; }
 DATABASE="${FIRE_DATABASE:-postgresql}"
 WORK="${FIRE_MEASURE_HOME:-$HOME/.cache/fire-measure}/variant-$VARIANT"
-[ "$DATABASE" = sqlite ] && WORK="$WORK-sqlite"
+[ "$DATABASE" = postgresql ] || WORK="$WORK-$DATABASE"
+MSSQL_PASSWORD='Throwaway!1'
+# a query on a database of the throwaway SQL Server, a row a line
+mssql() { docker exec "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PASSWORD" -C -y 0 -d "$1" -Q "set nocount on; $2" | sed 's/[[:space:]]*$//'; }
 DAZZLE="${DAZZLE:-dazzle}"
 PG_NAME=fire-variant-pg PG_PORT=55437 PG_PASSWORD=throwaway PORT=5583
 BASE="http://localhost:$PORT"
@@ -38,6 +41,7 @@ start() {
   local log=$1 database=$2; shift 2
   local kind=PostgreSql connection="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD"
   [ "$DATABASE" = sqlite ] && kind=Sqlite connection="Data Source=$WORK/$database.db"
+  [ "$DATABASE" = sqlserver ] && kind=SqlServer connection="Server=localhost,$PG_PORT;Database=$database;User Id=sa;Password=$MSSQL_PASSWORD;TrustServerCertificate=True"
   DatabaseType=$kind SeedDataPath="$ROOT/tools/turns/seed" ReseedSecret=variant-secret \
   ConnectionString="$connection" \
   Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE" "$@" > "$log" 2>&1 &
@@ -82,6 +86,13 @@ neutral() { [ -f "$1" ] || return 0; sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 # rows <database>: every row of every table, the content as text
 rows() {
   local tables sql= t
+  if [ "$DATABASE" = sqlserver ]; then
+    for t in $(mssql "$1" "select quotename(s.name) + '.' + quotename(t.name) from sys.tables t join sys.schemas s on s.schema_id = t.schema_id order by 1"); do
+      mssql "$1" "select '$t|' + $(mssql "$1" "select string_agg(cast('isnull(cast(' + quotename(name) + ' as nvarchar(max)), ''NULL'')' as nvarchar(max)), ' + ''|'' + ') within group (order by column_id) from sys.columns where object_id = object_id('$t') and name not in ('last_updated', 'history_timestamp', 'content')")$(mssql "$1" "select ' + ''|'' + cast(content as varchar(max))' from sys.columns where object_id = object_id('$t') and name = 'content'") from $t"
+    done > "$WORK/$1.rows.raw" || return 1
+    neutral "$WORK/$1.rows.raw" | sort > "$WORK/$1.rows"
+    return
+  fi
   if [ "$DATABASE" = sqlite ]; then
     for t in $(sqlite3 "$WORK/$1.db" "select name from sqlite_master where type = 'table' order by 1"); do
       sqlite3 "$WORK/$1.db" "select '$t', $(sqlite3 "$WORK/$1.db" "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$t') where name not in ('last_updated', 'history_timestamp', 'content')") $(sqlite3 "$WORK/$1.db" "select ', content' from pragma_table_info('$t') where name = 'content'") from $t"
@@ -120,7 +131,14 @@ cp "$WORK/model/fhir.xml" "$WORK/csharp/fhir.xml"
 (cd "$WORK/csharp" && "$DAZZLE" -t sgml -d codegen/map.dsl fhir.xml) > "$WORK/generate.c.log" 2>&1 || die "upstream's generator"
 (cd "$WORK/csharp/server" && dotnet build -v q) > "$WORK/build.c.log" 2>&1 || { grep -m5 'error' "$WORK/build.c.log" >&2; die "the C# server does not build"; }
 
-if [ "$DATABASE" != sqlite ]; then
+if [ "$DATABASE" = sqlserver ]; then
+  docker rm -f -v "$PG_NAME" > /dev/null 2>&1
+  docker run -d --rm --platform linux/amd64 --name "$PG_NAME" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_PASSWORD" -p "127.0.0.1:$PG_PORT:1433" mcr.microsoft.com/mssql/server:2022-latest > /dev/null || die "no SQL Server"
+  until mssql master "select 1" > /dev/null 2>&1; do sleep 1; done
+  # (it answers its own tool before it takes logins from outside)
+  sleep 8
+fi
+if [ "$DATABASE" = postgresql ]; then
   docker rm -f -v "$PG_NAME" > /dev/null 2>&1
   docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=FireS -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
   until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
@@ -144,7 +162,11 @@ while [ $n -le "$STEPPED" ]; do
   n=$((n+1))
 done
 for d in FireS FireC; do
-  if [ "$DATABASE" = sqlite ]; then
+  if [ "$DATABASE" = sqlserver ]; then
+    # every column with its type, and every index with its columns
+    mssql $d "select s.name + '.' + t.name + '.' + c.name + ' ' + ty.name + ' ' + cast(c.max_length as varchar(10)) + ' ' + cast(c.precision as varchar(10)) + ' ' + cast(c.scale as varchar(10)) + ' ' + cast(c.is_nullable as varchar(1)) from sys.columns c join sys.tables t on t.object_id = c.object_id join sys.schemas s on s.schema_id = t.schema_id join sys.types ty on ty.user_type_id = c.user_type_id order by 1" > "$WORK/$d.schema"
+    mssql $d "select 'index ' + s.name + '.' + t.name + '.' + i.name + ' ' + cast(i.is_primary_key as varchar(1)) + ' ' + (select string_agg(c.name, ',') within group (order by ic.key_ordinal) from sys.index_columns ic join sys.columns c on c.object_id = ic.object_id and c.column_id = ic.column_id where ic.object_id = i.object_id and ic.index_id = i.index_id) from sys.indexes i join sys.tables t on t.object_id = i.object_id join sys.schemas s on s.schema_id = t.schema_id where i.name is not null and i.is_primary_key = 0 order by 1" >> "$WORK/$d.schema"
+  elif [ "$DATABASE" = sqlite ]; then
     sqlite3 "$WORK/$d.db" .schema > "$WORK/$d.schema"
   else
     docker exec "$PG_NAME" pg_dump -U postgres --schema-only --no-owner -d $d | grep -v '^\\\(un\)\?restrict\|^-- Dumped' > "$WORK/$d.schema"

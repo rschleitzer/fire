@@ -51,7 +51,7 @@ define SqliteProvider
             Console.println("Cannot open the SQLite database `path`")
             return false
         }
-        var held DbConn(DATABASE_SQLITE, null, got)
+        var held DbConn(DATABASE_SQLITE, null, got, null)
         let ok prepare_schema(&held, software_version)
         held.finish()
         if ok = false

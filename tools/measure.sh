@@ -18,7 +18,7 @@
 # first run, outside the repository.
 #
 #   PYRTEST         the pyrtest checkout          (~/repos/pyrtest)
-#   FIRE_DATABASE   postgresql (the default) or sqlite
+#   FIRE_DATABASE   postgresql (the default), sqlite or sqlserver
 #   FIRE_PG_PORT    the throwaway PostgreSQL      (55432)
 #   FIRE_HTTP_PORT  the server under measurement  (5580)
 #   FIRE_MEASURE    environment and results       (~/.cache/fire-measure)
@@ -39,6 +39,9 @@ BASE="http://localhost:$HTTP_PORT"
 # sqlite (a file below $WORK)
 DATABASE="${FIRE_DATABASE:-postgresql}"
 SQLITE_FILE="$WORK/sqlite/fire.db"
+MSSQL_IMAGE=mcr.microsoft.com/mssql/server:2022-latest MSSQL_PORT="${FIRE_MSSQL_PORT:-51433}" MSSQL_PASSWORD='Throwaway!1'
+# a query on the throwaway SQL Server, a row a line, | between the columns
+mssql() { docker exec "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PASSWORD" -C -h -1 -W -s '|' -d "${MSSQL_DATABASE:-master}" -Q "set nocount on; $1"; }
 
 case "$WHAT" in
   scaly) TARGETS="scaly" ;;
@@ -107,6 +110,18 @@ start_database() {
     rm -rf "$WORK/sqlite"; mkdir -p "$WORK/sqlite"
     return
   fi
+  if [ "$DATABASE" = sqlserver ]; then
+    # (Microsoft's image is for x86-64; on arm64 Docker runs it emulated)
+    listening "$MSSQL_PORT" && die "port $MSSQL_PORT is taken"
+    docker run -d --rm --platform linux/amd64 --name "$PG_NAME" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_PASSWORD" \
+      -p "127.0.0.1:$MSSQL_PORT:1433" "$MSSQL_IMAGE" > /dev/null || die "the SQL Server container does not start"
+    local j=0
+    until mssql "select 1" > /dev/null 2>&1; do
+      j=$((j+1)); [ $j -lt 120 ] || die "SQL Server is not ready after 120 s"
+      sleep 1
+    done
+    return
+  fi
   listening "$PG_PORT" && die "port $PG_PORT is taken (FIRE_PG_PORT names another)"
   docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=Fire \
     -p "127.0.0.1:$PG_PORT:5432" "$PG_IMAGE" > /dev/null || die "the PostgreSQL container does not start"
@@ -126,6 +141,10 @@ start_server() {
   if [ "$DATABASE" = sqlite ]; then
     export DatabaseType=Sqlite
     export ConnectionString="Data Source=$SQLITE_FILE"
+  fi
+  if [ "$DATABASE" = sqlserver ]; then
+    export DatabaseType=SqlServer
+    export ConnectionString="Server=localhost,$MSSQL_PORT;Database=Fire;User Id=sa;Password=$MSSQL_PASSWORD;TrustServerCertificate=True"
   fi
   export Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE"
   # the seed data both servers load into a database they create, and the
@@ -228,11 +247,25 @@ lite_columns() {
   lite "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$table') where name not in (${not%,})"
 }
 
+# On SQL Server: a query on the database Fire, and the columns of a table
+# but the named ones as one expression -- each as text, NULL said so, with |
+# between.
+fire_mssql() { MSSQL_DATABASE=Fire mssql "$1" | sed 's/[[:space:]]*$//'; }
+mssql_columns() {
+  local table=$1 not; shift; not=$(printf "'%s'," "$@")
+  fire_mssql "select string_agg('isnull(cast(' + quotename(name) + ' as nvarchar(max)), ''NULL'')', ' + ''|'' + ') within group (order by column_id) from sys.columns where object_id = object_id('$table') and name not in (${not%,})"
+}
+
 # What the tables hold of a resource, in the order it was written.
 rows_of() {
   if [ "$DATABASE" = sqlite ]; then
     lite "select version_id, active, gender, length(content), history_operation from Patient_resource_history where id = '$1'
           union all select version_id, active, gender, length(content), 'CURRENT' from Patient where id = '$1' order by 1"
+    return
+  fi
+  if [ "$DATABASE" = sqlserver ]; then
+    fire_mssql "select version_id, cast(active as int), gender, datalength(content), history_operation from [Patient].resource_history where id = '$1'
+          union all select version_id, cast(active as int), gender, datalength(content), 'CURRENT' from [Patient] where id = '$1' order by 1"
     return
   fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "
@@ -280,6 +313,12 @@ binary() {
       | sed 's/"id":"[^"]*"/"id":""/; s/"lastUpdated":"[^"]*"/"lastUpdated":""/' > "$WORK/turns.$1.Binary.data"
     return
   fi
+  if [ "$DATABASE" = sqlserver ]; then
+    docker exec "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PASSWORD" -C -y 0 -d Fire \
+      -Q "set nocount on; select cast(version_id as varchar(10)) + '|' + cast(content as varchar(max)) from [Binary] where id = '$(id_of "$1.Binary.spaced")'" \
+      | sed 's/"id":"[^"]*"/"id":""/; s/"lastUpdated":"[^"]*"/"lastUpdated":""/; s/[[:space:]]*$//' > "$WORK/turns.$1.Binary.data"
+    return
+  fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "select version_id, encode(data, 'hex') from \"Binary\".resource_data where resource_id = '$(id_of "$1.Binary.spaced")'" > "$WORK/turns.$1.Binary.data"
 }
 
@@ -287,6 +326,12 @@ binary() {
 # resource's id.
 search_dump() {
   local tables sql= t
+  if [ "$DATABASE" = sqlserver ]; then
+    for t in $(fire_mssql "select t.name from sys.tables t join sys.schemas s on s.schema_id = t.schema_id where s.name = '$1' and t.name like 'search[_]%' order by 1"); do
+      fire_mssql "select '$t|' + cast(id as varchar(10)) + '|' + $(mssql_columns "[$1].$t" resource_id id) from [$1].$t where resource_id = '$2' order by id"
+    done
+    return
+  fi
   if [ "$DATABASE" = sqlite ]; then
     for t in $(lite "select name from sqlite_master where type = 'table' and name like '$1\_search\_%' escape '\\' order by 1"); do
       lite "select '${t#$1_}', id, $(lite_columns "$t" resource_id id) from $t where resource_id = '$2' order by id"
@@ -337,6 +382,12 @@ linked() {
   # ... and rows of tools/turns/rows.sql, written past the servers: a uri
   # search has no resource here that could hold one (R5's Observation has no
   # valueCanonical), so its tables are filled by hand for the questions
+  if [ "$DATABASE" = sqlserver ]; then
+    # (the same rows under SQL Server's names)
+    sed -E 's/"([A-Za-z]+)"/[\1]/g' "$ROOT/tools/turns/rows.sql" | docker exec -i "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PASSWORD" -C -b -d Fire > /dev/null \
+      || { echo "turns: FAIL -- tools/turns/rows.sql"; TURNS_FAILED=1; }
+    return
+  fi
   if [ "$DATABASE" = sqlite ]; then
     # (the same rows under SQLite's table names)
     sed -E 's/"([A-Za-z]+)"\.([a-z_]+)/\1_\2/g' "$ROOT/tools/turns/rows.sql" | sqlite3 "$SQLITE_FILE" \
@@ -355,7 +406,7 @@ asks() {
   while read -r method path rest; do
     case "$method" in ''|'#'*) continue ;; esac
     # (see refusals: on SQLite this request is taken, and would write)
-    [ "$DATABASE" = sqlite ] && [ "$rest" = refused/Binary.base64.json ] && continue
+    [ "$DATABASE" != postgresql ] && [ "$rest" = refused/Binary.base64.json ] && continue
     n=$((n+1)); out="$WORK/turns.$1.ask.$n"
     path=${path//\{A\}/$2}; path=${path//\{B\}/$3}
     case "$method" in
@@ -427,7 +478,7 @@ refusals() {
   for f in "$ROOT"/tools/turns/refused/*.json; do
     name=$(basename "$f" .json)
     # (where the data stays in the content it is not decoded, and not refused)
-    [ "$DATABASE" = sqlite ] && [ "$name" = Binary.base64 ] && continue
+    [ "$DATABASE" != postgresql ] && [ "$name" = Binary.base64 ] && continue
     call "$1.refused.$name" 400 POST "${name%%.*}" "refused/$name.json"
   done
 }
@@ -435,6 +486,11 @@ refusals() {
 # Everything the tables hold of a resource but its id, its times and its
 # bytes (their length instead), in the order it was written.
 other_rows() {
+  if [ "$DATABASE" = sqlserver ]; then
+    fire_mssql "select $(mssql_columns "[$1].resource_history" id last_updated content history_timestamp) + '|' + cast(datalength(content) as varchar(20)) from [$1].resource_history where id = '$2'"
+    fire_mssql "select $(mssql_columns "[$1]" id last_updated content) + '|' + cast(datalength(content) as varchar(20)) from [$1] where id = '$2'"
+    return
+  fi
   if [ "$DATABASE" = sqlite ]; then
     lite "select $(lite_columns "$1_resource_history" id last_updated content history_timestamp), length(content) from $1_resource_history where id = '$2'"
     lite "select $(lite_columns "$1" id last_updated content), length(content) from $1 where id = '$2'"
@@ -530,7 +586,7 @@ turns() {
   # what one refuses the other refuses, in the same words
   local f
   for f in "$ROOT"/tools/turns/refused/*.json; do
-    [ "$DATABASE" = sqlite ] && [ "$(basename "$f" .json)" = Binary.base64 ] && continue
+    [ "$DATABASE" != postgresql ] && [ "$(basename "$f" .json)" = Binary.base64 ] && continue
     same "s.refused.$(basename "$f" .json)" "c.refused.$(basename "$f" .json)"
   done
   # the search tables hold the same rows for the same resource
@@ -588,7 +644,7 @@ turns() {
   size_update=$(wc -c < "$WORK/turns.s.update.body" | tr -d ' ')
   # (a boolean as the database shows it: t and f, or SQLite's 1 and 0)
   local yes=t no=f
-  [ "$DATABASE" = sqlite ] && yes=1 no=0
+  [ "$DATABASE" != postgresql ] && yes=1 no=0
   printf '%s\n' "1|$yes|male|$size|UPDATE" "2|$no|female|$size_update|UPDATE" "3|$yes|male|$size|DELETE" "4|$yes|male|$size|CURRENT" > "$WORK/turns.rows.a.expected"
   printf '%s\n' "1|$yes|male|$size|UPDATE" "2|$no|female|$size_update|DELETE" "3|$yes|male|$size|CURRENT" > "$WORK/turns.rows.b.expected"
   for r in a b; do

@@ -16,6 +16,7 @@ package http 0.1.0
 package json 0.1.1
 package pg 0.2.0
 package sqlite 0.1.0
+package tds 0.1.0
 
 define fhir
 {
@@ -33,6 +34,7 @@ define fhir
     module Db
     module postgresql
     module sqlite
+    module sqlserver
     module Database
     module sql
     module Repository

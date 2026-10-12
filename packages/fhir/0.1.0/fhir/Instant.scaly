@@ -203,7 +203,8 @@ procedure put_sqlite_time(mutable out: ref[Array[u8]], time: Slice[u8])
 ; as SQLite holds it.
 procedure put_database_time(mutable out: ref[Array[u8]], time: Slice[u8])
 {
-    if database_in_use() = DATABASE_SQLITE
+    ; (SQL Server reads that text into its DATETIME2 too)
+    if database_in_use() <> DATABASE_POSTGRESQL
         return put_sqlite_time(out, time)
     put_bytes(out, time)
 }

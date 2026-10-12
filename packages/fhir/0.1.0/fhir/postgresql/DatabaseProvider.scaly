@@ -76,7 +76,7 @@ define PostgreSqlProvider
             return false
         }
         var c got as ref[PgConn]
-        var held DbConn(DATABASE_POSTGRESQL, got, null)
+        var held DbConn(DATABASE_POSTGRESQL, got, null, null)
         let ok prepare_schema(&held, software_version)
         if ok = false
         {

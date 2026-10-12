@@ -52,7 +52,7 @@ procedure put_instant(mutable out: ref[Array[u8]], value: Slice[u8])
 }
 
 ; GET and POST /purgeschema/{type}[?before=<instant>]
-procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type req.param("type")
     if known_type(type) = false
@@ -88,7 +88,7 @@ procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, 
 
 ; GET /admin/undelete/{type}: every deleted resource of the type back. A
 ; type the server does not store has none.
-procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type req.param("type")
     var restored: i64 0
@@ -119,14 +119,14 @@ procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg
 }
 
 ; GET /admin/indexes/create and /admin/indexes/drop
-procedure indexes_create(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure indexes_create(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     if database_indexes(true) = false
         return send_unavailable(res)
     send_information(res, "Indexes created")
 }
 
-procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     if database_indexes(false) = false
         return send_unavailable(res)
@@ -136,7 +136,7 @@ procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg
 ; GET /admin/createsearch/{type}/{parameter} and /admin/dropsearch/...: the
 ; table of a search parameter made and filled from the stored resources,
 ; or dropped.
-procedure search_table_route(req: ref[Request], mutable res: ref[Response], create: bool) mutable pg_pool, sqlite_thread
+procedure search_table_route(req: ref[Request], mutable res: ref[Response], create: bool) mutable pg_pool, sqlite_thread, tds_pool
 {
     let type req.param("type")
     let parameter req.param("parameter")
@@ -160,14 +160,14 @@ procedure search_table_route(req: ref[Request], mutable res: ref[Response], crea
     send_information(res, message.as_slice())
 }
 
-procedure create_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure create_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
     search_table_route(req, res, true)
 
-procedure drop_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure drop_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
     search_table_route(req, res, false)
 
 ; GET /admin/seed: the seed data put in again.
-procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     var totals Array[i64]()
     seed_load(0, "", &totals)
@@ -177,7 +177,7 @@ procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, s
 ; GET /admin/{secret}/reseed/{type}: everything of a type gone and put in
 ; anew from the seed data. There only when the environment names a
 ; ReseedSecret, and for the one who knows it.
-procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     let configured setting("ReseedSecret")
     if configured.length = 0 or configured.equals(req.param("secret")) = false

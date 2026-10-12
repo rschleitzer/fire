@@ -13,7 +13,7 @@ function version_behind(a: Slice[u8], b: Slice[u8]) returns bool
     version_newer(b, a)
 
 ; One step.
-procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
+procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     Console.println("Upgrading database to `String(version.data as pointer[const_char], version.length)`...")
     let scope transaction_begin()
@@ -66,7 +66,7 @@ procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool, sqlite_
 }
 
 ; Every step the database is behind. False when one fails.
-procedure upgrade_database() returns bool mutable pg_pool, sqlite_thread
+procedure upgrade_database() returns bool mutable pg_pool, sqlite_thread, tds_pool
 {
     var current Array[u8]()
     if database_version(&current) = false

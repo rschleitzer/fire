@@ -1,0 +1,6 @@
+; The SQL Server side of the database layer.
+
+define sqlserver
+{
+    module DatabaseProvider
+}

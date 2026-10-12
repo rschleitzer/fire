@@ -126,7 +126,7 @@ define " name "
     module Schema
 }
 
-procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool, sqlite_thread
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var text Array[u8]()
     model_write(&" "text)
@@ -257,7 +257,7 @@ procedure model_write(mutable out: ref[Array[u8]])
                             (file ($ name ".upgrade." (% "to" upgrade) ".sql")
                                   (upgrade-step-sql upgrade db))))
                         (empty-sosofo)))))
-            '(PostgreSql Sqlite)))))
+            '(PostgreSql Sqlite SqlServer)))))
 
 ; --- /metadata ---
 

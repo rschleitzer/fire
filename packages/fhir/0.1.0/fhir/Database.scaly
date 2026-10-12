@@ -3,6 +3,7 @@
 
 use fhir.postgresql.DatabaseProvider.PostgreSqlProvider
 use fhir.sqlite.DatabaseProvider.SqliteProvider
+use fhir.sqlserver.DatabaseProvider.SqlServerProvider
 
 ; The version of the schema this software is written for (upstream's
 ; Database.SoftwareVersion).
@@ -29,17 +30,20 @@ define DatabaseProvider union
 (
     PostgreSql: PostgreSqlProvider
     Sqlite: SqliteProvider
+    SqlServer: SqlServerProvider
 )
 
 ; Does a provider exist for this DatabaseType?
 function supported_database(database_type: Slice[u8]) returns bool
-    database_type.equals("PostgreSql") or database_type.equals("Sqlite")
+    database_type.equals("PostgreSql") or database_type.equals("Sqlite") or database_type.equals("SqlServer")
 
 ; The provider of a supported DatabaseType, its strings on page.
 procedure make_provider(page: ref[Page], database_type: Slice[u8], connection_string: Slice[u8]) returns DatabaseProvider
 {
     if database_type.equals("Sqlite")
         return DatabaseProvider.Sqlite(SqliteProvider.parse(page, connection_string))
+    if database_type.equals("SqlServer")
+        return DatabaseProvider.SqlServer(SqlServerProvider.parse(page, connection_string))
     DatabaseProvider.PostgreSql(PostgreSqlProvider.parse(page, connection_string))
 }
 
@@ -58,6 +62,11 @@ procedure initialize(db: DatabaseProvider) returns bool mutable sqlite_thread
             scaly_atomic_store_u64(&database_kind, DATABASE_SQLITE)
             return s.initialize(model_version())
         }
+        when m: SqlServer
+        {
+            scaly_atomic_store_u64(&database_kind, DATABASE_SQLSERVER)
+            return m.initialize(model_version())
+        }
 }
 
 ; A script the model carries for the database in use, by what it is for
@@ -68,7 +77,9 @@ procedure database_script_named(what: Slice[u8]) returns Slice[u8]
     var key Array[u8]()
     if database_in_use() = DATABASE_SQLITE
         key.append("sqlite.")
-    else
+    if database_in_use() = DATABASE_SQLSERVER
+        key.append("sqlserver.")
+    if database_in_use() = DATABASE_POSTGRESQL
         key.append("postgresql.")
     key.append(what)
     model_value(61, key.as_slice())

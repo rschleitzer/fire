@@ -18,6 +18,8 @@ procedure autocomplete_column(line: Slice[u8]) returns Slice[u8]
     {
         if database_in_use() = DATABASE_SQLITE
             return "STRFTIME('%Y-%m-%d', value_low)"
+        if database_in_use() = DATABASE_SQLSERVER
+            return "FORMAT(value_low, 'yyyy-MM-dd')"
         return "TO_CHAR(value_low, 'YYYY-MM-DD')"
     }
     ""
@@ -62,7 +64,7 @@ procedure autocomplete_condition(mutable sql: ref[Array[u8]], mutable values: re
     put_bytes(sql, column)
     put_bytes(sql, " IS NOT NULL AND LOWER(")
     put_bytes(sql, column)
-    if database_in_use() = DATABASE_SQLITE
+    if database_in_use() <> DATABASE_POSTGRESQL
     {
         ; (lowered here, as for a search: put_like_pattern)
         put_bytes(sql, ") LIKE $1")
@@ -79,7 +81,7 @@ procedure autocomplete_condition(mutable sql: ref[Array[u8]], mutable values: re
 
 ; The answers into text and cells. STORED, FAILED when the database does
 ; not answer, BROKEN for a statement it refuses (upstream's exception).
-procedure sql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
+procedure sql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     let property_line search_line(type, property)
     let property_column autocomplete_column(property_line)

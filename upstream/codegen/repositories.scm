@@ -159,7 +159,9 @@
 (define (add-param-line-for cmd-name n expr db)
     (case db
         ((PostgreSql) ($"            " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ((SqlServer Sqlite) ($"            " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ; SQL Server: through AddValue, which keeps a time's precision
+        ((SqlServer) ($"            AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
+        ((Sqlite) ($"            " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
 
 (define (add-param-line n expr db) (add-param-line-for "cmd" n expr db))
 
@@ -167,7 +169,8 @@
 (define (add-param-8-for cmd-name n expr db)
     (case db
         ((PostgreSql) ($"        " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ((SqlServer Sqlite) ($"        " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ((SqlServer) ($"        AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
+        ((Sqlite) ($"        " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
 
 (define (add-param-8 n expr db) (add-param-8-for "cmd" n expr db))
 
@@ -263,7 +266,9 @@
             ($ (case db
                 ((PostgreSql) ($"
             cmd.Parameters.AddWithValue((object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
-                ((SqlServer Sqlite) ($"
+                ((SqlServer) ($"
+            AddValue(cmd, \""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
+                ((Sqlite) ($"
             cmd.Parameters.AddWithValue(\""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);")))
                 (loop (cdr items) (+ idx 1))))))
 
@@ -425,6 +430,14 @@ public interface I"rn"Repository
 "
     private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
     private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value) { SqlDbType = SqlDbType.DateTime2 };
+    // A parameter by its value - but a time as DATETIME2: AddWithValue alone takes a DateTime
+    // for the old DATETIME, whose steps are a 300th of a second, and last_updated and every
+    // instant in a column of its own were stored rounded to that.
+    private static void AddValue(SqlCommand cmd, string name, object value)
+    {
+        var p = cmd.Parameters.AddWithValue(name, value);
+        if (value is DateTime) p.SqlDbType = SqlDbType.DateTime2;
+    }
     private static ParamType CopyParam(ParamType source) => new ParamType(source.ParameterName, source.Value) { SqlDbType = source.SqlDbType };
 
 ")
@@ -2382,7 +2395,8 @@ public class "rn"Repository : I"rn"Repository
 (define (add-param-line-20 cmd-name n expr db)
     (case db
         ((PostgreSql) ($"                    " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ((SqlServer Sqlite) ($"                    " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
+        ((SqlServer) ($"                    AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
+        ((Sqlite) ($"                    " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))
 
 ; An inline search parameter is a column on the resource table, so there is no table to create -
 ; the column comes with the schema or, for one added later, with the upgrade DDL. What is left is

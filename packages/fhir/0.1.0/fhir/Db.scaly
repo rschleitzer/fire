@@ -8,6 +8,7 @@
 
 use pg.Conn.PgConn
 use sqlite.Conn.SqliteConn
+use tds.Conn.TdsConn
 
 ; The SQL of fhir/sql/ is written as PostgreSQL reads it. For SQLite it is
 ; rendered here, on its way to the connection, by what differs in the
@@ -17,7 +18,7 @@ use sqlite.Conn.SqliteConn
 ;   x::type       ->  x              SQLite has no casts of that form ...
 ;   FOR UPDATE    ->  (nothing)      ... and no row locks: a transaction
 ;                                    that writes holds the database
-; A string literal ('...') is left as it is.
+; A string literal ('...') is left as it is, here and below.
 procedure put_for_sqlite(mutable out: ref[Array[u8]], sql: Slice[u8])
 {
     var i: size_t 0
@@ -73,16 +74,175 @@ procedure put_for_sqlite(mutable out: ref[Array[u8]], sql: Slice[u8])
     }
 }
 
+; ... and for SQL Server:
+;   "name"             ->  [name]
+;   $1                 ->  @p1                (sp_executesql's parameters)
+;   x::type            ->  x                  (the server converts a parameter)
+;   FOR UPDATE         ->  (nothing: the hint stands behind the table, at its place)
+;   a || b             ->  a + b
+;   substr(            ->  SUBSTRING(
+;   (SELECT ... LIMIT 1)                 ->  (SELECT TOP 1 ...)
+;   ... LIMIT 1 at a statement's end     ->  SELECT TOP 1 ...
+;   ORDER BY ... LIMIT $a OFFSET $b      ->  ... OFFSET @pb ROWS FETCH NEXT @pa ROWS ONLY
+;   ORDER BY ... LIMIT -1 OFFSET n       ->  ... OFFSET n ROWS
+;   ORDER BY ... LIMIT $a                ->  ... OFFSET 0 ROWS FETCH NEXT @pa ROWS ONLY
+procedure put_for_sqlserver(mutable out: ref[Array[u8]], sql: Slice[u8])
+{
+    ; where "TOP 1 " is to go in: behind the SELECT of each open parenthesis
+    var selects Array[i64]()
+    var tops Array[i64]()
+    selects.add(0 - 1)
+    var body Array[u8]()
+    var i: size_t 0
+    var literal false
+    while i < sql.length
+    {
+        let c sql[i]
+        if c = 39
+        {
+            literal := literal = false
+            body.add(c)
+            i := i + 1
+            continue
+        }
+        if literal
+        {
+            body.add(c)
+            i := i + 1
+            continue
+        }
+        if c = 34
+        {
+            body.add(91 as u8)
+            var end i + 1
+            while end < sql.length and sql[end] <> 34
+            {
+                body.add(sql[end])
+                end := end + 1
+            }
+            body.add(93 as u8)
+            i := end + 1
+            continue
+        }
+        if c = 36 and i + 1 < sql.length and sql[i + 1] >= 48 and sql[i + 1] <= 57
+        {
+            body.append("@p")
+            i := i + 1
+            continue
+        }
+        if c = 58 and i + 1 < sql.length and sql[i + 1] = 58
+        {
+            i := i + 2
+            while i < sql.length and ((sql[i] >= 97 and sql[i] <= 122) or (sql[i] >= 65 and sql[i] <= 90))
+                i := i + 1
+            continue
+        }
+        if c = 124 and i + 1 < sql.length and sql[i + 1] = 124
+        {
+            body.add(43 as u8)
+            i := i + 2
+            continue
+        }
+        if c = 32 and i + 11 <= sql.length and sql.subslice(i, i + 11).equals(" FOR UPDATE")
+        {
+            i := i + 11
+            continue
+        }
+        if c = 115 and i + 7 <= sql.length and sql.subslice(i, i + 7).equals("substr(")
+        {
+            body.append("SUBSTRING(")
+            i := i + 7
+            continue
+        }
+        if c = 40
+            selects.add(0 - 1)
+        if c = 41 and selects.length > 1
+            selects.length := selects.length - 1
+        if c = 83 and i + 7 <= sql.length and sql.subslice(i, i + 7).equals("SELECT ") and selects[selects.length - 1] < 0
+        {
+            body.append("SELECT ")
+            selects.put(selects.length - 1, body.length as i64)
+            i := i + 7
+            continue
+        }
+        if c = 32 and i + 7 <= sql.length and sql.subslice(i, i + 7).equals(" LIMIT ")
+        {
+            ; what is limited to, and what stands behind it
+            var end i + 7
+            while end < sql.length and sql[end] <> 32 and sql[end] <> 41
+                end := end + 1
+            let count sql.subslice(i + 7, end)
+            if count.equals("1") and (end = sql.length or sql[end] = 41)
+            {
+                tops.add(selects[selects.length - 1])
+                i := end
+                continue
+            }
+            var offset: Slice[u8] "0"
+            var after end
+            if end + 8 <= sql.length and sql.subslice(end, end + 8).equals(" OFFSET ")
+            {
+                after := end + 8
+                while after < sql.length and sql[after] <> 32 and sql[after] <> 41
+                    after := after + 1
+                offset := sql.subslice(end + 8, after)
+            }
+            body.append(" OFFSET ")
+            put_sqlserver_value(&body, offset)
+            body.append(" ROWS")
+            if count.equals("-1") = false
+            {
+                body.append(" FETCH NEXT ")
+                put_sqlserver_value(&body, count)
+                body.append(" ROWS ONLY")
+            }
+            i := after
+            continue
+        }
+        body.add(c)
+        i := i + 1
+    }
+    ; the statement with every TOP 1 at its place (the places come in the
+    ; order the limits were met, not the order they stand in)
+    var at: size_t 0
+    while at <= body.length
+    {
+        var t: size_t 0
+        while t < tops.length
+        {
+            if tops[t] = (at as i64)
+                out.append("TOP 1 ")
+            t := t + 1
+        }
+        if at < body.length
+            out.add(body[at])
+        at := at + 1
+    }
+}
+
+; A count or an offset of a page as SQL Server names it: a parameter by
+; its number, a number as it is.
+procedure put_sqlserver_value(mutable out: ref[Array[u8]], value: Slice[u8])
+{
+    if value.length > 0 and value[0] = 36
+    {
+        out.append("@p")
+        return out.append(value.slice_from(1))
+    }
+    out.append(value)
+}
+
 define DbConn
 (
     kind: u64
     pg: ref[PgConn]?
     lite: ref[SqliteConn]?
+    ms: ref[TdsConn]?
 )
 {
     ; No connection: the database did not answer.
     function missing(this) returns bool
-        pg = null and lite = null
+        pg = null and lite = null and ms = null
 
     procedure prepare(mutable this, name: Slice[u8], sql: Slice[u8]) returns bool
     {
@@ -91,6 +251,13 @@ define DbConn
             var c lite as ref[SqliteConn]
             var rendered Array[u8]()
             put_for_sqlite(&rendered, sql)
+            return c.prepare(name, rendered.as_slice())
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            var rendered Array[u8]()
+            put_for_sqlserver(&rendered, sql)
             return c.prepare(name, rendered.as_slice())
         }
         var c pg as ref[PgConn]
@@ -106,6 +273,13 @@ define DbConn
             put_for_sqlite(&rendered, sql)
             return c.prepare_unnamed(rendered.as_slice())
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            var rendered Array[u8]()
+            put_for_sqlserver(&rendered, sql)
+            return c.prepare_unnamed(rendered.as_slice())
+        }
         var c pg as ref[PgConn]
         c.prepare_unnamed(sql)
     }
@@ -115,6 +289,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.start(name)
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.start(name)
         }
         var c pg as ref[PgConn]
@@ -128,6 +307,11 @@ define DbConn
             var c lite as ref[SqliteConn]
             return c.param_text(v)
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            return c.param_text(v)
+        }
         var c pg as ref[PgConn]
         c.param_text(v)
     }
@@ -137,6 +321,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.param_bytes(v)
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.param_bytes(v)
         }
         var c pg as ref[PgConn]
@@ -150,6 +339,11 @@ define DbConn
             var c lite as ref[SqliteConn]
             return c.param_int(v)
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            return c.param_int(v)
+        }
         var c pg as ref[PgConn]
         c.param_int(v)
     }
@@ -161,6 +355,11 @@ define DbConn
             var c lite as ref[SqliteConn]
             return c.param_null()
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            return c.param_null()
+        }
         var c pg as ref[PgConn]
         c.param_null()
     }
@@ -170,6 +369,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.run()
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.run()
         }
         var c pg as ref[PgConn]
@@ -185,6 +389,13 @@ define DbConn
             put_for_sqlite(&rendered, sql)
             return c.execute(rendered.as_slice())
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            var rendered Array[u8]()
+            put_for_sqlserver(&rendered, sql)
+            return c.execute(rendered.as_slice())
+        }
         var c pg as ref[PgConn]
         c.execute(sql)
     }
@@ -194,6 +405,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.next_row()
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.next_row()
         }
         var c pg as ref[PgConn]
@@ -207,6 +423,11 @@ define DbConn
             var c lite as ref[SqliteConn]
             return c.column(i)
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            return c.column(i)
+        }
         var c pg as ref[PgConn]
         c.column(i)
     }
@@ -216,6 +437,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.column_int(i)
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.column_int(i)
         }
         var c pg as ref[PgConn]
@@ -229,6 +455,11 @@ define DbConn
             var c lite as ref[SqliteConn]
             return c.column_is_null(i)
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            return c.column_is_null(i)
+        }
         var c pg as ref[PgConn]
         c.column_is_null(i)
     }
@@ -238,6 +469,11 @@ define DbConn
         if kind = DATABASE_SQLITE
         {
             var c lite as ref[SqliteConn]
+            return c.error_message()
+        }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
             return c.error_message()
         }
         var c pg as ref[PgConn]
@@ -253,13 +489,48 @@ define DbConn
             var c lite as ref[SqliteConn]
             c.finish()
         }
+        if kind = DATABASE_SQLSERVER
+        {
+            var c ms as ref[TdsConn]
+            c.finish()
+        }
+    }
+
+    ; Run a script of the model (the schema, the indexes, an upgrade step).
+    ; On SQL Server as upstream's provider runs one there: cut at every
+    ; semicolon, a statement at a time, and what only says that an object,
+    ; an index or a key is there already (the server's errors 2714, 1913,
+    ; 1779) is passed over -- its scripts have no IF NOT EXISTS.
+    procedure run_script(mutable this, sql: Slice[u8]) returns bool
+    {
+        if kind <> DATABASE_SQLSERVER
+            return this.execute(sql)
+        var c ms as ref[TdsConn]
+        var at: size_t 0
+        while at < sql.length
+        {
+            var end at
+            while end < sql.length and sql[end] <> 59
+                end := end + 1
+            var from at
+            while from < end and (sql[from] = 32 or sql[from] = 10 or sql[from] = 13 or sql[from] = 9)
+                from := from + 1
+            if from < end and this.execute(sql.subslice(from, end)) = false
+            {
+                let n c.error_number()
+                if n <> 2714 and n <> 1913 and n <> 1779
+                    return false
+            }
+            at := end + 1
+        }
+        true
     }
 
     ; A result column that is to come as its bytes (pg asks for it in the
     ; statement; SQLite gives a column what it holds).
     procedure binary_column(mutable this, i: int)
     {
-        if kind = DATABASE_SQLITE
+        if kind <> DATABASE_POSTGRESQL
             return
         var c pg as ref[PgConn]
         c.binary_column(i)
@@ -269,21 +540,32 @@ define DbConn
 ; The connection an operation runs on: the one of the transaction `scope`
 ; (transaction_begin's answer), or with no scope one of its own -- of pg's
 ; pool, or this thread's SQLite connection.
-procedure connection(scope: u64) returns DbConn mutable pg_pool, sqlite_thread
+procedure connection(scope: u64) returns DbConn mutable pg_pool, sqlite_thread, tds_pool
 {
     if database_in_use() = DATABASE_SQLITE
-        return DbConn(DATABASE_SQLITE, null, thread_connection())
+        return DbConn(DATABASE_SQLITE, null, thread_connection(), null)
+    if database_in_use() = DATABASE_SQLSERVER
+    {
+        if scope <> 0
+            return DbConn(DATABASE_SQLSERVER, null, null, (scope as size_t) as ref[TdsConn])
+        return DbConn(DATABASE_SQLSERVER, null, null, tds_acquire())
+    }
     if scope <> 0
-        return DbConn(DATABASE_POSTGRESQL, (scope as size_t) as ref[PgConn], null)
-    DbConn(DATABASE_POSTGRESQL, acquire(), null)
+        return DbConn(DATABASE_POSTGRESQL, (scope as size_t) as ref[PgConn], null, null)
+    DbConn(DATABASE_POSTGRESQL, acquire(), null, null)
 }
 
-; Give a connection of the pool back; this thread's SQLite connection
-; stays where it is.
-procedure release_connection(mutable c: ref[DbConn]) mutable pg_pool
+; Give a connection of a pool back; this thread's SQLite connection stays
+; where it is.
+procedure release_connection(mutable c: ref[DbConn]) mutable pg_pool, tds_pool
 {
     if c.kind = DATABASE_SQLITE
         return c.finish()
+    if c.kind = DATABASE_SQLSERVER
+    {
+        var m c.ms as ref[TdsConn]
+        return tds_release(m)
+    }
     var p c.pg as ref[PgConn]
     release(p)
 }
@@ -294,6 +576,8 @@ function scope_of(c: ref[DbConn]) returns u64
 {
     if c.kind = DATABASE_SQLITE
         return 1
+    if c.kind = DATABASE_SQLSERVER
+        return (c.ms as ref[TdsConn]) as u64
     (c.pg as ref[PgConn]) as u64
 }
 
@@ -321,6 +605,8 @@ procedure prepare_schema(mutable c: ref[DbConn], software_version: Slice[u8]) re
     var has_schema: Slice[u8] "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'fire_meta'"
     if c.kind = DATABASE_SQLITE
         has_schema := "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'fire_meta_%'"
+    if c.kind = DATABASE_SQLSERVER
+        has_schema := "SELECT COUNT(*) FROM sys.schemas WHERE name = 'fire_meta'"
     if c.prepare_unnamed(has_schema) = false
         return false
     c.start("")
@@ -331,15 +617,24 @@ procedure prepare_schema(mutable c: ref[DbConn], software_version: Slice[u8]) re
     if has_meta = false
     {
         Console.println("Creating database schema...")
-        if c.execute(database_script_named("schema")) = false
+        if c.run_script(database_script_named("schema")) = false
             return false
         version := software_version
         database_created()
     }
-    if c.kind <> DATABASE_SQLITE and c.execute("CREATE SCHEMA IF NOT EXISTS \"fire_meta\"") = false
-        return false
-    if c.execute("CREATE TABLE IF NOT EXISTS \"fire_meta\".dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
-        return false
+    if c.kind = DATABASE_SQLSERVER
+    {
+        ; (upstream's CreateDbInfoTableSql of that provider)
+        if c.execute("IF NOT EXISTS (SELECT * FROM sys.schemas WHERE name = 'fire_meta') EXEC('CREATE SCHEMA [fire_meta]');IF NOT EXISTS (SELECT * FROM sys.tables t JOIN sys.schemas s ON t.schema_id = s.schema_id WHERE s.name = 'fire_meta' AND t.name = 'dbinfo') CREATE TABLE [fire_meta].dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
+            return false
+    }
+    else
+    {
+        if c.kind = DATABASE_POSTGRESQL and c.execute("CREATE SCHEMA IF NOT EXISTS \"fire_meta\"") = false
+            return false
+        if c.execute("CREATE TABLE IF NOT EXISTS \"fire_meta\".dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
+            return false
+    }
     if c.prepare("fire_insert_version", "INSERT INTO \"fire_meta\".dbinfo (name, value) VALUES ('version', $1)") = false
         return false
     c.start("fire_insert_version")

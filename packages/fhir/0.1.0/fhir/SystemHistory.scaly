@@ -179,7 +179,7 @@ procedure history_order(mutable order: ref[Array[i64]], keys: Slice[i64])
     history_intro_sort(order, keys, 0, keys.length, 2 * (log + 1))
 }
 
-procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
+procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     var text Array[u8]()
     var cells Array[i64]()

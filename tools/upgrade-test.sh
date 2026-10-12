@@ -18,7 +18,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATABASE="${FIRE_DATABASE:-postgresql}"
 WORK="${FIRE_MEASURE_HOME:-$HOME/.cache/fire-measure}/upgrade"
-[ "$DATABASE" = sqlite ] && WORK="$WORK-sqlite"
+[ "$DATABASE" = postgresql ] || WORK="$WORK-$DATABASE"
+MSSQL_PASSWORD='Throwaway!1'
+# a script on a database of the throwaway SQL Server
+mssql() { local d=$1; shift; docker exec -i "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_PASSWORD" -C -b -y 0 -d "$d" "$@" | sed 's/[[:space:]]*$//'; }
 DAZZLE="${DAZZLE:-dazzle}"
 PG_NAME=fire-upgrade-pg PG_PORT=55436 PG_PASSWORD=throwaway PORT=5582
 BASE="http://localhost:$PORT"
@@ -40,6 +43,7 @@ start() {
   local log=$1 database=$2; shift 2
   local kind=PostgreSql connection="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD"
   [ "$DATABASE" = sqlite ] && kind=Sqlite connection="Data Source=$WORK/$database.db"
+  [ "$DATABASE" = sqlserver ] && kind=SqlServer connection="Server=localhost,$PG_PORT;Database=$database;User Id=sa;Password=$MSSQL_PASSWORD;TrustServerCertificate=True"
   DatabaseType=$kind ConnectionString="$connection" \
   Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE" "$@" > "$log" 2>&1 &
   SERVER_PID=$!
@@ -61,7 +65,14 @@ echo "upgrade-test: 1 -- a database of the model as it is, with resources, set b
 "$ROOT/tools/generate.sh" > "$WORK/generate.log" 2>&1 || die "tools/generate.sh"
 mkdir -p "$ROOT/server/build"
 (cd "$ROOT" && scaly build server/fire.scaly -o server/build/fire) > "$WORK/build.a.log" 2>&1 || { cat "$WORK/build.a.log" >&2; die "the server of the model as it is does not build"; }
-if [ "$DATABASE" != sqlite ]; then
+if [ "$DATABASE" = sqlserver ]; then
+  docker rm -f -v "$PG_NAME" > /dev/null 2>&1
+  docker run -d --rm --platform linux/amd64 --name "$PG_NAME" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_PASSWORD" -p "127.0.0.1:$PG_PORT:1433" mcr.microsoft.com/mssql/server:2022-latest > /dev/null || die "no SQL Server"
+  until mssql master -Q "select 1" > /dev/null 2>&1; do sleep 1; done
+  # (it answers its own tool before it takes logins from outside)
+  sleep 8
+fi
+if [ "$DATABASE" = postgresql ]; then
   docker rm -f -v "$PG_NAME" > /dev/null 2>&1
   docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=Fire -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
   until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
@@ -72,7 +83,14 @@ for f in "$ROOT"/tools/turns/linked/*.json; do
   curl -s -o /dev/null -X PUT -H 'Content-Type: application/fhir+json' --data-binary @"$f" "$BASE/fire/${name%%.*}/${name#*.}"
 done
 stop_server
-if [ "$DATABASE" = sqlite ]; then
+if [ "$DATABASE" = sqlserver ]; then
+  mssql Fire < "$ROOT/tools/upgrade/before.sqlserver.sql" > "$WORK/before.log" 2>&1 || { cat "$WORK/before.log" >&2; die "tools/upgrade/before.sqlserver.sql"; }
+  # the copies: a backup restored under two names
+  mssql master -Q "BACKUP DATABASE [Fire] TO DISK = '/var/opt/mssql/data/fire.bak'" > "$WORK/copies.log" 2>&1 || die "the backup"
+  for d in FireS FireC; do
+    mssql master -Q "RESTORE DATABASE [$d] FROM DISK = '/var/opt/mssql/data/fire.bak' WITH MOVE 'Fire' TO '/var/opt/mssql/data/$d.mdf', MOVE 'Fire_log' TO '/var/opt/mssql/data/${d}_log.ldf'" >> "$WORK/copies.log" 2>&1 || { tail -3 "$WORK/copies.log" >&2; die "the copy $d"; }
+  done
+elif [ "$DATABASE" = sqlite ]; then
   sqlite3 "$WORK/Fire.db" < "$ROOT/tools/upgrade/before.sqlite.sql" || die "tools/upgrade/before.sqlite.sql"
   cp "$WORK/Fire.db" "$WORK/FireS.db" && cp "$WORK/Fire.db" "$WORK/FireC.db" || die "the copies"
 else
@@ -100,6 +118,12 @@ stop_server
 echo "upgrade-test: 3 -- the two databases"
 FAILED=""
 for d in FireS FireC; do
+  if [ "$DATABASE" = sqlserver ]; then
+    mssql $d -Q "set nocount on; select value from [fire_meta].dbinfo where name = 'version'" > "$WORK/$d.version"
+    mssql $d -Q "set nocount on; select s.name + '.' + t.name + '.' + c.name + ' ' + ty.name + ' ' + cast(c.max_length as varchar(10)) + ' ' + cast(c.is_nullable as varchar(1)) from sys.columns c join sys.tables t on t.object_id = c.object_id join sys.schemas s on s.schema_id = t.schema_id join sys.types ty on ty.user_type_id = c.user_type_id order by 1; select 'index ' + s.name + '.' + t.name + '.' + i.name from sys.indexes i join sys.tables t on t.object_id = i.object_id join sys.schemas s on s.schema_id = t.schema_id where i.name is not null and i.is_primary_key = 0 order by 1; select 'key ' + s.name + '.' + t.name + ' ' + cast(count(*) as varchar(10)) from sys.foreign_keys f join sys.tables t on t.object_id = f.parent_object_id join sys.schemas s on s.schema_id = t.schema_id group by s.name, t.name order by 1" > "$WORK/$d.schema"
+    mssql $d < "$ROOT/tools/upgrade/rows.sqlserver.sql" > "$WORK/$d.rows"
+    continue
+  fi
   if [ "$DATABASE" = sqlite ]; then
     sqlite3 "$WORK/$d.db" "select value from fire_meta_dbinfo where name = 'version'" > "$WORK/$d.version"
     sqlite3 "$WORK/$d.db" .schema > "$WORK/$d.schema"

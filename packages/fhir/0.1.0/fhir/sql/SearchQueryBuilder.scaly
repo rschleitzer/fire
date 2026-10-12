@@ -216,7 +216,7 @@ function readable_number(s: Slice[u8]) returns bool
 procedure put_like_pattern(mutable q: ref[SearchQuery], joined: bool, value: Slice[u8], anywhere: bool)
 {
     var pattern Array[u8]()
-    if database_in_use() = DATABASE_SQLITE
+    if database_in_use() <> DATABASE_POSTGRESQL
     {
         var whole Array[u8]()
         if anywhere
@@ -247,11 +247,11 @@ procedure put_like_pattern(mutable q: ref[SearchQuery], joined: bool, value: Sli
 ; PostgreSQL reads the word, SQLite has 1 and 0.
 procedure put_boolean_param(mutable q: ref[SearchQuery], word: Slice[u8])
 {
-    if database_in_use() = DATABASE_SQLITE
+    if database_in_use() <> DATABASE_POSTGRESQL
     {
-        put_bytes(&q.wheres, "(LOWER(")
+        put_bytes(&q.wheres, "(CASE WHEN LOWER(")
         put_param(q, &q.wheres, word)
-        put_bytes(&q.wheres, ") = 'true')")
+        put_bytes(&q.wheres, ") = 'true' THEN 1 ELSE 0 END)")
         return
     }
     put_param(q, &q.wheres, word)
