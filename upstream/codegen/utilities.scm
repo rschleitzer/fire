@@ -186,6 +186,15 @@
 
 (define (fhir-name) (let ((fhir (name-of (tree-root (current-node)))))(if fhir fhir "Fhir")))
 (define (fhir-seed-path) (% "seed-path" (tree-root (current-node))))
+; What a project's own model may give its server for a start on a
+; developer's machine: the password of the local database and the secret of
+; the reseed route. A model that names neither gets a connection string
+; without a password and a reseed route that is not there.
+(define (fhir-password) (% "password" (tree-root (current-node))))
+(define (fhir-reseed-secret) (% "reseed-secret" (tree-root (current-node))))
+(define (default-connection-string)
+    ($ "Host=localhost;Database=" (database-name) ";Username=postgres"
+       (if (fhir-password) ($ ";Password=" (fhir-password)) "")))
 
 (define (project-dir) "server")
 (define (software-version) (% "version" (tree-root (current-node))))

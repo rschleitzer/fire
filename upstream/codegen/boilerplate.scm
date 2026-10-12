@@ -81,11 +81,12 @@
   \"externalUrl\": \"http://localhost:5080/" (route-prefix) "\",
   \"Origins\": [\"*\"],
   \"DatabaseType\": \"PostgreSql\",
-  \"ConnectionString\": \"Host=localhost;Database=" (database-name) ";Username=postgres;Password=postgres\""
+  \"ConnectionString\": \"" (default-connection-string) "\""
 (if (fhir-seed-path) ($",
   \"SeedDataPath\": \"" (fhir-seed-path) "\"") "")
-",
-  \"ReseedSecret\": \"00000000-0000-0000-0000-000000000000\"
+(if (fhir-reseed-secret) ($",
+  \"ReseedSecret\": \"" (fhir-reseed-secret) "\"") "")
+"
 }
 ")))
 
@@ -721,7 +722,7 @@ builder.Host.UseWindowsService();
 
 var dbType = builder.Configuration[\"DatabaseType\"] ?? \"PostgreSql\";
 var connectionString = builder.Configuration[\"ConnectionString\"]
-    ?? \"Host=localhost;Database=" (database-name) ";Username=postgres;Password=postgres\";
+    ?? \"" (default-connection-string) "\";
 
 IDatabaseProvider databaseProvider;
 switch (dbType)
