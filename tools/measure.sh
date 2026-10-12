@@ -1,5 +1,5 @@
 #!/bin/bash
-# tools/measure.sh [scaly|csharp|both|turns] -- the yardstick: build a server,
+# tools/measure.sh [scaly|csharp|both|turns|client] -- the yardstick: build a server,
 # start it on a throwaway PostgreSQL in Docker, run pyrtest against it and
 # print passed / total per test file; then remove the server and the container.
 #
@@ -12,6 +12,9 @@
 #            wrote, and must answer -- current and from the history -- the
 #            bytes the other stored; both must store the same bytes for the
 #            same request but for the id and the time.
+#   client   the client packages (packages/fhirclient and the generated
+#            search parameters): tools/client-test against each server on
+#            a database of its own
 #
 # The database is a container of this script's own on a port of its own;
 # nothing else is touched. The Python environment for pyrtest is made on the
@@ -46,8 +49,8 @@ mssql() { docker exec "$PG_NAME" /opt/mssql-tools18/bin/sqlcmd -S localhost -U s
 case "$WHAT" in
   scaly) TARGETS="scaly" ;;
   csharp) TARGETS="csharp" ;;
-  both|turns) TARGETS="scaly csharp" ;;
-  *) echo "usage: tools/measure.sh [scaly|csharp|both|turns]" >&2; exit 2 ;;
+  both|turns|client) TARGETS="scaly csharp" ;;
+  *) echo "usage: tools/measure.sh [scaly|csharp|both|turns|client]" >&2; exit 2 ;;
 esac
 
 die() { echo "measure: $*" >&2; exit 1; }
@@ -660,7 +663,30 @@ turns() {
   exit 0
 }
 
+# The client's test program against each server, on a database of its own.
+client() {
+  local t failed=
+  build_scaly
+  build_csharp
+  if [ -n "${FIRE_SCALY_HOME:-}" ]; then
+    (cd "$ROOT" && SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build tools/client-test/client-test.scaly -o server/build/client-test) > "$WORK/client.build.log" 2>&1
+  else
+    (cd "$ROOT" && env -u SCALY_HOME scaly build tools/client-test/client-test.scaly -o server/build/client-test) > "$WORK/client.build.log" 2>&1
+  fi || { cat "$WORK/client.build.log" >&2; die "the client's test does not build"; }
+  for t in scaly csharp; do
+    start_database
+    start_server "$t"
+    echo "client: $t"
+    "$ROOT/server/build/client-test" "$HTTP_PORT" "$t" || failed=1
+    stop_server
+    stop_database
+  done
+  [ -z "$failed" ] || exit 1
+  exit 0
+}
+
 [ "$WHAT" != turns ] || turns
+[ "$WHAT" != client ] || client
 
 for t in $TARGETS; do measure "$t"; done
 

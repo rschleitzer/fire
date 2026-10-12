@@ -1,0 +1,356 @@
+; tools/client-test -- the client packages against a running server: every
+; interaction of fhirclient and the generated search parameters, on
+; resources of its own. tools/measure.sh client runs it against both
+; servers.
+;
+;   client-test PORT [MARK]   the server on 127.0.0.1, its base /fire; MARK
+;                             sets this run's resources apart
+; It prints what failed, or "client: passed" and the number of checks.
+
+package scaly 0.1.0
+package json 0.1.1
+package fhirclient 0.1.0
+package fireclient 0.1.0
+
+use json.Value.JsonValue
+use fhirclient.Client.FhirClient
+use fhirclient.Search.SearchQuery
+
+; The number an argument holds.
+function number_of(text: Slice[u8]) returns int
+{
+    var v 0
+    var i: size_t 0
+    while i < text.length and text[i] >= 48 and text[i] <= 57
+    {
+        v := v * 10 + ((text[i] as int) - 48)
+        i := i + 1
+    }
+    v
+}
+
+procedure say(text: Slice[u8])
+    Console.println(String(text.data as pointer[const_char], text.length))
+
+; What went wrong, with the server's last answer.
+procedure failed(mutable c: ref[FhirClient], what: Slice[u8]) returns int
+{
+    var line Array[u8]()
+    line.append("client: FAILED -- ")
+    line.append(what)
+    line.append(" (status ")
+    put_count(&line, c.status() as i64)
+    line.append(") ")
+    let body c.body()
+    if body.length > 300
+        line.append(body.slice_to(300))
+    else
+        line.append(body)
+    say(line.as_slice())
+    1
+}
+
+; A member of the JSON in text that is a string, copied to out.
+procedure member(text: Slice[u8], name: Slice[u8], mutable out: ref[Array[u8]])
+{
+    out.clear()
+    let parsed JsonValue.parse(text)
+    if parsed.ok()
+        out.append(parsed.value.get(name).text())
+}
+
+; The total of the Bundle in text; -1 when it says none.
+procedure total_of(text: Slice[u8]) returns i64
+{
+    let parsed JsonValue.parse(text)
+    if parsed.ok() = false or parsed.value.get("total").is_number() = false
+        return (0 as i64) - 1
+    parsed.value.get("total").as_i64()
+}
+
+; How many entries the Bundle in text has.
+procedure entries_of(text: Slice[u8]) returns size_t
+{
+    let parsed JsonValue.parse(text)
+    if parsed.ok() = false
+        return 0
+    parsed.value.get("entry").length()
+}
+
+; A Patient of this run: family and given name, gender, date of birth.
+procedure patient(mutable out: ref[Array[u8]], mark: Slice[u8], family: Slice[u8], given: Slice[u8], gender: Slice[u8], born: Slice[u8])
+{
+    out.clear()
+    out.append("{\"resourceType\":\"Patient\",\"identifier\":[{\"system\":\"urn:client-test\",\"value\":\"")
+    out.append(mark)
+    out.append("\"}],\"name\":[{\"family\":\"")
+    out.append(family)
+    out.append("\",\"given\":[\"")
+    out.append(given)
+    out.append("\"]}],\"gender\":\"")
+    out.append(gender)
+    out.append("\",\"birthDate\":\"")
+    out.append(born)
+    out.append("\"}")
+}
+
+procedure run(mutable c: ref[FhirClient], mark: Slice[u8]) returns int
+{
+    var checks 0
+    var body Array[u8]()
+    var id Array[u8]()
+    var other Array[u8]()
+    var text Array[u8]()
+    var q SearchQuery()
+
+    ; a family name no other run has
+    var family Array[u8]()
+    family.append("Zz")
+    family.append(mark)
+
+    ; create, read, read of a version
+    patient(&body, mark, family.as_slice(), "Ada", "female", "1990-05-17")
+    if c.create("Patient", body.as_slice()) = false or c.status() <> 201
+        return failed(c, "create")
+    member(c.body(), "id", &id)
+    if id.length = 0 or c.version().equals("1") = false or c.field("location").length = 0
+        return failed(c, "create: id, version or location")
+    checks := checks + 2
+    if c.read("Patient", id.as_slice()) = false
+        return failed(c, "read")
+    member(c.body(), "gender", &text)
+    if text.as_slice().equals("female") = false
+        return failed(c, "read: content")
+    if c.vread("Patient", id.as_slice(), "1") = false
+        return failed(c, "vread")
+    checks := checks + 3
+
+    ; update with and without the version it had
+    body.clear()
+    body.append("{\"resourceType\":\"Patient\",\"id\":\"")
+    body.append(id.as_slice())
+    body.append("\",\"identifier\":[{\"system\":\"urn:client-test\",\"value\":\"")
+    body.append(mark)
+    body.append("\"}],\"name\":[{\"family\":\"")
+    body.append(family.as_slice())
+    body.append("\",\"given\":[\"Ada\",\"Lou\"]}],\"gender\":\"female\",\"birthDate\":\"1990-05-17\"}")
+    if c.update_version("Patient", id.as_slice(), "1", body.as_slice()) = false or c.version().equals("2") = false
+        return failed(c, "update with its version")
+    if c.update_version("Patient", id.as_slice(), "1", body.as_slice()) or c.status() <> 409
+        return failed(c, "update with an old version is not 409")
+    if c.diagnostics().length = 0
+        return failed(c, "a refusal without diagnostics")
+    if c.update("Patient", id.as_slice(), body.as_slice()) = false or c.version().equals("3") = false
+        return failed(c, "update")
+    checks := checks + 4
+
+    ; patch
+    if c.patch("Patient", id.as_slice(), "[{\"op\":\"replace\",\"path\":\"/gender\",\"value\":\"other\"}]") = false
+        return failed(c, "patch")
+    member(c.body(), "gender", &text)
+    if text.as_slice().equals("other") = false
+        return failed(c, "patch: content")
+    checks := checks + 2
+
+    ; create unless there is one
+    var condition Array[u8]()
+    condition.append("identifier=urn:client-test|")
+    condition.append(mark)
+    condition.append("-once")
+    var once Array[u8]()
+    once.append(mark)
+    once.append("-once")
+    patient(&body, once.as_slice(), family.as_slice(), "Bea", "male", "1985-01-02")
+    if c.create_unless("Patient", body.as_slice(), condition.as_slice()) = false or c.status() <> 201
+        return failed(c, "conditional create")
+    member(c.body(), "id", &other)
+    if c.create_unless("Patient", body.as_slice(), condition.as_slice()) = false or c.status() <> 200
+        return failed(c, "conditional create of what is there is not 200")
+    checks := checks + 2
+
+    ; a third, with a name that needs escaping
+    var odd Array[u8]()
+    odd.append(family.as_slice())
+    odd.append(" & Söhne")
+    var third Array[u8]()
+    third.append(mark)
+    third.append("-odd")
+    patient(&body, third.as_slice(), odd.as_slice(), "Cy", "male", "2001-12-31")
+    if c.create("Patient", body.as_slice()) = false
+        return failed(c, "create with an odd name")
+    checks := checks + 1
+
+    ; an Observation about the first
+    body.clear()
+    body.append("{\"resourceType\":\"Observation\",\"status\":\"final\",\"code\":{\"coding\":[{\"system\":\"http://loinc.org\",\"code\":\"8867-4\"}]},\"subject\":{\"reference\":\"Patient/")
+    body.append(id.as_slice())
+    body.append("\"},\"effectiveDateTime\":\"2026-03-04T10:00:00Z\",\"valueQuantity\":{\"value\":72,\"unit\":\"/min\",\"system\":\"http://unitsofmeasure.org\",\"code\":\"/min\"}}")
+    if c.create("Observation", body.as_slice()) = false
+        return failed(c, "create an Observation")
+    var observation Array[u8]()
+    member(c.body(), "id", &observation)
+    checks := checks + 1
+
+    ; searches: string, exact, token, date, the odd name
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    if c.search(&q) = false or total_of(c.body()) <> 3
+        return failed(c, "search by family")
+    q.begin("Patient")
+    q.where(patient_family().exact(family.as_slice()))
+    if c.search(&q) = false or total_of(c.body()) <> 2
+        return failed(c, "search by the exact family")
+    q.begin("Patient")
+    q.where(patient_family().exact(odd.as_slice()))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "search by a name with an ampersand and an umlaut")
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    q.where(patient_gender().eq("male"))
+    if c.search(&q) = false or total_of(c.body()) <> 2
+        return failed(c, "search by family and gender")
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    q.where(patient_gender().ne("male"))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "search by a gender that is not")
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    q.where(patient_birthdate().ge("1990-01-01"))
+    q.where(patient_birthdate().lt("2001-12-31"))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "search by a span of birth dates")
+    q.begin("Patient")
+    q.where(patient_identifier().coded("urn:client-test", once.as_slice()))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "search by a coded identifier")
+    checks := checks + 7
+
+    ; through a reference, and with what is referred to
+    var reference Array[u8]()
+    reference.append("Patient/")
+    reference.append(id.as_slice())
+    q.begin("Observation")
+    q.where(observation_subject().eq(reference.as_slice()))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "search by a reference")
+    q.begin("Observation")
+    q.where(observation_subject().chain_to("Patient", patient_family().exact(family.as_slice())))
+    q.include(observation_subject())
+    if c.search(&q) = false or total_of(c.body()) <> 1 or entries_of(c.body()) <> 2
+        return failed(c, "chained search with an include")
+    q.begin("Observation")
+    q.where(observation_subject().chain("identifier", mark))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "chained search by a parameter's name")
+    q.begin("Patient")
+    q.where(patient_identifier().eq(mark))
+    q.revinclude(observation_subject())
+    if c.search(&q) = false or entries_of(c.body()) <> 2
+        return failed(c, "search with a reverse include")
+    q.begin("Observation")
+    q.where(observation_subject().eq(reference.as_slice()))
+    q.where(observation_code_value_quantity().eq("8867-4", "72"))
+    if c.search(&q) = false or total_of(c.body()) <> 1
+        return failed(c, "composite search")
+    q.begin("Observation")
+    q.where(observation_subject().eq(reference.as_slice()))
+    q.where(observation_value_quantity().gt("100"))
+    if c.search(&q) = false or total_of(c.body()) <> 0
+        return failed(c, "quantity search")
+    checks := checks + 6
+
+    ; pages: three found, one a page, sorted
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    q.sort("birthdate")
+    q.count(1)
+    if c.search(&q) = false or entries_of(c.body()) <> 1
+        return failed(c, "first page")
+    var pages 1
+    while c.next_page()
+    {
+        if entries_of(c.body()) <> 1
+            return failed(c, "a page that does not hold one")
+        pages := pages + 1
+        if pages > 5
+            break
+    }
+    if pages <> 3 or c.status() <> 0
+        return failed(c, "three pages")
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    q.count(2)
+    q.offset(2)
+    if c.search(&q) = false or entries_of(c.body()) <> 1
+        return failed(c, "a page by its offset")
+    checks := checks + 3
+
+    ; autocomplete
+    q.begin("Patient")
+    q.where(patient_family().eq(family.as_slice()))
+    if c.autocomplete(&q, "given") = false
+        return failed(c, "autocomplete")
+    let names JsonValue.parse(c.body())
+    if names.ok() = false or names.value.is_array() = false or names.value.length() < 3
+        return failed(c, "autocomplete: the given names")
+    checks := checks + 1
+
+    ; histories
+    if c.history("Patient", id.as_slice(), "") = false or entries_of(c.body()) <> 4
+        return failed(c, "history of a resource")
+    if c.history("Patient", "", "_count=2") = false or entries_of(c.body()) <> 2
+        return failed(c, "history of a type")
+    if c.history("", "", "_count=2") = false or entries_of(c.body()) <> 2
+        return failed(c, "history of everything")
+    checks := checks + 3
+
+    ; a transaction: one created, one read
+    body.clear()
+    body.append("{\"resourceType\":\"Bundle\",\"type\":\"transaction\",\"entry\":[{\"request\":{\"method\":\"POST\",\"url\":\"Patient\"},\"resource\":{\"resourceType\":\"Patient\",\"name\":[{\"family\":\"")
+    body.append(family.as_slice())
+    body.append("\"}]}},{\"request\":{\"method\":\"GET\",\"url\":\"Patient/")
+    body.append(id.as_slice())
+    body.append("\"}}]}")
+    if c.submit(body.as_slice()) = false or entries_of(c.body()) <> 2
+        return failed(c, "transaction")
+    checks := checks + 1
+
+    ; delete, and what is gone
+    if c.remove("Observation", observation.as_slice()) = false or c.status() <> 204
+        return failed(c, "delete")
+    if c.read("Observation", observation.as_slice()) or c.status() <> 410
+        return failed(c, "a deleted resource is not 410")
+    if c.read("Patient", "client-test-no-such-id") or c.status() <> 404 or c.diagnostics().length = 0
+        return failed(c, "an unknown id is not 404 with diagnostics")
+    q.begin("Patient")
+    q.param("no-such-parameter", "1")
+    if c.search(&q) or c.status() <> 400
+        return failed(c, "an unknown parameter is not 400")
+    checks := checks + 4
+
+    var line Array[u8]()
+    line.append("client: passed -- ")
+    put_count(&line, checks as i64)
+    line.append(" checks")
+    say(line.as_slice())
+    0
+}
+
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
+{
+    if argc < 2
+    {
+        Console.println("usage: client-test PORT [MARK]")
+        return 2
+    }
+    let port String(*(argv + 1))
+    var mark String("m")
+    if argc > 2
+        mark := String(*(argv + 2))
+    var c FhirClient()
+    c.connect("127.0.0.1", number_of(port.as_slice()), "/fire")
+    let result run(&c, mark.as_slice())
+    c.close()
+    result
+}

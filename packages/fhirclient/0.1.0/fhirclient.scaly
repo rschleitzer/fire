@@ -1,0 +1,17 @@
+; fhirclient -- a client of a FHIR server over HTTP/1.1: the interactions
+; of the RESTful API on resources in JSON (the json package reads them), a
+; search built of typed criteria, the pages of a result. What knows no
+; resource type is here; the search parameters of a model's resources are
+; written by the generator (codegen/client.scm) as a package of their own.
+;
+; NOT in it: TLS, authentication, a retry of a request that failed, more
+; than one connection.
+
+package scaly 0.1.0
+package json 0.1.1
+
+define fhirclient
+{
+    module Search
+    module Client
+}

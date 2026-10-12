@@ -15,6 +15,8 @@
 <!ENTITY bundlejs       SYSTEM "../upstream/codegen/bundlejs.scm">
 <!ENTITY js             SYSTEM "../upstream/codegen/js.scm">
 <!ENTITY html           SYSTEM "../upstream/codegen/html.scm">
+<!ENTITY fhirclient     SYSTEM "../upstream/codegen/fhirclient.scm">
+<!ENTITY client         SYSTEM "client.scm">
 <!ENTITY model          SYSTEM "model.scm">
 <!ENTITY search         SYSTEM "search.scm">
 
@@ -32,10 +34,15 @@
 &bundlejs;
 &js;
 &html;
+&fhirclient;
+&client;
 &model;
 &search;
 
 (element fhir
+  (sosofo-append
+    (with-mode clientpackage
+        (process-node-list (select-children "resources" (current-node))))
     (make directory path: "server"
         (sosofo-append
             (scaly-program-file)
@@ -44,7 +51,7 @@
                     (scaly-model-file)
                     (process-node-list (select-children "resources" (current-node)))))
             (with-mode webroot
-                (process-node-list (select-children "resources" (current-node)))))))
+                (process-node-list (select-children "resources" (current-node))))))))
 
 ; upstream's schema functions walk the children of the node they are called
 ; at: the resources
@@ -70,3 +77,7 @@
                 (html-documentation-file))
             (empty-sosofo)))
     (default (empty-sosofo)))
+
+; The search parameters for the client, a package of their own.
+(mode clientpackage
+    (element resources (scaly-client-package)))

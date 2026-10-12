@@ -976,6 +976,120 @@
 
         </chapter>
 
+        <chapter xml:id="client"><title>The Client</title>
+
+            <para>A Scaly program reaches the server through two packages:
+            <filename>packages/fhirclient</filename>, written by hand, which knows no resource type, and a
+            package the <link linkend="codegen">generator</link> writes
+            (<filename>packages/fireclient</filename>) with the search parameters of the model's
+            resources.</para>
+
+            <sect1 xml:id="clientrequests"><title>Requests</title>
+
+                <para>A <classname>FhirClient</classname> is one connection to a server, over HTTP/1.1 without
+                TLS. Resources are handed in and answered as JSON text; the <filename>json</filename> package
+                reads them.</para>
+
+                <programlisting>var c FhirClient()
+c.connect("127.0.0.1", 5080, "/fire")
+if c.read("Patient", "p1")
+{
+    let patient JsonValue.parse(c.body())
+    ...
+}</programlisting>
+
+                <para>Each request answers whether the server said 2xx. <literal>status()</literal>,
+                <literal>body()</literal>, <literal>field(name)</literal> (a header), <literal>version()</literal>
+                (from the ETag) and <literal>diagnostics()</literal> (of an OperationOutcome) are those of the
+                last answer.</para>
+
+                <variablelist>
+
+                    <varlistentry><term><literal>read</literal>, <literal>vread</literal></term>
+                        <listitem><para>A resource, and a version of it.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>create</literal>, <literal>create_unless</literal></term>
+                        <listitem><para>Create, and create unless a search finds one.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>update</literal>, <literal>update_version</literal>, <literal>patch</literal></term>
+                        <listitem><para>Replace a resource, replace it if it still has a version, change it by a
+                        JSON Patch.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>remove</literal></term>
+                        <listitem><para>Delete.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>history</literal></term>
+                        <listitem><para>Of a resource, a type or everything.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>submit</literal></term>
+                        <listitem><para>A batch or a transaction.</para></listitem></varlistentry>
+
+                    <varlistentry><term><literal>search</literal>, <literal>search_text</literal>, <literal>next_page</literal>, <literal>autocomplete</literal></term>
+                        <listitem><para>A <link linkend="clientsearch">search</link>, a search by its query
+                        string, the page behind the last answer, and the
+                        <link linkend="autocomplete">values</link> of a parameter.</para></listitem></varlistentry>
+
+                </variablelist>
+
+            </sect1>
+
+            <sect1 xml:id="clientsearch"><title>Searching</title>
+
+                <para>The generated package has a function for each search parameter, named by resource and
+                parameter. It answers the parameter in its type, and the type has the comparisons that
+                parameter allows: a comparison its type does not have does not compile.</para>
+
+                <programlisting>var q SearchQuery()
+q.begin("Observation")
+q.where(observation_subject().chain_to("Patient", patient_family().exact("Brown")))
+q.where(observation_date().ge("2026-01-01"))
+q.include(observation_subject())
+q.sort("-date")
+q.count(20)
+if c.search(&amp;q)
+    ...</programlisting>
+
+                <variablelist>
+
+                    <varlistentry><term>string</term>
+                        <listitem><para><literal>eq</literal>, <literal>exact</literal>, <literal>contains</literal></para></listitem></varlistentry>
+
+                    <varlistentry><term>token</term>
+                        <listitem><para><literal>eq</literal>, <literal>ne</literal>, and with a system
+                        <literal>coded</literal>, <literal>not_coded</literal></para></listitem></varlistentry>
+
+                    <varlistentry><term>date</term>
+                        <listitem><para><literal>eq</literal>, <literal>ne</literal>, <literal>gt</literal>,
+                        <literal>lt</literal>, <literal>ge</literal>, <literal>le</literal>, <literal>sa</literal>,
+                        <literal>eb</literal>, <literal>ap</literal></para></listitem></varlistentry>
+
+                    <varlistentry><term>quantity</term>
+                        <listitem><para><literal>eq</literal>, <literal>ne</literal>, <literal>gt</literal>,
+                        <literal>lt</literal>, <literal>ge</literal>, <literal>le</literal></para></listitem></varlistentry>
+
+                    <varlistentry><term>uri</term>
+                        <listitem><para><literal>eq</literal>, <literal>above</literal>, <literal>below</literal></para></listitem></varlistentry>
+
+                    <varlistentry><term>composite</term>
+                        <listitem><para><literal>eq</literal> with its two parts</para></listitem></varlistentry>
+
+                    <varlistentry><term>reference</term>
+                        <listitem><para><literal>eq</literal>, <literal>chain</literal> (to a parameter by its
+                        name), <literal>chain_to</literal> (to a criterion of a type); the query's
+                        <literal>include</literal> and <literal>revinclude</literal> take one</para></listitem></varlistentry>
+
+                </variablelist>
+
+                <para>Any other parameter is added by its name with <literal>param</literal>. Names and values
+                are escaped by the query.</para>
+
+                <para><command>tools/measure.sh client</command> runs the client's test,
+                <filename>tools/client-test</filename>, against both servers.</para>
+
+            </sect1>
+
+        </chapter>
+
     </part>
 
 </book>

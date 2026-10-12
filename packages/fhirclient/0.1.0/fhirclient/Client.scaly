@@ -1,0 +1,447 @@
+; The connection to a FHIR server and the interactions on it. A request
+; answers whether the server said 2xx; status(), body() and field() are of
+; the last answer and hold until the next request.
+;
+;   var c FhirClient()
+;   c.connect("127.0.0.1", 5080, "/fire")
+;   if c.read("Patient", "p1")
+;       let patient JsonValue.parse(c.body())
+
+use json.Value.JsonValue
+use fhirclient.Search.SearchQuery
+
+; The byte b in lower case, for the letters of ASCII.
+function lowered(b: u8) returns u8
+{
+    if b >= 65 and b <= 90
+        return b + 32
+    b
+}
+
+; Where needle begins in text at or after from; text.length when nowhere.
+function position_of(text: Slice[u8], needle: Slice[u8], from: size_t) returns size_t
+{
+    var i from
+    while i + needle.length <= text.length
+    {
+        if text.subslice(i, i + needle.length).equals(needle)
+            return i
+        i := i + 1
+    }
+    text.length
+}
+
+define FhirClient
+(
+    var host: Array[u8]
+    var port: int
+    var base: Array[u8]
+    var tcp: TcpStream
+    ; what was sent last, and what came back: the whole answer as read
+    var out: Array[u8]
+    var answer: Array[u8]
+    ; of the last answer: the status (0: the server was not reached), where
+    ; its head ends, and its body with any transfer coding taken off
+    var code: int
+    var head_length: size_t
+    var content: Array[u8]
+    ; the address a next_page was read from
+    var link: Array[u8]
+)
+{
+    init()
+    {
+        host := Array[u8]^this()
+        port := 0
+        base := Array[u8]^this()
+        tcp := TcpStream(0 - 1)
+        out := Array[u8]^this()
+        answer := Array[u8]^this()
+        code := 0
+        head_length := 0
+        content := Array[u8]^this()
+        link := Array[u8]^this()
+    }
+
+    ; Name the server: its host, its port and the path of its FHIR base
+    ; ("/fire"). The connection is made by the first request.
+    procedure connect(mutable this, name: Slice[u8], at: int, path: Slice[u8])
+    {
+        this.close()
+        host.clear()
+        host.append(name)
+        port := at
+        base.clear()
+        base.append(path)
+        while base.length > 0 and (base.as_slice()[base.length - 1] = 47)
+            base.length := base.length - 1
+    }
+
+    procedure close(mutable this)
+    {
+        if tcp.is_open()
+            tcp.close()
+    }
+
+    function status(this) returns int
+        code
+
+    function ok(this) returns bool
+        code >= 200 and code < 300
+
+    ; The body of the last answer.
+    function body(this) returns Slice[u8]
+        content.as_slice()
+
+    ; A header field of the last answer by its name in lower case; empty
+    ; when it has none.
+    function field(this, name: Slice[u8]) returns Slice[u8]
+    {
+        let head answer.as_slice().slice_to(head_length)
+        var at: size_t 0
+        while at < head.length
+        {
+            var end at
+            while end < head.length and head[end] <> 13
+                end := end + 1
+            let line head.subslice(at, end)
+            at := end + 2
+            if line.length <= name.length or line[name.length] <> 58
+                continue
+            var k: size_t 0
+            while k < name.length and (lowered(line[k]) = name[k])
+                k := k + 1
+            if k < name.length
+                continue
+            var from name.length + 1
+            while from < line.length and line[from] = 32
+                from := from + 1
+            return line.slice_from(from)
+        }
+        Slice[u8]()
+    }
+
+    ; The version the last answer names in its ETag (W/"3": 3); empty
+    ; without one.
+    function version(this) returns Slice[u8]
+    {
+        let tag this.field("etag")
+        let open position_of(tag, "\"", 0)
+        if open = tag.length
+            return Slice[u8]()
+        let close position_of(tag, "\"", open + 1)
+        if close = tag.length
+            return Slice[u8]()
+        tag.subslice(open + 1, close)
+    }
+
+    ; The diagnostics of the OperationOutcome a refusal was answered with;
+    ; empty when the body is none. A view of a copy the client keeps.
+    procedure diagnostics(mutable this) returns Slice[u8]
+    {
+        link.clear()
+        let parsed JsonValue.parse(content.as_slice())
+        if parsed.ok()
+        {
+            let issues parsed.value.get("issue")
+            if issues.is_array() and issues.length() > 0
+                link.append(issues.item(0).get("diagnostics").text())
+        }
+        link.as_slice()
+    }
+
+    ; More of the answer; false at the end of the stream.
+    procedure more(mutable this) returns bool
+    {
+        var chunk u8[8192]
+        let got tcp.read(Slice[u8](8192, &chunk[0]))
+        if got <= 0
+            return false
+        answer.append(Slice[u8](got as size_t, &chunk[0]))
+        true
+    }
+
+    ; Read the answer to what out holds; false when the connection ended
+    ; before a whole answer was there.
+    procedure receive(mutable this, head_only: bool) returns bool
+    {
+        answer.clear()
+        content.clear()
+        code := 0
+        head_length := 0
+        var end: size_t 0
+        while true
+        {
+            end := position_of(answer.as_slice(), "\r\n\r\n", 0)
+            if end < answer.length
+                break
+            if this.more() = false
+                return false
+        }
+        head_length := end + 2
+        let line answer.as_slice()
+        if line.length < 12
+            return false
+        code := ((line[9] as int) - 48) * 100 + ((line[10] as int) - 48) * 10 + ((line[11] as int) - 48)
+        let start end + 4
+        if head_only or code = 204 or code = 304 or code < 200
+            return true
+        let coding this.field("transfer-encoding")
+        if position_of(coding, "chunked", 0) < coding.length
+            return this.receive_chunks(start)
+        let length this.field("content-length")
+        var wanted: size_t 0
+        var k: size_t 0
+        while k < length.length and length[k] >= 48 and length[k] <= 57
+        {
+            wanted := wanted * 10 + ((length[k] as size_t) - 48)
+            k := k + 1
+        }
+        while answer.length < start + wanted
+        {
+            if this.more() = false
+                return false
+        }
+        content.append(answer.as_slice().subslice(start, start + wanted))
+        true
+    }
+
+    ; The chunks of a body that begins at `from`, put together.
+    procedure receive_chunks(mutable this, from: size_t) returns bool
+    {
+        var at from
+        while true
+        {
+            var end position_of(answer.as_slice(), "\r\n", at)
+            while end = answer.length
+            {
+                if this.more() = false
+                    return false
+                end := position_of(answer.as_slice(), "\r\n", at)
+            }
+            var size: size_t 0
+            var k at
+            while k < end
+            {
+                let b lowered(answer.as_slice()[k])
+                k := k + 1
+                if b >= 48 and b <= 57
+                {
+                    size := size * 16 + ((b as size_t) - 48)
+                    continue
+                }
+                if b >= 97 and b <= 102
+                {
+                    size := size * 16 + ((b as size_t) - 87)
+                    continue
+                }
+                break
+            }
+            at := end + 2
+            while answer.length < at + size + 2
+            {
+                if this.more() = false
+                    return false
+            }
+            if size = 0
+                return true
+            content.append(answer.as_slice().subslice(at, at + size))
+            at := at + size + 2
+        }
+        true
+    }
+
+    ; One request: the method, the address behind the server's base (or a
+    ; whole address, when absolute is set), one more header line or none,
+    ; and a body or none. True when the answer is 2xx.
+    procedure send(mutable this, method: Slice[u8], path: Slice[u8], absolute: bool, header: Slice[u8], header_value: Slice[u8], payload: Slice[u8]) returns bool
+    {
+        out.clear()
+        out.append(method)
+        out.add(32 as u8)
+        if absolute = false
+        {
+            out.append(base.as_slice())
+            if path.length > 0
+                out.add(47 as u8)
+        }
+        out.append(path)
+        out.append(" HTTP/1.1\r\nHost: ")
+        out.append(host.as_slice())
+        out.add(58 as u8)
+        put_count(&out, port as i64)
+        out.append("\r\nAccept: application/fhir+json\r\n")
+        if header.length > 0
+        {
+            out.append(header)
+            out.append(": ")
+            out.append(header_value)
+            out.append("\r\n")
+        }
+        if payload.length > 0 or method.equals("POST") or method.equals("PUT") or method.equals("PATCH")
+        {
+            out.append("Content-Type: application/fhir+json\r\nContent-Length: ")
+            put_count(&out, payload.length as i64)
+            out.append("\r\n")
+        }
+        out.append("\r\n")
+        out.append(payload)
+        let head_only method.equals("HEAD")
+        ; a connection the server has closed since the last request shows at
+        ; the write or the first read: one more try on a new one
+        var attempt 0
+        while attempt < 2
+        {
+            attempt := attempt + 1
+            if tcp.is_open() = false
+            {
+                var name String(host.as_slice().data as pointer[const_char], host.length)
+                tcp := TcpStream.connect(name, port)
+                if tcp.is_open() = false
+                {
+                    code := 0
+                    return false
+                }
+                tcp.set_nodelay(true)
+            }
+            if tcp.write(out.as_slice()) and this.receive(head_only)
+            {
+                let closing this.field("connection")
+                if position_of(closing, "close", 0) < closing.length
+                    tcp.close()
+                return this.ok()
+            }
+            tcp.close()
+        }
+        code := 0
+        false
+    }
+
+    ; type/id, with what follows behind it.
+    procedure address(mutable this, type: Slice[u8], id: Slice[u8], rest: Slice[u8], query: Slice[u8]) returns Slice[u8]
+    {
+        link.clear()
+        link.append(type)
+        if id.length > 0
+        {
+            link.add(47 as u8)
+            link.append(id)
+        }
+        link.append(rest)
+        if query.length > 0
+        {
+            link.add(63 as u8)
+            link.append(query)
+        }
+        link.as_slice()
+    }
+
+    procedure read(mutable this, type: Slice[u8], id: Slice[u8]) returns bool
+        this.send("GET", this.address(type, id, "", ""), false, "", "", "")
+
+    procedure vread(mutable this, type: Slice[u8], id: Slice[u8], version: Slice[u8]) returns bool
+    {
+        link.clear()
+        link.append(type)
+        link.add(47 as u8)
+        link.append(id)
+        link.append("/_history/")
+        link.append(version)
+        this.send("GET", link.as_slice(), false, "", "", "")
+    }
+
+    ; Create resource (JSON); the answer has it as stored, with its id.
+    procedure create(mutable this, type: Slice[u8], resource: Slice[u8]) returns bool
+        this.send("POST", type, false, "", "", resource)
+
+    ; Create unless `search` (a query string) finds one: status 201 when it
+    ; was created, 200 when one was there.
+    procedure create_unless(mutable this, type: Slice[u8], resource: Slice[u8], search: Slice[u8]) returns bool
+        this.send("POST", type, false, "If-None-Exist", search, resource)
+
+    procedure update(mutable this, type: Slice[u8], id: Slice[u8], resource: Slice[u8]) returns bool
+        this.send("PUT", this.address(type, id, "", ""), false, "", "", resource)
+
+    ; Update when the resource still has `version`; 409 (a conflict) when it has not.
+    procedure update_version(mutable this, type: Slice[u8], id: Slice[u8], version: Slice[u8], resource: Slice[u8]) returns bool
+    {
+        var tag Array[u8]()
+        tag.append("W/\"")
+        tag.append(version)
+        tag.append("\"")
+        this.send("PUT", this.address(type, id, "", ""), false, "If-Match", tag.as_slice(), resource)
+    }
+
+    ; Change a resource by a JSON Patch document.
+    procedure patch(mutable this, type: Slice[u8], id: Slice[u8], operations: Slice[u8]) returns bool
+        this.send("PATCH", this.address(type, id, "", ""), false, "", "", operations)
+
+    procedure remove(mutable this, type: Slice[u8], id: Slice[u8]) returns bool
+        this.send("DELETE", this.address(type, id, "", ""), false, "", "", "")
+
+    ; The versions of a resource, of a type (id empty) or of everything
+    ; (type empty too), as a Bundle; query may be empty.
+    procedure history(mutable this, type: Slice[u8], id: Slice[u8], query: Slice[u8]) returns bool
+    {
+        if type.length = 0
+            return this.send("GET", this.address("_history", "", "", query), false, "", "", "")
+        this.send("GET", this.address(type, id, "/_history", query), false, "", "", "")
+    }
+
+    ; A batch or a transaction; the answer is the Bundle of its results.
+    procedure submit(mutable this, bundle: Slice[u8]) returns bool
+        this.send("POST", "", false, "", "", bundle)
+
+    ; A search by its query string; the answer is a Bundle.
+    procedure search_text(mutable this, type: Slice[u8], query: Slice[u8]) returns bool
+        this.send("GET", this.address(type, "", "", query), false, "", "", "")
+
+    procedure search(mutable this, query: ref[SearchQuery]) returns bool
+        this.search_text(query.resource(), query.query())
+
+    ; The values of `parameter` among what the search finds, as a JSON
+    ; array of strings.
+    procedure autocomplete(mutable this, query: ref[SearchQuery], parameter: Slice[u8]) returns bool
+    {
+        var text Array[u8]()
+        text.append(query.query())
+        if text.length > 0
+            text.add(38 as u8)
+        text.append("_autocomplete=")
+        put_escaped(&text, parameter)
+        this.send("GET", this.address(query.resource(), "", "/$autocomplete", text.as_slice()), false, "", "", "")
+    }
+
+    ; The page behind the Bundle of the last answer; false when it has
+    ; none (status() is 0 then) or the request for it failed.
+    procedure next_page(mutable this) returns bool
+    {
+        link.clear()
+        let parsed JsonValue.parse(content.as_slice())
+        if parsed.ok()
+        {
+            let links parsed.value.get("link")
+            var i: size_t 0
+            while i < links.length()
+            {
+                if links.item(i).get("relation").text().equals("next")
+                    link.append(links.item(i).get("url").text())
+                i := i + 1
+            }
+        }
+        if link.length = 0
+        {
+            code := 0
+            return false
+        }
+        ; the address as the server wrote it: its path and query
+        var from position_of(link.as_slice(), "://", 0)
+        if from < link.length
+            from := position_of(link.as_slice(), "/", from + 3)
+        else
+            from := 0
+        var path Array[u8]()
+        path.append(link.as_slice().slice_from(from))
+        this.send("GET", path.as_slice(), true, "", "", "")
+    }
+}

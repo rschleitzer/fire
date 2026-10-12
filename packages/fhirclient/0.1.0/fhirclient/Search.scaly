@@ -1,0 +1,296 @@
+; A search: criteria made by the parameters of a resource, each of its
+; type, and the query string they make.
+;
+;   var q SearchQuery()
+;   q.begin("Patient")
+;   q.where(patient_family().exact("Brown"))
+;   q.where(patient_birthdate().ge("1990-01-01"))
+;   q.count(10)
+
+; One condition: the parameter's name (behind `lead`, the reference it is
+; chained through, and `target`, the type that reference is narrowed to),
+; its modifier, and the value with its prefix; `second` behind `joiner` for
+; a value of two parts. All of them are views: of literals, or of what the
+; caller handed in, which must live until the criterion is added.
+define Criterion
+(
+    lead: Slice[u8]
+    target: Slice[u8]
+    name: Slice[u8]
+    modifier: Slice[u8]
+    prefix: Slice[u8]
+    value: Slice[u8]
+    joiner: Slice[u8]
+    second: Slice[u8]
+)
+
+; (a literal is a Slice where a parameter says so, not in a construction)
+function criterion(lead: Slice[u8], target: Slice[u8], name: Slice[u8], modifier: Slice[u8], prefix: Slice[u8], value: Slice[u8], joiner: Slice[u8], second: Slice[u8]) returns Criterion
+    Criterion(lead, target, name, modifier, prefix, value, joiner, second)
+
+function plain_criterion(name: Slice[u8], modifier: Slice[u8], prefix: Slice[u8], value: Slice[u8]) returns Criterion
+    criterion("", "", name, modifier, prefix, value, "", "")
+
+define StringParam(name: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    function exact(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, ":exact", "", value)
+    function contains(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, ":contains", "", value)
+}
+
+define TokenParam(name: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    function ne(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, ":not", "", value)
+    ; A code of a system.
+    function coded(this, system: Slice[u8], value: Slice[u8]) returns Criterion
+        criterion("", "", name, "", "", system, "|", value)
+    function not_coded(this, system: Slice[u8], value: Slice[u8]) returns Criterion
+        criterion("", "", name, ":not", "", system, "|", value)
+}
+
+define DateParam(name: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    function ne(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "ne", value)
+    function gt(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "gt", value)
+    function lt(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "lt", value)
+    function ge(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "ge", value)
+    function le(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "le", value)
+    function sa(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "sa", value)
+    function eb(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "eb", value)
+    function ap(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "ap", value)
+}
+
+define QuantityParam(name: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    function ne(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "ne", value)
+    function gt(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "gt", value)
+    function lt(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "lt", value)
+    function ge(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "ge", value)
+    function le(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "le", value)
+}
+
+define UriParam(name: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    function above(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, ":above", "", value)
+    function below(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, ":below", "", value)
+}
+
+define CompositeParam(name: Slice[u8])
+{
+    function eq(this, first: Slice[u8], second: Slice[u8]) returns Criterion
+        criterion("", "", name, "", "", first, "$", second)
+}
+
+; A reference parameter of the resource type `resource`.
+define ReferenceParam(name: Slice[u8], resource: Slice[u8])
+{
+    function eq(this, value: Slice[u8]) returns Criterion
+        plain_criterion(name, "", "", value)
+    ; Through the reference to a parameter of what it points to, by name.
+    function chain(this, parameter: Slice[u8], value: Slice[u8]) returns Criterion
+        criterion(name, "", parameter, "", "", value, "", "")
+    ; Through the reference to a criterion of the type it is narrowed to.
+    ; (One step: a criterion that is chained itself keeps its last part.)
+    function chain_to(this, type: Slice[u8], inner: Criterion) returns Criterion
+        criterion(name, type, inner.name, inner.modifier, inner.prefix, inner.value, inner.joiner, inner.second)
+}
+
+; Is b a byte a URI leaves as it is (.NET's Uri.EscapeDataString)?
+function unreserved(b: u8) returns bool
+{
+    if b >= 48 and b <= 57
+        return true
+    if b >= 65 and b <= 90
+        return true
+    if b >= 97 and b <= 122
+        return true
+    b = 45 or b = 46 or b = 95 or b = 126
+}
+
+; text added to out, escaped for a query string.
+procedure put_escaped(mutable out: ref[Array[u8]], text: Slice[u8])
+{
+    let digits: Slice[u8] "0123456789ABCDEF"
+    var i: size_t 0
+    while i < text.length
+    {
+        let b text[i]
+        i := i + 1
+        if unreserved(b)
+        {
+            out.add(b)
+            continue
+        }
+        out.add(37 as u8)
+        out.add(digits[(b / 16) as size_t])
+        out.add(digits[(b % 16) as size_t])
+    }
+}
+
+; v in decimal, added to out.
+procedure put_count(mutable out: ref[Array[u8]], v: i64)
+{
+    if v < 0
+    {
+        out.add(45 as u8)
+        return put_count(out, (0 as i64) - v)
+    }
+    if v >= 10
+        put_count(out, v / 10)
+    out.add(((v % 10) + 48) as u8)
+}
+
+; The search being built: the resource type and the query string so far.
+define SearchQuery
+(
+    var type: Array[u8]
+    var text: Array[u8]
+)
+{
+    init()
+    {
+        type := Array[u8]^this()
+        text := Array[u8]^this()
+    }
+
+    ; Start a search of a resource type.
+    procedure begin(mutable this, resource: Slice[u8])
+    {
+        type.clear()
+        type.append(resource)
+        text.clear()
+    }
+
+    function resource(this) returns Slice[u8]
+        type.as_slice()
+
+    ; The query string, without the question mark.
+    function query(this) returns Slice[u8]
+        text.as_slice()
+
+    procedure separate(mutable this)
+    {
+        if text.length > 0
+            text.add(38 as u8)
+    }
+
+    procedure where(mutable this, c: Criterion)
+    {
+        this.separate()
+        if c.lead.length > 0
+        {
+            put_escaped(&text, c.lead)
+            if c.target.length > 0
+            {
+                put_escaped(&text, ":")
+                put_escaped(&text, c.target)
+            }
+            text.add(46 as u8)
+        }
+        put_escaped(&text, c.name)
+        put_escaped(&text, c.modifier)
+        text.add(61 as u8)
+        put_escaped(&text, c.prefix)
+        put_escaped(&text, c.value)
+        put_escaped(&text, c.joiner)
+        put_escaped(&text, c.second)
+    }
+
+    ; Any parameter by its name.
+    procedure param(mutable this, name: Slice[u8], value: Slice[u8])
+    {
+        this.separate()
+        put_escaped(&text, name)
+        text.add(61 as u8)
+        put_escaped(&text, value)
+    }
+
+    procedure number(mutable this, name: Slice[u8], value: i64)
+    {
+        this.separate()
+        put_escaped(&text, name)
+        text.add(61 as u8)
+        put_count(&text, value)
+    }
+
+    procedure count(mutable this, value: i64)
+        this.number("_count", value)
+
+    procedure offset(mutable this, value: i64)
+        this.number("_offset", value)
+
+    procedure sort(mutable this, value: Slice[u8])
+        this.param("_sort", value)
+
+    ; The resources a reference of the searched type points to.
+    procedure include(mutable this, reference: ReferenceParam)
+    {
+        this.separate()
+        put_escaped(&text, "_include")
+        text.add(61 as u8)
+        put_escaped(&text, type.as_slice())
+        put_escaped(&text, ":")
+        put_escaped(&text, reference.name)
+    }
+
+    ; The resources that point to the found ones through a reference of
+    ; their own type.
+    procedure revinclude(mutable this, reference: ReferenceParam)
+    {
+        this.separate()
+        put_escaped(&text, "_revinclude")
+        text.add(61 as u8)
+        put_escaped(&text, reference.resource)
+        put_escaped(&text, ":")
+        put_escaped(&text, reference.name)
+    }
+}
+
+; The parameters by their names, as the generated descriptors make them.
+function string_param(name: Slice[u8]) returns StringParam
+    StringParam(name)
+
+function token_param(name: Slice[u8]) returns TokenParam
+    TokenParam(name)
+
+function date_param(name: Slice[u8]) returns DateParam
+    DateParam(name)
+
+function quantity_param(name: Slice[u8]) returns QuantityParam
+    QuantityParam(name)
+
+function uri_param(name: Slice[u8]) returns UriParam
+    UriParam(name)
+
+function composite_param(name: Slice[u8]) returns CompositeParam
+    CompositeParam(name)
+
+function reference_param(name: Slice[u8], resource: Slice[u8]) returns ReferenceParam
+    ReferenceParam(name, resource)

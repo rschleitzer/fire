@@ -9,3 +9,6 @@ obj/
 # packages/fhir and is NOT generated.
 /server/*.scaly
 /server/*/
+
+# the search parameters for the client (codegen/client.scm)
+/packages/fireclient/

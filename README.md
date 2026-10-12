@@ -46,6 +46,13 @@ The documentation of the Scaly server in DocBook. `tools/generate.sh` makes
 its pages with upstream's stylesheet and puts them into the server's web
 root, where the server serves them.
 
+## packages/fhirclient
+
+A client of the server for Scaly programs: the requests of the RESTful API
+and searches built of typed criteria. The search parameters of the model's
+resources are generated beside it (`packages/fireclient`, not in git).
+`tools/measure.sh client` runs its test against both servers.
+
 ## Licence
 
 MIT, `LICENSE`. `upstream/` carries its own, `upstream/LICENSE`, also MIT.
