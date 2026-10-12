@@ -11,11 +11,14 @@
 #      on its copy and upgrades it;
 #   3. the two databases must be the same: the version, the schema
 #      (pg_dump), the rows the steps wrote.
-# A throwaway postgres:18 on port 55436; scratch and logs in
+# A throwaway postgres:18 on port 55436 -- or, with FIRE_DATABASE=sqlite,
+# files (before.sqlite.sql, rows.sqlite.sql); scratch and logs in
 # ~/.cache/fire-measure/upgrade. dazzle on the PATH, or $DAZZLE.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DATABASE="${FIRE_DATABASE:-postgresql}"
 WORK="${FIRE_MEASURE_HOME:-$HOME/.cache/fire-measure}/upgrade"
+[ "$DATABASE" = sqlite ] && WORK="$WORK-sqlite"
 DAZZLE="${DAZZLE:-dazzle}"
 PG_NAME=fire-upgrade-pg PG_PORT=55436 PG_PASSWORD=throwaway PORT=5582
 BASE="http://localhost:$PORT"
@@ -29,14 +32,15 @@ stop_server() {
   local left; left=$(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null)
   [ -z "$left" ] || { kill $left 2>/dev/null; sleep 1; }
 }
-trap 'stop_server; docker rm -f -v "$PG_NAME" > /dev/null 2>&1' EXIT
+trap 'stop_server; [ "$DATABASE" = sqlite ] || docker rm -f -v "$PG_NAME" > /dev/null 2>&1' EXIT
 psql_() { docker exec -i "$PG_NAME" psql -U postgres -v ON_ERROR_STOP=1 "$@"; }
 
 # start <log> <database> <command...>: a server on the database, until it listens
 start() {
   local log=$1 database=$2; shift 2
-  DatabaseType=PostgreSql \
-  ConnectionString="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD" \
+  local kind=PostgreSql connection="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD"
+  [ "$DATABASE" = sqlite ] && kind=Sqlite connection="Data Source=$WORK/$database.db"
+  DatabaseType=$kind ConnectionString="$connection" \
   Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE" "$@" > "$log" 2>&1 &
   SERVER_PID=$!
   local i=0
@@ -57,17 +61,24 @@ echo "upgrade-test: 1 -- a database of the model as it is, with resources, set b
 "$ROOT/tools/generate.sh" > "$WORK/generate.log" 2>&1 || die "tools/generate.sh"
 mkdir -p "$ROOT/server/build"
 (cd "$ROOT" && scaly build server/fire.scaly -o server/build/fire) > "$WORK/build.a.log" 2>&1 || { cat "$WORK/build.a.log" >&2; die "the server of the model as it is does not build"; }
-docker rm -f -v "$PG_NAME" > /dev/null 2>&1
-docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=Fire -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
-until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
+if [ "$DATABASE" != sqlite ]; then
+  docker rm -f -v "$PG_NAME" > /dev/null 2>&1
+  docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=Fire -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
+  until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
+fi
 start "$WORK/a.log" Fire "$ROOT/server/build/fire" || die "the server of the model as it is does not start"
 for f in "$ROOT"/tools/turns/linked/*.json; do
   name=$(basename "$f" .json)
   curl -s -o /dev/null -X PUT -H 'Content-Type: application/fhir+json' --data-binary @"$f" "$BASE/fire/${name%%.*}/${name#*.}"
 done
 stop_server
-psql_ -d Fire -q < "$ROOT/tools/upgrade/before.sql" || die "tools/upgrade/before.sql"
-psql_ -q -c 'create database "FireS" template "Fire"' -c 'create database "FireC" template "Fire"' || die "the copies"
+if [ "$DATABASE" = sqlite ]; then
+  sqlite3 "$WORK/Fire.db" < "$ROOT/tools/upgrade/before.sqlite.sql" || die "tools/upgrade/before.sqlite.sql"
+  cp "$WORK/Fire.db" "$WORK/FireS.db" && cp "$WORK/Fire.db" "$WORK/FireC.db" || die "the copies"
+else
+  psql_ -d Fire -q < "$ROOT/tools/upgrade/before.sql" || die "tools/upgrade/before.sql"
+  psql_ -q -c 'create database "FireS" template "Fire"' -c 'create database "FireC" template "Fire"' || die "the copies"
+fi
 
 echo "upgrade-test: 2 -- the Scaly server of the model with steps upgrades its copy"
 mkdir -p "$WORK/scaly" && ln -s "$ROOT/packages" "$WORK/scaly/packages"
@@ -89,6 +100,12 @@ stop_server
 echo "upgrade-test: 3 -- the two databases"
 FAILED=""
 for d in FireS FireC; do
+  if [ "$DATABASE" = sqlite ]; then
+    sqlite3 "$WORK/$d.db" "select value from fire_meta_dbinfo where name = 'version'" > "$WORK/$d.version"
+    sqlite3 "$WORK/$d.db" .schema > "$WORK/$d.schema"
+    sqlite3 "$WORK/$d.db" < "$ROOT/tools/upgrade/rows.sqlite.sql" > "$WORK/$d.rows"
+    continue
+  fi
   psql_ -d $d -At -c "select value from fire_meta.dbinfo where name = 'version'" > "$WORK/$d.version"
   docker exec "$PG_NAME" pg_dump -U postgres --schema-only --no-owner -d $d | grep -v '^\\\(un\)\?restrict\|^-- Dumped' > "$WORK/$d.schema"
   psql_ -d $d -At < "$ROOT/tools/upgrade/rows.sql" > "$WORK/$d.rows"
@@ -102,4 +119,4 @@ cmp -s "$WORK/FireS.rows" "$WORK/FireC.rows" || { echo "upgrade-test: FAIL -- th
 cmp -s "$WORK/s.steps" "$WORK/c.steps" || { echo "upgrade-test: FAIL -- the steps the servers name differ:"; diff "$WORK/s.steps" "$WORK/c.steps"; FAILED=1; }
 [ -s "$WORK/FireS.rows" ] || { echo "upgrade-test: FAIL -- no rows to compare"; FAILED=1; }
 [ -z "$FAILED" ] || { echo "upgrade-test: FAILED"; exit 1; }
-echo "upgrade-test: passed -- both servers took the database from 5.0.0 to $(cat "$WORK/FireS.version") in $(grep -c 'Database upgraded' "$WORK/s.steps") steps; the schemas are the same ($(wc -l < "$WORK/FireS.schema" | tr -d ' ') lines), and so are the $(wc -l < "$WORK/FireS.rows" | tr -d ' ') rows the steps wrote"
+echo "upgrade-test: passed on $DATABASE -- both servers took the database from 5.0.0 to $(cat "$WORK/FireS.version") in $(grep -c 'Database upgraded' "$WORK/s.steps") steps; the schemas are the same ($(wc -l < "$WORK/FireS.schema" | tr -d ' ') lines), and so are the $(wc -l < "$WORK/FireS.rows" | tr -d ' ') rows the steps wrote"

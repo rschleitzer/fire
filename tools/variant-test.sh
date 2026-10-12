@@ -7,14 +7,17 @@
 # then the same must hold of both: the schema (pg_dump), the answer to
 # every step (status, Location, ETag, content type, the body without ids
 # and times), and every row of every table (without ids and times).
-# A throwaway postgres:18 on port 55437; scratch and answers in
-# ~/.cache/fire-measure/variant-<variant>. dazzle on the PATH, or $DAZZLE.
+# A throwaway postgres:18 on port 55437 -- or, with FIRE_DATABASE=sqlite, a
+# file each; scratch and answers in ~/.cache/fire-measure/variant-<variant>.
+# dazzle on the PATH, or $DAZZLE.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VARIANT=${1:?usage: tools/variant-test.sh <variant>}
 HERE="$ROOT/tools/variants/$VARIANT"
 [ -f "$HERE/model.py" ] || { echo "variant-test: no variant $VARIANT" >&2; exit 2; }
+DATABASE="${FIRE_DATABASE:-postgresql}"
 WORK="${FIRE_MEASURE_HOME:-$HOME/.cache/fire-measure}/variant-$VARIANT"
+[ "$DATABASE" = sqlite ] && WORK="$WORK-sqlite"
 DAZZLE="${DAZZLE:-dazzle}"
 PG_NAME=fire-variant-pg PG_PORT=55437 PG_PASSWORD=throwaway PORT=5583
 BASE="http://localhost:$PORT"
@@ -28,13 +31,15 @@ stop_server() {
   local left; left=$(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null)
   [ -z "$left" ] || { kill $left 2>/dev/null; sleep 1; }
 }
-trap 'stop_server; docker rm -f -v "$PG_NAME" > /dev/null 2>&1' EXIT
+trap 'stop_server; [ "$DATABASE" = sqlite ] || docker rm -f -v "$PG_NAME" > /dev/null 2>&1' EXIT
 
 # start <log> <database> <command...>: a server on the database, until it listens
 start() {
   local log=$1 database=$2; shift 2
-  DatabaseType=PostgreSql SeedDataPath="$ROOT/tools/turns/seed" ReseedSecret=variant-secret \
-  ConnectionString="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD" \
+  local kind=PostgreSql connection="Host=localhost;Port=$PG_PORT;Database=$database;Username=postgres;Password=$PG_PASSWORD"
+  [ "$DATABASE" = sqlite ] && kind=Sqlite connection="Data Source=$WORK/$database.db"
+  DatabaseType=$kind SeedDataPath="$ROOT/tools/turns/seed" ReseedSecret=variant-secret \
+  ConnectionString="$connection" \
   Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE" "$@" > "$log" 2>&1 &
   SERVER_PID=$!
   local i=0
@@ -77,6 +82,13 @@ neutral() { [ -f "$1" ] || return 0; sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 # rows <database>: every row of every table, the content as text
 rows() {
   local tables sql= t
+  if [ "$DATABASE" = sqlite ]; then
+    for t in $(sqlite3 "$WORK/$1.db" "select name from sqlite_master where type = 'table' order by 1"); do
+      sqlite3 "$WORK/$1.db" "select '$t', $(sqlite3 "$WORK/$1.db" "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$t') where name not in ('last_updated', 'history_timestamp', 'content')") $(sqlite3 "$WORK/$1.db" "select ', content' from pragma_table_info('$t') where name = 'content'") from $t"
+    done > "$WORK/$1.rows.raw" || return 1
+    neutral "$WORK/$1.rows.raw" | sort > "$WORK/$1.rows"
+    return
+  fi
   tables=$(docker exec "$PG_NAME" psql -U postgres -d "$1" -Atc \
     "select quote_ident(table_schema) || '.' || quote_ident(table_name) from information_schema.tables
       where table_schema not in ('pg_catalog', 'information_schema') and table_type = 'BASE TABLE' order by 1")
@@ -108,10 +120,12 @@ cp "$WORK/model/fhir.xml" "$WORK/csharp/fhir.xml"
 (cd "$WORK/csharp" && "$DAZZLE" -t sgml -d codegen/map.dsl fhir.xml) > "$WORK/generate.c.log" 2>&1 || die "upstream's generator"
 (cd "$WORK/csharp/server" && dotnet build -v q) > "$WORK/build.c.log" 2>&1 || { grep -m5 'error' "$WORK/build.c.log" >&2; die "the C# server does not build"; }
 
-docker rm -f -v "$PG_NAME" > /dev/null 2>&1
-docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=FireS -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
-until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
-docker exec "$PG_NAME" psql -U postgres -q -c 'create database "FireC"' || die "the second database"
+if [ "$DATABASE" != sqlite ]; then
+  docker rm -f -v "$PG_NAME" > /dev/null 2>&1
+  docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=FireS -p "$PG_PORT:5432" postgres:18 > /dev/null || die "no PostgreSQL"
+  until docker exec "$PG_NAME" pg_isready -U postgres -q; do sleep 1; done; sleep 2
+  docker exec "$PG_NAME" psql -U postgres -q -c 'create database "FireC"' || die "the second database"
+fi
 
 echo "variant-test: scaly answers the steps"
 start "$WORK/s.log" FireS "$WORK/scaly/server/build/fire" || die "the Scaly server does not start (see $WORK/s.log)"
@@ -130,11 +144,15 @@ while [ $n -le "$STEPPED" ]; do
   n=$((n+1))
 done
 for d in FireS FireC; do
-  docker exec "$PG_NAME" pg_dump -U postgres --schema-only --no-owner -d $d | grep -v '^\\\(un\)\?restrict\|^-- Dumped' > "$WORK/$d.schema"
+  if [ "$DATABASE" = sqlite ]; then
+    sqlite3 "$WORK/$d.db" .schema > "$WORK/$d.schema"
+  else
+    docker exec "$PG_NAME" pg_dump -U postgres --schema-only --no-owner -d $d | grep -v '^\\\(un\)\?restrict\|^-- Dumped' > "$WORK/$d.schema"
+  fi
   rows $d || die "the rows of $d"
 done
 cmp -s "$WORK/FireS.schema" "$WORK/FireC.schema" || { echo "variant-test: FAIL -- the schemas differ: diff $WORK/FireS.schema $WORK/FireC.schema"; FAILED=1; }
 cmp -s "$WORK/FireS.rows" "$WORK/FireC.rows" || { echo "variant-test: FAIL -- the rows differ: diff $WORK/FireS.rows $WORK/FireC.rows"; FAILED=1; }
 [ -s "$WORK/FireS.rows" ] || { echo "variant-test: FAIL -- no rows to compare"; FAILED=1; }
 [ -z "$FAILED" ] || { echo "variant-test: FAILED ($UNLIKE of $STEPPED steps unlike)"; exit 1; }
-echo "variant-test: passed -- $VARIANT: $STEPPED steps answered alike, the schemas the same ($(wc -l < "$WORK/FireS.schema" | tr -d ' ') lines), $(wc -l < "$WORK/FireS.rows" | tr -d ' ') rows equal"
+echo "variant-test: passed -- $VARIANT on $DATABASE: $STEPPED steps answered alike, the schemas the same ($(wc -l < "$WORK/FireS.schema" | tr -d ' ') lines), $(wc -l < "$WORK/FireS.rows" | tr -d ' ') rows equal"
