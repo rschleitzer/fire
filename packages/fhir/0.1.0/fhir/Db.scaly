@@ -284,6 +284,24 @@ define DbConn
         c.prepare_unnamed(sql)
     }
 
+    ; Begin a query of sql itself, a text made for this one query, which
+    ; answers `columns` columns: the parameters follow, then run. PostgreSQL
+    ; gets text and parameters in ONE exchange (a text it refuses fails at
+    ; run); the others prepare it first, and false is their refusal.
+    procedure begin_query(mutable this, sql: Slice[u8], columns: int) returns bool
+    {
+        if kind = DATABASE_POSTGRESQL
+        {
+            var c pg as ref[PgConn]
+            c.start_unnamed(sql, columns)
+            return true
+        }
+        if this.prepare_unnamed(sql) = false
+            return false
+        this.start("")
+        true
+    }
+
     procedure start(mutable this, name: Slice[u8])
     {
         if kind = DATABASE_SQLITE

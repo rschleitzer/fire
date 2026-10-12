@@ -177,10 +177,9 @@ procedure sql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], 
     if held.missing()
         return FAILED
     var c &held
-    var ok c.prepare_unnamed(sql.as_slice())
+    var ok c.begin_query(sql.as_slice(), 0)
     if ok
     {
-        c.start("")
         var at: size_t 0
         while at < values.length
         {

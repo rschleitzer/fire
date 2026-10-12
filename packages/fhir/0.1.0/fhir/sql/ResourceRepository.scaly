@@ -1463,10 +1463,9 @@ procedure sql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[
     counting.add(matching.as_slice())
     ; a search's text is made for this request: the statement is not kept
     var total: i64 0
-    var ok c.prepare_unnamed(counting.as_slice())
+    var ok c.begin_query(counting.as_slice(), 1)
     if ok
     {
-        c.start("")
         bind_parameters(c, &q)
         ok := c.run() and c.next_row()
         if ok
@@ -1485,10 +1484,9 @@ procedure sql_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[
         put_decimal(&page, (q.cells.length / 2 + 1) as i64)
         put_bytes(&page, " OFFSET $")
         put_decimal(&page, (q.cells.length / 2 + 2) as i64)
-        ok := c.prepare_unnamed(page.as_slice())
+        ok := c.begin_query(page.as_slice(), 3)
         if ok
         {
-            c.start("")
             bind_parameters(c, &q)
             c.param_int(count)
             c.param_int(offset)
@@ -1585,10 +1583,9 @@ procedure sql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, of
         return StoreResult(FAILED, 0, 0)
     var c &held
     var total: i64 0
-    var ok c.prepare_unnamed(counting.as_slice())
+    var ok c.begin_query(counting.as_slice(), 1)
     if ok
     {
-        c.start("")
         if one
             c.param_text(id)
         ok := c.run() and c.next_row()
@@ -1597,10 +1594,9 @@ procedure sql_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, of
     }
     if ok
     {
-        ok := c.prepare_unnamed(listing.as_slice())
+        ok := c.begin_query(listing.as_slice(), 6)
         if ok
         {
-            c.start("")
             if one
                 c.param_text(id)
             c.param_int(count)
