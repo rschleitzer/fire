@@ -261,14 +261,19 @@ public class DatabaseProvider : IDatabaseProvider
 "       ))
     )
 "
-    public string InitialSchema => \"\"\"
-" (schema-sql db) "\"\"\";
+    // (the scripts as UTF-8 data, read when they are asked for: as string literals the three
+    // databases' schemas of a large model are more text than an assembly may hold)
+    private string? _initialSchema;
+    public string InitialSchema => _initialSchema ??= System.Text.Encoding.UTF8.GetString(\"\"\"
+" (schema-sql db) "\"\"\"u8);
 
-    public string CreateIndexesSql => \"\"\"
-" (create-indexes-sql db) "\"\"\";
+    private string? _createIndexesSql;
+    public string CreateIndexesSql => _createIndexesSql ??= System.Text.Encoding.UTF8.GetString(\"\"\"
+" (create-indexes-sql db) "\"\"\"u8);
 
-    public string DropIndexesSql => \"\"\"
-" (drop-indexes-sql db) "\"\"\";
+    private string? _dropIndexesSql;
+    public string DropIndexesSql => _dropIndexesSql ??= System.Text.Encoding.UTF8.GetString(\"\"\"
+" (drop-indexes-sql db) "\"\"\"u8);
 
     public string? ReseedTruncateSql(string resourceType) => resourceType switch
     {

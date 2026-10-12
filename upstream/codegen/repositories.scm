@@ -3133,6 +3133,120 @@ public class "rn"Repository : I"rn"Repository
                 "")))
           target-nodes))))
 
+; --- Sorting through a reference ---
+
+; The keys every active resource offers to a chained sort, as data (SortTargets.cs).
+(define (sort-target-keys)
+    (apply $ (map (lambda (r)
+        (let ((rn (name-of r)))
+            ($
+                (apply $ (map (lambda (s)
+                    ($"        [\"" rn "." (% "name" s) "\"] = ('i', \"" (search-col s) "\"),
+"))
+                    (node-list->list (inline-searches r))))
+                (apply $ (map (lambda (s)
+                    (let ((t (% "type" s)))
+                        (if (or (string=? "string" t) (string=? "token" t) (string=? "date" t) (string=? "number" t))
+                            ($"        [\"" rn "." (% "name" s) "\"] = ('" (if (string=? "date" t) "d" "t") "', \"" (search-table-name s) "\"),
+")
+                            "")))
+                    (node-list->list (table-searches r)))))))
+        (node-list->list (active-resources)))))
+
+(define (sort-target-types)
+    (apply $ (map (lambda (r) ($"        \"" (name-of r) "\",
+")) (node-list->list (active-resources)))))
+
+(define (sort-targets-file)
+    (file "SortTargets.cs" ($
+"namespace "(project-name)".Repositories;
+
+// What a resource may be sorted by through a reference to it (_sort=subject:Patient.family):
+// a column of its own, the time of its last change, or a search table of strings, tokens,
+// numbers (the value) or dates (the lower bound). The key of a search is put together here
+// when it is asked for.
+internal static class SortTargets
+{
+    // \"<""Type>.<""parameter>\": 'i' and the column, 't' or 'd' and the search table
+    private static readonly Dictionary<""string, (char kind, string name)> Keys = new()
+    {
+"(sort-target-keys)"    };
+
+    public static readonly string[] AllTypes =
+    {
+"(sort-target-types)"    };
+
+    private static readonly HashSet<""string> Types = new(AllTypes);
+
+    public static bool Known(string type) => Types.Contains(type);
+
+    // The column the key `parameter` of `target` sorts by, reached through the reference whose
+    // rows lie in `table` of `schema`; null when the target has no such key.
+    public static string? Expression(string schema, string table, string target, string parameter)
+    {
+        var select = Db.Kind == DbKind.SqlServer ? \"SELECT TOP 1\" : \"SELECT\";
+        var limit = Db.Kind == DbKind.SqlServer ? \"\" : \" LIMIT 1\";
+        var source = Db.SchemaTable(schema, table);
+        if (parameter == \"_lastUpdated\")
+            return Types.Contains(target)
+                ? $\"({select} t.last_updated FROM {source} src JOIN {Db.Table(target)} t ON t.id = src.target_id WHERE src.resource_id = r.id{limit})\"
+                : null;
+        if (!Keys.TryGetValue(target + \".\" + parameter, out var key)) return null;
+        return key.kind == 'i'
+            ? $\"({select} t.{Db.Col(key.name)} FROM {source} src JOIN {Db.Table(target)} t ON t.id = src.target_id WHERE src.resource_id = r.id{limit})\"
+            : $\"({select} c.{(key.kind == 'd' ? \"value_low\" : \"value\")} FROM {source} src JOIN {Db.SchemaTable(target, key.name)} c ON c.resource_id = src.target_id WHERE src.resource_id = r.id{limit})\";
+    }
+}
+")))
+
+; The active types a reference parameter may point to, by its first path.
+(define (ref-sort-targets ref-search)
+    (let* ((paths-node (select-children "paths" ref-search))
+           (path-nodes (if (node-list-empty? paths-node) (empty-node-list)
+                          (select-children "path" (node-list-first paths-node))))
+           (first-path (if (node-list-empty? path-nodes) #f (node-list-first path-nodes)))
+           (targets-node (if first-path (select-children "targets" first-path) (empty-node-list)))
+           (target-nodes (if (node-list-empty? targets-node) '()
+                            (node-list->list (children (node-list-first targets-node))))))
+        (filter (lambda (rn) (let ((e (if rn (element-with-id (downcase-string rn)) #f))) (and e (active? e))))
+                (map (lambda (tgt) (% "resource" tgt)) target-nodes))))
+
+; A resource's part of it: its reference parameters with their tables and the types each may
+; point to, and the key put together from them.
+(define (repo-chain-sort schema ref-searches)
+    ($
+"    // The reference parameters a sort may go through: the table of each, and the types it may
+    // point to.
+    private static readonly Dictionary<""string, (string table, string[] targets)> SortReferences = new()
+    {
+"
+    (apply $ (map (lambda (ref-s)
+        (let ((targets (ref-sort-targets ref-s))
+              (all (length (node-list->list (node-list-filter active? (children (parent (current-node))))))))
+            ; (a reference to any resource: the list of all of them, kept once)
+            ($"        [\"" (% "name" ref-s) "\"] = (\"" (search-table-name ref-s) "\", "
+                (if (and (> all 8) (= (length targets) all))
+                    "SortTargets.AllTypes"
+                    ($ "new string[] {" (apply $ (map (lambda (rn) ($ " \"" rn "\",")) targets)) " }"))
+                "),
+")))
+        ref-searches))
+"    };
+
+    // The sort key \"reference:Type.parameter\"; null when it is none of this resource's.
+    private static string? ChainSort(string key)
+    {
+        var colon = key.IndexOf(':');
+        var dot = colon < 0 ? -1 : key.IndexOf('.', colon + 1);
+        if (dot < 0) return null;
+        if (!SortReferences.TryGetValue(key[..colon], out var reference)) return null;
+        var target = key[(colon + 1)..dot];
+        if (Array.IndexOf(reference.targets, target) < 0) return null;
+        return SortTargets.Expression(\"" schema "\", reference.table, target, key[(dot + 1)..]);
+    }
+
+"))
+
 ; --- BuildOrderBy is defined in orderby.scm (per-project; see map.dsl) ---
 
 ; --- AddMissingSearch ---
@@ -3297,6 +3411,7 @@ public class "rn"Repository : I"rn"Repository
     (apply sosofo-append
         (file "Db.cs" (db-runtime-cs))
         (repo-generic-interfaces)
+        (sort-targets-file)
         (file "SearchQueryBuilder.cs"
             ($ (sqb-header 'Any) (sqb-body 'Any)"}
 "))
@@ -3424,6 +3539,15 @@ public static class Db
                 return new Microsoft.Data.Sqlite.SqliteParameter(source.ParameterName, source.Value);
         }
     }
+
+    // A resource's own table, and a column of it, as each database names them in upstream's SQL.
+    public static string Table(string name) => Kind == DbKind.SqlServer ? \"[\" + name + \"]\" : \"\\\"\" + name + \"\\\"\";
+    public static string Col(string name) => Kind switch
+    {
+        DbKind.PostgreSql => \"\\\"\" + name + \"\\\"\",
+        DbKind.SqlServer => \"[\" + name + \"]\",
+        _ => name
+    };
 
     // A table of a resource's schema; SQLite has no schemas, the schema is the front of the name.
     public static string SchemaTable(string schema, string table) => Kind switch

@@ -56,7 +56,11 @@
                 ($"                \""(% "name" s)"\" => \"("(db-select-top1 db)" t.value FROM " (tbl schema (search-table-name s) db)" t WHERE t.resource_id = r.id"(db-trailing-limit1 db)")\",
 "))
                 token-searches))
-            (apply $ (map (lambda (ref-s) (chain-sort-cases-for-ref schema ref-s db)) ref-searches))
+            ; (through a reference: put together when it is asked for, see ChainSort below --
+            ; written out, every reference times every type it may point to times every key
+            ; of that type was most of a repository's text)
+"                _ when ChainSort(key) is { } chained => chained,
+"
             (apply $ (map (lambda (ref-s)
                 ($"                \""(% "name" ref-s)"\" => throw new ArgumentException($\"Sorting by reference parameter '"(% "name" ref-s)"' requires chaining syntax: _sort="(% "name" ref-s)":<""TargetType>.<""property>.\"),
 "))
@@ -72,4 +76,5 @@
         return string.Join(\", \", parts);
     }
 
-")))
+"
+        (repo-chain-sort schema ref-searches))))
