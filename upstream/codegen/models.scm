@@ -251,7 +251,7 @@ namespace " (project-name) ".Search;
                    (col (search-query-camel s)))
                 ($",
     " cs-type "? " col (loop (cdr items))))))
-    ");
+    ") : " (project-name) ".Repositories.IResourceRecord;
 
 "))
 
@@ -263,7 +263,7 @@ namespace " (project-name) ".Search;
     int versionId,
     DateTime lastUpdated,
     byte[]? content,
-    string historyOperation);
+    string historyOperation) : " (project-name) ".Repositories.IHistoryRow;
 
 "))
 

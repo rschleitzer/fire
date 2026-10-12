@@ -13,42 +13,99 @@
     (if (member "Task" (map name-of (node-list->list (node-list-filter active? (children (parent (current-node)))))))
         "System.Threading.Tasks.Task" "Task"))
 (define (handler-model-class rn)
-    (if (string=? rn "Task") ($ (project-name) ".Model.Task") rn))
+    (if (string=? rn "*") "TModel" (if (string=? rn "Task") ($ (project-name) ".Model.Task") rn)))
+
+; The handlers of every resource are ONE class (two: with and without versions), generic over
+; what a resource brings -- its repository, its records, its model class and, through a type
+; of its own, its name and its validator. A resource's file is that type and the name its
+; handlers always had, as an alias of the class made for it: {Resource}Handlers.
+(define generic-rn "*")
+(define (h-generic? rn) (string=? rn generic-rn))
+(define (h-repo rn) (if (h-generic? rn) "TRepo" ($ "I" rn "Repository")))
+(define (h-res rn) (if (h-generic? rn) "TResource" ($ rn "Resource")))
+(define (h-validate rn) (if (h-generic? rn) "T.Validate" ($ "ModelValidator.Validate" rn)))
+(define (h-name rn) (if (h-generic? rn) "T.Name" ($ "\"" rn "\"")))
+(define (h-in rn) (if (h-generic? rn) "{T.Name}" rn))
+(define (h-class rn has-history)
+    (if has-history
+        ($
+"public static class ResourceHandlers<""T, TRepo, TResource, TRow, TModel>
+    where T : IResourceType<""TModel>
+    where TRepo : IVersionedResourceRepository<""TResource, TRow>
+    where TResource : IResourceRecord
+    where TRow : IHistoryRow
+    where TModel : class")
+        ($
+"public static class UnversionedResourceHandlers<""T, TRepo, TResource, TModel>
+    where T : IResourceType<""TModel>
+    where TRepo : IResourceRepository<""TResource>
+    where TResource : IResourceRecord
+    where TModel : class")))
+
+(define (handler-class-text rn has-history)
+    ($
+        (handler-header rn has-history)
+        (handler-create rn has-history)
+        (handler-read rn has-history)
+        (if has-history (handler-vread rn) (handler-vread-non-versioned rn))
+        (handler-update rn has-history)
+        (handler-conditional-update rn has-history)
+        (handler-patch rn has-history)
+        (handler-delete rn)
+        (handler-conditional-delete rn)
+        (if has-history (handler-rollback rn) "")
+        (if has-history (handler-undelete rn) "")
+        (handler-search rn)
+        (handler-post-search rn)
+        (if has-history (handler-instance-history rn) "")
+        (if has-history (handler-type-history rn) "")
+        (handler-autocomplete rn)
+        (handler-import rn)
+        (handler-create-search rn)
+        (handler-drop-search rn)
+        (handler-purge rn)
+        (handler-get-base-url)))
+
+; The two classes, and what a resource's type answers.
+(define (generic-handlers)
+    (sosofo-append
+        (file "ResourceHandlers.cs" (handler-class-text generic-rn #t))
+        (file "UnversionedResourceHandlers.cs" (handler-class-text generic-rn #f))
+        (file "IResourceType.cs" ($
+"namespace " (project-name) ".Handlers;
+
+// What the handlers ask of a resource: its name, and its model's validator.
+public interface IResourceType<""TModel>
+{
+    static abstract string Name { get; }
+    static abstract List<""string> Validate(TModel model);
+}
+"))))
 
 (define (handler)
     (let* ((resource (current-node))
            (rn (name-of resource))
-           (has-history (history? resource)))
+           (has-history (history? resource))
+           (model-class ($ (project-name) ".Model." rn))
+           (p (project-name)))
         (file ($ rn "Handlers.cs")
             ($
-                (handler-header rn)
-                (handler-create rn has-history)
-                (handler-read rn has-history)
-                (if has-history (handler-vread rn) (handler-vread-non-versioned rn))
-                (handler-update rn has-history)
-                (handler-conditional-update rn has-history)
-                (handler-patch rn has-history)
-                (handler-delete rn)
-                (handler-conditional-delete rn)
-                (if has-history (handler-rollback rn) "")
-                (if has-history (handler-undelete rn) "")
-                (handler-search rn)
-                (handler-post-search rn)
-                (if has-history (handler-instance-history rn) "")
-                (if has-history (handler-type-history rn) "")
-                (handler-autocomplete rn)
-                (handler-import rn)
-                (handler-create-search rn)
-                (handler-drop-search rn)
-                (handler-purge rn)
-                (handler-get-base-url)
-            ))))
+"global using " rn "Handlers = " p ".Handlers." (if has-history "ResourceHandlers" "UnversionedResourceHandlers") "<""" p ".Handlers." rn "Type, " p ".Repositories.I" rn "Repository, " p ".Search." rn "Resource, " (if has-history ($ p ".Search." rn "HistoryRow, ") "") model-class ">;
+
+namespace " p ".Handlers;
+
+public sealed class " rn "Type : IResourceType<""" model-class ">
+{
+    public static string Name => \"" rn "\";
+    public static List<""string> Validate(" model-class " model) => " p ".Model.Validator.ModelValidator.Validate" rn "(model);
+}
+"))))
 
 ; ===================================================================
 ; Section: Header
 ; ===================================================================
 
-(define (handler-header rn)
+(define (handler-header rn has-history)
     ($
 "using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -60,7 +117,7 @@ using " (project-name) ".Repositories;
 
 namespace " (project-name) ".Handlers;
 
-public static class "rn"Handlers
+"(h-class rn has-history)"
 {
     public static void Configure(IConfiguration configuration)
     {
@@ -74,7 +131,7 @@ public static class "rn"Handlers
 
 (define (handler-create rn has-history)
     ($
-"    public static async Task<""IResult> Create(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Create(HttpContext ctx, "(h-repo rn)" repo)
     {
         JsonNode content;
         try
@@ -92,9 +149,9 @@ public static class "rn"Handlers
         {
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Missing required field: resourceType\", 400);
         }
-        if (resourceType != \""rn"\")
+        if (resourceType != "(h-name rn)")
         {
-            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "rn", got {resourceType}\", 400);
+            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "(h-in rn)", got {resourceType}\", 400);
         }
 
 "
@@ -118,7 +175,7 @@ public static class "rn"Handlers
             }
         }
 
-        "rn"Resource resource;
+        "(h-res rn)" resource;
         try
         {
             resource = await repo.CreateAsync(content);
@@ -133,7 +190,7 @@ public static class "rn"Handlers
 
         var baseUrl = GetBaseUrl(ctx);
 "
-    "        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{resource.id}/_history/{resource.versionId}\";
+    "        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"(h-in rn)"/{resource.id}/_history/{resource.versionId}\";
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
         ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
 "
@@ -156,7 +213,7 @@ public static class "rn"Handlers
             return FhirResult.Error(ctx, \"error\", \"invalid\", ex.Message, 400);
         }
 
-        var validationErrors = ModelValidator.Validate"rn"(model);
+        var validationErrors = "(h-validate rn)"(model);
         if (validationErrors.Count > 0)
             return FhirResult.ValidationErrors(ctx, validationErrors);
 
@@ -168,14 +225,14 @@ public static class "rn"Handlers
 
 (define (handler-read rn has-history)
     ($
-"    public static async Task<""IResult> Read(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Read(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         var resource = await repo.ReadAsync(id);
         if (resource == null)
         {
 " (if has-history "            if (await repo.IsDeletedAsync(id))
                 return FhirResult.Error(ctx, \"error\", \"deleted\", \"Resource has been deleted\", 410);
-" "") "            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found\", 404);
+" "") "            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found\", 404);
         }
 
 "
@@ -196,7 +253,10 @@ public static class "rn"Handlers
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
         ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
 "
-    (if (string=? "Binary" rn) ($
+    (if (or (string=? "Binary" rn) (h-generic? rn)) ($
+(if (h-generic? rn) "        if (T.Name == \"Binary\")
+        {
+" "")
 "        // Binary content negotiation: serve raw bytes unless FHIR format is requested
         var format = ctx.Request.Query[\"_format\"].FirstOrDefault() ?? \"\";
         var accept = ctx.Request.Headers[\"Accept\"].FirstOrDefault() ?? \"\";
@@ -216,7 +276,10 @@ public static class "rn"Handlers
                 return Results.Empty;
             }
         }
-
+"
+(if (h-generic? rn) "        }
+" "")
+"
 "
         )"")
 "        return FhirResult.Resource(ctx, resource.content);
@@ -230,7 +293,7 @@ public static class "rn"Handlers
 
 (define (handler-vread rn)
     ($
-"    public static async Task<""IResult> VersionRead(string id, string vid, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> VersionRead(string id, string vid, HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!int.TryParse(vid, out var versionId))
         {
@@ -240,13 +303,16 @@ public static class "rn"Handlers
         var resource = await repo.VersionReadAsync(id, versionId);
         if (resource == null)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id}/_history/{versionId} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id}/_history/{versionId} not found\", 404);
         }
 
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
         ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
 "
-    (if (string=? "Binary" rn) ($
+    (if (or (string=? "Binary" rn) (h-generic? rn)) ($
+(if (h-generic? rn) "        if (T.Name == \"Binary\")
+        {
+" "")
 "        // Binary content negotiation: serve raw bytes unless FHIR format is requested
         var format = ctx.Request.Query[\"_format\"].FirstOrDefault() ?? \"\";
         var accept = ctx.Request.Headers[\"Accept\"].FirstOrDefault() ?? \"\";
@@ -266,7 +332,10 @@ public static class "rn"Handlers
                 return Results.Empty;
             }
         }
-
+"
+(if (h-generic? rn) "        }
+" "")
+"
 "
         )"")
 "        return FhirResult.Resource(ctx, resource.content);
@@ -276,7 +345,7 @@ public static class "rn"Handlers
 
 (define (handler-vread-non-versioned rn)
     ($
-"    public static async Task<""IResult> VersionRead(string id, string vid, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> VersionRead(string id, string vid, HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!int.TryParse(vid, out var versionId))
         {
@@ -286,7 +355,7 @@ public static class "rn"Handlers
         var resource = await repo.ReadAsync(id);
         if (resource == null || resource.versionId != versionId)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id}/_history/{versionId} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id}/_history/{versionId} not found\", 404);
         }
 
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
@@ -307,7 +376,7 @@ public static class "rn"Handlers
 
 (define (handler-update-versioned rn)
     ($
-"    public static async Task<""IResult> Update(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Update(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         // Validate ID format
         if (id.Length > 64 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '.'))
@@ -327,9 +396,9 @@ public static class "rn"Handlers
         }
 
         var resourceType = content[\"resourceType\"]?.GetValue<""string>();
-        if (resourceType != \""rn"\")
+        if (resourceType != "(h-name rn)")
         {
-            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "rn", got {resourceType}\", 400);
+            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "(h-in rn)", got {resourceType}\", 400);
         }
 
         var bodyId = content[\"id\"]?.GetValue<""string>();
@@ -359,7 +428,7 @@ public static class "rn"Handlers
                 // Update-as-create: PUT to non-existent ID creates the resource
                 resource = await repo.CreateAsync(content, id);
                 var baseUrl = GetBaseUrl(ctx);
-                ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{resource.id}/_history/{resource.versionId}\";
+                ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"(h-in rn)"/{resource.id}/_history/{resource.versionId}\";
                 ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
                 ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
                 return await HandlePrefer(ctx, resource.content, 201);
@@ -387,7 +456,7 @@ public static class "rn"Handlers
 
 (define (handler-update-non-versioned rn)
     ($
-"    public static async Task<""IResult> Update(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Update(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         // Validate ID format
         if (id.Length > 64 || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '.'))
@@ -407,9 +476,9 @@ public static class "rn"Handlers
         }
 
         var resourceType = content[\"resourceType\"]?.GetValue<""string>();
-        if (resourceType != \""rn"\")
+        if (resourceType != "(h-name rn)")
         {
-            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "rn", got {resourceType}\", 400);
+            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "(h-in rn)", got {resourceType}\", 400);
         }
 
         var bodyId = content[\"id\"]?.GetValue<""string>();
@@ -429,7 +498,7 @@ public static class "rn"Handlers
                 // Update-as-create: PUT to non-existent ID creates the resource
                 resource = await repo.CreateAsync(content, id);
                 var baseUrl = GetBaseUrl(ctx);
-                ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{resource.id}/_history/{resource.versionId}\";
+                ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"(h-in rn)"/{resource.id}/_history/{resource.versionId}\";
                 ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
                 ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
                 return await HandlePrefer(ctx, resource.content, 201);
@@ -462,7 +531,7 @@ public static class "rn"Handlers
 
 (define (handler-conditional-update-versioned rn)
     ($
-"    public static async Task<""IResult> ConditionalUpdate(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> ConditionalUpdate(HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!ctx.Request.Query.Any())
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Conditional update requires search parameters\", 400);
@@ -479,9 +548,9 @@ public static class "rn"Handlers
         }
 
         var resourceType = content[\"resourceType\"]?.GetValue<""string>();
-        if (resourceType != \""rn"\")
+        if (resourceType != "(h-name rn)")
         {
-            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "rn", got {resourceType}\", 400);
+            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "(h-in rn)", got {resourceType}\", 400);
         }
 
 "
@@ -521,7 +590,7 @@ public static class "rn"Handlers
             ? await repo.CreateAsync(content, id)
             : await repo.CreateAsync(content);
         var baseUrl = GetBaseUrl(ctx);
-        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{created.id}/_history/{created.versionId}\";
+        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"(h-in rn)"/{created.id}/_history/{created.versionId}\";
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{created.versionId}\\\"\";
         ctx.Response.Headers[\"Last-Modified\"] = created.lastUpdated.ToUniversalTime().ToString(\"R\");
         return await HandlePrefer(ctx, created.content, 201);
@@ -531,7 +600,7 @@ public static class "rn"Handlers
 
 (define (handler-conditional-update-non-versioned rn)
     ($
-"    public static async Task<""IResult> ConditionalUpdate(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> ConditionalUpdate(HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!ctx.Request.Query.Any())
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Conditional update requires search parameters\", 400);
@@ -548,9 +617,9 @@ public static class "rn"Handlers
         }
 
         var resourceType = content[\"resourceType\"]?.GetValue<""string>();
-        if (resourceType != \""rn"\")
+        if (resourceType != "(h-name rn)")
         {
-            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "rn", got {resourceType}\", 400);
+            return FhirResult.Error(ctx, \"error\", \"invalid\", $\"Resource type mismatch: expected "(h-in rn)", got {resourceType}\", 400);
         }
 
 "
@@ -574,7 +643,7 @@ public static class "rn"Handlers
             ? await repo.CreateAsync(content, id)
             : await repo.CreateAsync(content);
         var baseUrl = GetBaseUrl(ctx);
-        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{created.id}/_history/{created.versionId}\";
+        ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"(h-in rn)"/{created.id}/_history/{created.versionId}\";
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{created.versionId}\\\"\";
         ctx.Response.Headers[\"Last-Modified\"] = created.lastUpdated.ToUniversalTime().ToString(\"R\");
         return await HandlePrefer(ctx, created.content, 201);
@@ -593,7 +662,7 @@ public static class "rn"Handlers
 
 (define (handler-patch-versioned rn)
     ($
-"    public static async Task<""IResult> Patch(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Patch(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         JsonArray patchOps;
         try
@@ -615,7 +684,7 @@ public static class "rn"Handlers
                 ifMatchVersion = int.Parse(match.Groups[1].Value);
         }
 
-        "rn"Resource? resource;
+        "(h-res rn)"? resource;
         try
         {
             resource = await repo.PatchAsync(id, patchOps, ifMatchVersion);
@@ -635,7 +704,7 @@ public static class "rn"Handlers
 
         if (resource == null)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found\", 404);
         }
 
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
@@ -647,7 +716,7 @@ public static class "rn"Handlers
 
 (define (handler-patch-non-versioned rn)
     ($
-"    public static async Task<""IResult> Patch(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Patch(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         JsonArray patchOps;
         try
@@ -660,7 +729,7 @@ public static class "rn"Handlers
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Invalid JSON Patch\", 400);
         }
 
-        "rn"Resource? resource;
+        "(h-res rn)"? resource;
         try
         {
             resource = await repo.PatchAsync(id, patchOps);
@@ -675,7 +744,7 @@ public static class "rn"Handlers
 
         if (resource == null)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found\", 404);
         }
 
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
@@ -691,12 +760,12 @@ public static class "rn"Handlers
 
 (define (handler-delete rn)
     ($
-"    public static async Task<""IResult> Delete(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Delete(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         var deleted = await repo.DeleteAsync(id);
         if (!deleted)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found\", 404);
         }
 
         return Results.StatusCode(204);
@@ -710,7 +779,7 @@ public static class "rn"Handlers
 
 (define (handler-conditional-delete rn)
     ($
-"    public static async Task<""IResult> ConditionalDelete(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> ConditionalDelete(HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!ctx.Request.Query.Any())
             return FhirResult.Error(ctx, \"error\", \"invalid\", \"Conditional delete requires search parameters\", 400);
@@ -731,7 +800,7 @@ public static class "rn"Handlers
 
 (define (handler-rollback rn)
     ($
-"    public static async Task<""IResult> Rollback(string id, string vid, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Rollback(string id, string vid, HttpContext ctx, "(h-repo rn)" repo)
     {
         if (!int.TryParse(vid, out var versionId))
         {
@@ -745,7 +814,7 @@ public static class "rn"Handlers
         var resource = await repo.RollbackAsync(id, versionId);
         if (resource == null)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} rollback failed\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} rollback failed\", 404);
         }
 
         if (rolledBack != null)
@@ -765,7 +834,7 @@ public static class "rn"Handlers
         var provenanceRepo = ctx.RequestServices.GetRequiredService<""IProvenanceRepository>();
         var query = new QueryCollection(new Dictionary<""string, StringValues>
         {
-            [\"target\"] = $\""rn"/{id}\"
+            [\"target\"] = $\""(h-in rn)"/{id}\"
         });
         var (provenances, _) = await provenanceRepo.SearchAsync(query, 1000, 0);
         foreach (var provenance in provenances)
@@ -775,7 +844,7 @@ public static class "rn"Handlers
             if (targets == null) continue;
             foreach (var target in targets)
             {
-                if (target?[\"reference\"]?.GetValue<""string>() != $\""rn"/{id}\") continue;
+                if (target?[\"reference\"]?.GetValue<""string>() != $\""(h-in rn)"/{id}\") continue;
                 await provenanceRepo.HardDeleteAsync(provenance.id);
                 break;
             }
@@ -790,12 +859,12 @@ public static class "rn"Handlers
 
 (define (handler-undelete rn)
     ($
-"    public static async Task<""IResult> Undelete(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Undelete(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         var resource = await repo.UndeleteAsync(id);
         if (resource == null)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found or not deleted\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found or not deleted\", 404);
         }
 
         ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
@@ -811,7 +880,7 @@ public static class "rn"Handlers
 
 (define (handler-search rn)
     ($
-"    public static async Task<""IResult> Search(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Search(HttpContext ctx, "(h-repo rn)" repo)
     {
 "
         (handler-search-body rn "ctx.Request.Query")))
@@ -822,7 +891,7 @@ public static class "rn"Handlers
 
 (define (handler-post-search rn)
     ($
-"    public static async Task<""IResult> PostSearch(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> PostSearch(HttpContext ctx, "(h-repo rn)" repo)
     {
         var form = await ctx.Request.ReadFormAsync();
         var queryDict = new Dictionary<""string, Microsoft.Extensions.Primitives.StringValues>();
@@ -855,7 +924,7 @@ public static class "rn"Handlers
         var totalParam = " query-source ".TryGetValue(\"_total\", out var totalStr) ? (string?)totalStr : null;
 
         // Resolve forward chains
-        var searchQuery = await SearchHelper.ResolveForwardChainsAsync(ctx.RequestServices, \""rn"\", " query-source ");
+        var searchQuery = await SearchHelper.ResolveForwardChainsAsync(ctx.RequestServices, "(h-name rn)", " query-source ");
 
         // Resolve reverse chains (_has)
         var hasIds = await SearchHelper.ResolveReverseChainsAsync(ctx.RequestServices, " query-source ");
@@ -876,7 +945,7 @@ public static class "rn"Handlers
             p.Key == \"code-value-quantity\" || p.Key == \"code-value-concept\" ||
             p.Key == \"component-code-value-quantity\" || p.Key == \"component-code-value-concept\").ToList();
 
-        List<"rn"Resource> resources;
+        List<"(h-res rn)"> resources;
         int total;
 
         if (compositeParams.Count > 0)
@@ -922,13 +991,13 @@ public static class "rn"Handlers
 
         var baseUrl = GetBaseUrl(ctx);
         var entries = resources.Select(r =>
-            FhirResponse.SearchEntry(JsonNode.Parse(r.content)!, $\"{baseUrl}/"rn"/{r.id}\")).ToList();
+            FhirResponse.SearchEntry(JsonNode.Parse(r.content)!, $\"{baseUrl}/"(h-in rn)"/{r.id}\")).ToList();
 
         // Resolve includes
         var primaryContents = resources.Select(r => (JsonNode)JsonNode.Parse(r.content)!).ToList();
         var primaryIds = resources.Select(r => r.id).ToList();
         var includeEntries = await SearchHelper.ResolveIncludesAsync(
-            ctx.RequestServices, \""rn"\", primaryContents, primaryIds, baseUrl, " query-source ");
+            ctx.RequestServices, "(h-name rn)", primaryContents, primaryIds, baseUrl, " query-source ");
         entries.AddRange(includeEntries);
 
         // Handle _summary: add SUBSETTED tag
@@ -981,7 +1050,7 @@ public static class "rn"Handlers
             }
         }
 
-        var selfUrl = $\"{baseUrl}/"rn"{ctx.Request.QueryString}\";
+        var selfUrl = $\"{baseUrl}/"(h-in rn)"{ctx.Request.QueryString}\";
         var bundleTotal = totalParam == \"none\" ? -1 : total;
         var bundle = FhirResponse.SearchBundle(entries, bundleTotal, selfUrl, count, offset);
 
@@ -996,7 +1065,7 @@ public static class "rn"Handlers
 
 (define (handler-instance-history rn)
     ($
-"    public static async Task<""IResult> InstanceHistory(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> InstanceHistory(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         var count = 20;
         var offset = 0;
@@ -1008,7 +1077,7 @@ public static class "rn"Handlers
         var (rows, total) = await repo.InstanceHistoryAsync(id, count, offset);
         if (rows.Count == 0)
         {
-            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""rn"/{id} not found\", 404);
+            return FhirResult.Error(ctx, \"error\", \"not-found\", $\""(h-in rn)"/{id} not found\", 404);
         }
 
         var baseUrl = GetBaseUrl(ctx);
@@ -1020,21 +1089,21 @@ public static class "rn"Handlers
             if (r.historyOperation == \"TOMBSTONE\")
             {
                 return FhirResponse.HistoryDeleteEntry(
-                    $\"{baseUrl}/"rn"/{r.id}\",
-                    \"DELETE\", $\""rn"/{r.id}\",
+                    $\"{baseUrl}/"(h-in rn)"/{r.id}\",
+                    \"DELETE\", $\""(h-in rn)"/{r.id}\",
                     \"204\",
                     r.lastUpdated.ToString(\"yyyy-MM-ddTHH:mm:ss.fffzzz\"));
             }
             return FhirResponse.HistoryEntry(
                 JsonNode.Parse(r.content)!,
-                $\"{baseUrl}/"rn"/{r.id}\",
+                $\"{baseUrl}/"(h-in rn)"/{r.id}\",
                 r.historyOperation == \"CURRENT\" ? \"PUT\" : \"PUT\",
-                $\""rn"/{r.id}\",
+                $\""(h-in rn)"/{r.id}\",
                 \"200\",
                 r.lastUpdated.ToString(\"yyyy-MM-ddTHH:mm:ss.fffzzz\"));
         }).ToList();
 
-        var selfUrl = $\"{baseUrl}/"rn"/{id}/_history{ctx.Request.QueryString}\";
+        var selfUrl = $\"{baseUrl}/"(h-in rn)"/{id}/_history{ctx.Request.QueryString}\";
         var bundle = FhirResponse.HistoryBundle(entries, total, selfUrl, count, offset);
 
         return FhirResult.Bundle(ctx, bundle);
@@ -1048,7 +1117,7 @@ public static class "rn"Handlers
 
 (define (handler-type-history rn)
     ($
-"    public static async Task<""IResult> TypeHistory(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> TypeHistory(HttpContext ctx, "(h-repo rn)" repo)
     {
         var count = 20;
         var offset = 0;
@@ -1068,21 +1137,21 @@ public static class "rn"Handlers
             if (r.historyOperation == \"TOMBSTONE\")
             {
                 return FhirResponse.HistoryDeleteEntry(
-                    $\"{baseUrl}/"rn"/{r.id}\",
-                    \"DELETE\", $\""rn"/{r.id}\",
+                    $\"{baseUrl}/"(h-in rn)"/{r.id}\",
+                    \"DELETE\", $\""(h-in rn)"/{r.id}\",
                     \"204\",
                     r.lastUpdated.ToString(\"yyyy-MM-ddTHH:mm:ss.fffzzz\"));
             }
             return FhirResponse.HistoryEntry(
                 JsonNode.Parse(r.content)!,
-                $\"{baseUrl}/"rn"/{r.id}\",
+                $\"{baseUrl}/"(h-in rn)"/{r.id}\",
                 \"PUT\",
-                $\""rn"/{r.id}\",
+                $\""(h-in rn)"/{r.id}\",
                 \"200\",
                 r.lastUpdated.ToString(\"yyyy-MM-ddTHH:mm:ss.fffzzz\"));
         }).ToList();
 
-        var selfUrl = $\"{baseUrl}/"rn"/_history{ctx.Request.QueryString}\";
+        var selfUrl = $\"{baseUrl}/"(h-in rn)"/_history{ctx.Request.QueryString}\";
         var bundle = FhirResponse.HistoryBundle(entries, total, selfUrl, count, offset);
 
         return FhirResult.Bundle(ctx, bundle);
@@ -1096,7 +1165,7 @@ public static class "rn"Handlers
 
 (define (handler-autocomplete rn)
     ($
-"    public static async Task<""IResult> Autocomplete(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Autocomplete(HttpContext ctx, "(h-repo rn)" repo)
     {
         var query = ctx.Request.Query;
         var property = query[\"_autocomplete\"].FirstOrDefault();
@@ -1133,20 +1202,20 @@ public static class "rn"Handlers
 
 (define (handler-create-search rn)
     ($
-"    public static async Task<""IResult> CreateSearch(string parameter, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> CreateSearch(string parameter, HttpContext ctx, "(h-repo rn)" repo)
     {
         await repo.CreateSearchAsync(parameter);
-        return FhirResult.Error(ctx, \"information\", \"informational\", $\"Search table '{parameter}' created for "rn"\", 200);
+        return FhirResult.Error(ctx, \"information\", \"informational\", $\"Search table '{parameter}' created for "(h-in rn)"\", 200);
     }
 
 "))
 
 (define (handler-drop-search rn)
     ($
-"    public static async Task<""IResult> DropSearch(string parameter, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> DropSearch(string parameter, HttpContext ctx, "(h-repo rn)" repo)
     {
         await repo.DropSearchAsync(parameter);
-        return FhirResult.Error(ctx, \"information\", \"informational\", $\"Search table '{parameter}' dropped for "rn"\", 200);
+        return FhirResult.Error(ctx, \"information\", \"informational\", $\"Search table '{parameter}' dropped for "(h-in rn)"\", 200);
     }
 
 "))
@@ -1164,7 +1233,7 @@ public static class "rn"Handlers
 ; comes back 405 instead of silently ignoring 'before' and purging everything.
 (define (handler-purge rn)
     ($
-"    public static async Task<""IResult> Purge(HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> Purge(HttpContext ctx, "(h-repo rn)" repo)
     {
         DateTime? before = null;
         if (ctx.Request.Query.TryGetValue(\"before\", out var beforeValue) && !string.IsNullOrWhiteSpace(beforeValue))
@@ -1179,7 +1248,7 @@ public static class "rn"Handlers
         var count = await repo.PurgeAsync(before);
         var scope = before == null ? \"\" : $\" deleted before {before:o}\";
         return FhirResult.Error(ctx, \"information\", \"informational\",
-            $\"Purge completed for "rn": {count} resource(s){scope} removed\", 200);
+            $\"Purge completed for "(h-in rn)": {count} resource(s){scope} removed\", 200);
     }
 
 "))
@@ -1190,7 +1259,7 @@ public static class "rn"Handlers
 
 (define (handler-import rn)
     ($
-"    public static async Task<""IResult> ImportVersion(string id, HttpContext ctx, I"rn"Repository repo)
+"    public static async Task<""IResult> ImportVersion(string id, HttpContext ctx, "(h-repo rn)" repo)
     {
         JsonNode content;
         try

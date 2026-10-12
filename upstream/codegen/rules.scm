@@ -26,6 +26,7 @@
             (empty-sosofo))
         (process-children)
         (make directory path: (project-dir)
+            (if generate-handlers (make directory path: "Handlers" (generic-handlers)) (empty-sosofo))
             (make directory path: "wwwroot"
                 (if generate-js (make directory path: "js" (js-elements-file)) (empty-sosofo))
                 (if generate-html (html-resourcelist-file) (empty-sosofo))))))

@@ -380,6 +380,82 @@
 ; Interface generation
 ; ===================================================================
 
+; What every repository offers, written once for all resources: the members with the
+; resource's record and history row as type parameters -- with versions, and without.
+(define (repo-interface-members res row has-history)
+    ($
+"    Task<"res"> CreateAsync(JsonNode content, string? clientId = null);
+    Task<"res"?> ReadAsync(string id);
+"
+    (if has-history
+        ($
+"    Task<"res"?> VersionReadAsync(string id, int versionId);
+    Task<"res"?> UpdateAsync(string id, JsonNode content, int? ifMatchVersion = null);
+    Task<"res"?> PatchAsync(string id, JsonArray patchOps, int? ifMatchVersion = null);
+")
+        ($
+"    Task<"res"?> UpdateAsync(string id, JsonNode content);
+    Task<"res"?> PatchAsync(string id, JsonArray patchOps);
+"       )
+    )
+"    Task<""bool> DeleteAsync(string id);
+"
+    (if has-history ($
+"    Task<""bool> IsDeletedAsync(string id);
+    Task<"res"?> RollbackAsync(string id, int currentVersionId);
+    Task<"res"?> UndeleteAsync(string id);
+    Task<""int> UndeleteAllAsync();
+"   )"")
+"    Task<(List<"res"> resources, int total)> SearchAsync(IQueryCollection queryParams, int count, int offset);
+"
+    (if has-history ($
+"    Task<(List<"row"> rows, int total)> InstanceHistoryAsync(string id, int count, int offset);
+    Task<(List<"row"> rows, int total)> TypeHistoryAsync(int count, int offset);
+"   )"")
+"    Task<""List<""string>> AutocompleteAsync(string param, string value, string property, int? count, int? offset);
+"
+"    Task CreateSearchAsync(string parameter);
+    Task DropSearchAsync(string parameter);
+    Task<""int> PurgeAsync(DateTime? before);
+"))
+
+(define (repo-generic-interfaces)
+    (file "IResourceRepository.cs" ($
+"using System.Text.Json.Nodes;
+
+namespace "(project-name)".Repositories;
+
+// What a stored resource is known by, whatever columns of its own it has beside.
+public interface IResourceRecord
+{
+    string id { get; }
+    int versionId { get; }
+    DateTime lastUpdated { get; }
+    byte[] content { get; }
+}
+
+public interface IHistoryRow
+{
+    string id { get; }
+    int versionId { get; }
+    DateTime lastUpdated { get; }
+    byte[]? content { get; }
+    string historyOperation { get; }
+}
+
+// The repository of a resource that keeps its versions ...
+public interface IVersionedResourceRepository<""TResource, TRow>
+{
+" (repo-interface-members "TResource" "TRow" #t)
+"}
+
+// ... and of one that does not.
+public interface IResourceRepository<""TResource>
+{
+" (repo-interface-members "TResource" "" #f)
+"}
+")))
+
 (define (repo-interface rn inline-list has-history)
     (file ($ "I"rn"Repository.cs")
         ($
@@ -388,48 +464,19 @@ using "(project-name)".Search;
 
 namespace "(project-name)".Repositories;
 
-public interface I"rn"Repository
-{
-"
-"    Task<"rn"Resource> CreateAsync(JsonNode content, string? clientId = null);
-    Task<"rn"Resource?> ReadAsync(string id);
-"
+public interface I"rn"Repository : "
     (if has-history
-        ($
-"    Task<"rn"Resource?> VersionReadAsync(string id, int versionId);
-    Task<"rn"Resource?> UpdateAsync(string id, JsonNode content, int? ifMatchVersion = null);
-    Task<"rn"Resource?> PatchAsync(string id, JsonArray patchOps, int? ifMatchVersion = null);
-")
-        ($
-"    Task<"rn"Resource?> UpdateAsync(string id, JsonNode content);
-    Task<"rn"Resource?> PatchAsync(string id, JsonArray patchOps);
-"       )
-    )
-"    Task<""bool> DeleteAsync(string id);
+        ($ "IVersionedResourceRepository<" rn "Resource, " rn "HistoryRow>")
+        ($ "IResourceRepository<" rn "Resource>"))
+"
+{
 "
     ; Only the provenance of a rolled back version gets removed without a trace, so only
     ; Provenance carries the method that does it.
     (if (string=? rn "Provenance") ($
 "    Task<""bool> HardDeleteAsync(string id);
 "   )"")
-    (if has-history ($
-"    Task<""bool> IsDeletedAsync(string id);
-    Task<"rn"Resource?> RollbackAsync(string id, int currentVersionId);
-    Task<"rn"Resource?> UndeleteAsync(string id);
-    Task<""int> UndeleteAllAsync();
-"   )"")
-"    Task<(List<"rn"Resource> resources, int total)> SearchAsync(IQueryCollection queryParams, int count, int offset);
-"
-    (if has-history ($
-"    Task<(List<"rn"HistoryRow> rows, int total)> InstanceHistoryAsync(string id, int count, int offset);
-    Task<(List<"rn"HistoryRow> rows, int total)> TypeHistoryAsync(int count, int offset);
-"   )"")
-"    Task<""List<""string>> AutocompleteAsync(string param, string value, string property, int? count, int? offset);
-"
-"    Task CreateSearchAsync(string parameter);
-    Task DropSearchAsync(string parameter);
-    Task<""int> PurgeAsync(DateTime? before);
-}
+"}
 ")))
 
 ; ===================================================================
@@ -3249,6 +3296,7 @@ public class "rn"Repository : I"rn"Repository
     (make directory path: "Repositories"
     (apply sosofo-append
         (file "Db.cs" (db-runtime-cs))
+        (repo-generic-interfaces)
         (file "SearchQueryBuilder.cs"
             ($ (sqb-header 'Any) (sqb-body 'Any)"}
 "))
