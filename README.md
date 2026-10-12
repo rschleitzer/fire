@@ -40,6 +40,12 @@ whether the converter still writes it byte for byte.
 `tools/fhir-to-xml` is upstream's converter (`upstream/tools/fhir-to-xml`,
 C#) ported to Scaly, routine for routine; both write the same file.
 
+## documentation/
+
+The documentation of the Scaly server in DocBook. `tools/generate.sh` makes
+its pages with upstream's stylesheet and puts them into the server's web
+root, where the server serves them.
+
 ## Licence
 
 MIT, `LICENSE`. `upstream/` carries its own, `upstream/LICENSE`, also MIT.

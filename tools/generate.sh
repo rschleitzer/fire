@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 export SP_ENCODING=utf-8
 rm -rf server/wwwroot
 "${DAZZLE:-dazzle}" -t sgml -d codegen/scaly.dsl model/fhir.xml
-"${DAZZLE:-dazzle}" -t sgml -d upstream/codegen/documentation.dsl upstream/documentation/fire.xml
+"${DAZZLE:-dazzle}" -t sgml -d upstream/codegen/documentation.dsl documentation/fire.xml
 mkdir -p server/wwwroot/css
 cp upstream/codegen/css/* server/wwwroot/css/
 cp upstream/codegen/img/* server/wwwroot/

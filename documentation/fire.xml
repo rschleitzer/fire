@@ -1,0 +1,981 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook V5.0/EN" "../upstream/documentation/docbook.dtd" >
+
+<book><title>Fire FHIR Server</title>
+
+    <preface>
+
+        <para>Fire is a FHIR R5 server generated from HL7's definitions. This is its Scaly form: a program
+        written in Scaly that serves the same API on the same database as the C# server the generator
+        was first written for.</para>
+
+    </preface>
+
+    <part xml:id="designdevelopment"><title>Design and Development</title>
+
+        <partintro>
+            <para>This part describes the <link linkend="design">design of Fire</link>
+            and the <link linkend="development">procedures of its development</link>.</para>
+        </partintro>
+
+        <chapter xml:id="design"><title>Design</title>
+
+            <para>The following sections describe the <link linkend="components">components of Fire</link>
+            and its <link linkend="designprinciples">design principles</link>.</para>
+
+            <sect1 xml:id="components"><title>Components</title>
+
+                <para>Fire consists of a model, a generator, a runtime and the program the generator writes.</para>
+
+                <sect2 xml:id="fhirserver"><title>FHIR Server</title>
+
+                    <para>The <olink targetdoc="https://hl7.org/fhir">FHIR</olink> server stores data as
+                    <olink targetdoc="resourcelist.html">FHIR resources</olink> and allows you to</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>read, write and query them with
+                        <olink targetdoc="https://hl7.org/fhir/search.html">FHIR searches</olink>
+                        through the <olink targetdoc="https://hl7.org/fhir/http.html">FHIR RESTful API</olink>,</para></listitem>
+
+                        <listitem><para>send batch and transaction bundles,</para>
+                        <para>and</para>
+                        </listitem>
+
+                        <listitem><para>browse and edit resources through the built-in HTML pages.</para>
+                        </listitem>
+
+                    </itemizedlist>
+
+                    <para>The server is one executable. It is made of two parts:</para>
+
+                    <variablelist>
+
+                        <varlistentry><term>The runtime</term>
+                            <listitem><para>The Scaly package <filename>packages/fhir</filename>, written by hand.
+                            It knows nothing of a particular resource: handlers, repository, search, validation,
+                            bundles and the output formats all work from the model they are handed.</para></listitem></varlistentry>
+
+                        <varlistentry><term>The program</term>
+                            <listitem><para><filename>server/fire.scaly</filename>, written by the generator.
+                            It holds the model as one text of records and hands it to the runtime.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                </sect2>
+
+                <sect2 xml:id="codegencomponent"><title>Code Generator</title>
+
+                    <para>The <link linkend="codegen">generator</link> is written in DSSSL. From the XML model it writes
+                    the program, the model's records, the SQL of the database schema for the three databases,
+                    the JavaScript of the HTML pages and the reference pages of this documentation.</para>
+
+                </sect2>
+
+                <sect2 xml:id="csharp"><title>The C# Server</title>
+
+                    <para>The directory <filename>upstream</filename> holds the generator this one descends from. It
+                    writes a C# server from the same model. The Scaly server is measured against it: it answers
+                    with the same bytes and keeps the same tables with the same contents, so either server can
+                    continue on a database the other one wrote.</para>
+
+                    <para>Where the C# server does something it should not, the Scaly server does the same as long
+                    as the answers or the stored rows would differ otherwise.
+                    <link linkend="restlimitations">Limitations</link> lists what a user can see of that.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="designprinciples"><title>Design Principles</title>
+
+                <para>The following sections describe <link linkend="datamodel">the data layout</link>,
+                the <link linkend="repository">repository layer</link>, the
+                <link linkend="contentformat">storage of the content</link> and
+                <link linkend="runtimedesign">how a request is served</link>.</para>
+
+                <sect2 xml:id="datamodel"><title>Data Model</title>
+
+                    <para>For each resource type there is a resource table with the resource's name
+                    (e.g. <database class="table">Patient</database>) and a schema of the same name which holds
+                    its history and search tables. SQLite has no schemas; there the schema's name is the front
+                    part of the table's name (<database class="table">Patient_search_name</database>).</para>
+
+                    <variablelist>
+
+                        <varlistentry>
+                            <term><database class="table">{Resource}</database></term>
+                                <listitem><para>The resource table, one row per resource: its id, its current
+                                version, the time of the last change, the content, and a column for each search
+                                parameter that is a single top-level property.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                            <term><database class="table">{Resource}.resource_history</database></term>
+                                <listitem><para>The earlier versions of a resource and the marks of its deletions.
+                                Present only for a resource with history.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                            <term><database class="table">{Resource}.search_[name]</database></term>
+                                <listitem><para>The values of the search parameter [name], one row per value.</para></listitem>
+                        </varlistentry>
+
+                        <varlistentry>
+                            <term><database class="table">Binary.resource_data</database></term>
+                                <listitem><para>On PostgreSQL, the bytes of a Binary, kept apart from its content.</para></listitem>
+                        </varlistentry>
+
+                    </variablelist>
+
+                    <para>The table <database class="table">dbinfo</database> holds the version of the schema.</para>
+
+                </sect2>
+
+                <sect2 xml:id="repository"><title>Repository Layer</title>
+
+                    <para>The repository layer</para>
+
+                    <orderedlist>
+                        <listitem><para>stores and loads resources,</para></listitem>
+                        <listitem><para>searches for them by their search parameters,</para>
+                        <para>and</para></listitem>
+                        <listitem><para>maintains the schema.</para></listitem>
+                    </orderedlist>
+
+                    <para>It supports</para>
+
+                    <itemizedlist>
+                        <listitem><para><olink targetdoc="https://www.postgresql.org">PostgreSQL</olink>,</para></listitem>
+                        <listitem><para><olink targetdoc="https://www.microsoft.com/en-us/sql-server">SQL Server</olink>,</para>
+                        <para>and</para>
+                        </listitem>
+                        <listitem><para><olink targetdoc="https://www.sqlite.org">SQLite</olink>.</para></listitem>
+                    </itemizedlist>
+
+                    <para>There is one repository for all three. Its SQL is written as PostgreSQL reads it and
+                    rendered for the database in use when a statement is sent: the names of tables, the
+                    placeholders of parameters, the paging clause. What differs in meaning, such as the form of a
+                    time or the lock on a row, is decided where it occurs.</para>
+
+                    <para>Every write is one transaction: the resource's row, the copy of the replaced version in
+                    the history, and the rows of the search tables. A transaction bundle is one transaction as a
+                    whole.</para>
+
+                    <para>A search is answered with two statements: one counts the matches, one fetches the page.
+                    Nothing is kept between two pages of a search.</para>
+
+                </sect2>
+
+                <sect2 xml:id="contentformat"><title>Content Storage</title>
+
+                    <para>The content of a resource is stored as raw UTF-8 JSON bytes (BYTEA in PostgreSQL,
+                    VARBINARY in SQL Server, BLOB in SQLite), in the text the C# server's serializer writes. A
+                    read in JSON answers these bytes as they are. They are parsed only where a part of them is
+                    needed: for XML and HTML, inside a bundle, for the search tables, for a patch.</para>
+
+                </sect2>
+
+                <sect2 xml:id="runtimedesign"><title>Serving a Request</title>
+
+                    <para>The server runs a scheduler thread per processor core. A request is a task on one of
+                    them; where it waits for the database or the network, the thread serves other requests.
+                    Each thread has its own connections to the database.</para>
+
+                    <para>The memory a request needs is taken from a region that is given back as a whole when
+                    the request is answered. There is no garbage collector.</para>
+
+                    <para>The model is read once at the start and indexed; a handler looks up what it needs to
+                    know of a resource type by the type's name.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="development"><title>Development</title>
+
+            <para>This chapter describes <link linkend="generating">the generation</link>,
+            <link linkend="building">how to build and test</link>,
+            and <link linkend="producing">how this documentation is produced</link>.</para>
+
+            <sect1 xml:id="generating"><title>Generating Code</title>
+
+                <para>What the server knows of FHIR comes from an XML model, which is made of the
+                <olink targetdoc="https://hl7.org/fhir/downloads.html">FHIR specification</olink>.</para>
+
+                <sect2 xml:id="generatingdesign"><title>Design</title>
+
+                    <orderedlist>
+
+                        <listitem><para>The <link linkend="modeler">converter</link> turns the
+                        <olink targetdoc="https://hl7.org/fhir/definitions.json.zip">JSON definitions</olink>
+                        of the specification into <filename>model/fhir.xml</filename>.</para></listitem>
+
+                        <listitem><para>The model is <link linkend="fhirspec">edited</link>: the resources to be
+                        served are activated.</para></listitem>
+
+                        <listitem><para>The <link linkend="codegen">generator</link> writes the program and the
+                        web root from the model.</para></listitem>
+
+                    </orderedlist>
+
+                </sect2>
+
+                <sect2 xml:id="modeler"><title>The Converter</title>
+
+                    <para><filename>tools/fhir-to-xml</filename> is a Scaly program. It reads these files of the
+                    definitions:</para>
+
+                    <variablelist>
+
+                        <varlistentry><term><filename>profiles-resources.json</filename></term>
+                            <listitem><para>The resources.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>profiles-types.json</filename></term>
+                            <listitem><para>The data types.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>valuesets.json</filename></term>
+                            <listitem><para>The value sets and code systems.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>search-parameters.json</filename></term>
+                            <listitem><para>The search parameters.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                    <para>The model is kept in the repository, so a build needs neither the definitions nor the
+                    converter. <command>tools/pin-model.sh</command> makes it anew;
+                    <command>tools/pin-model.sh --check</command> says whether the converter still writes the
+                    kept model byte for byte.</para>
+
+                </sect2>
+
+                <sect2 xml:id="fhirspec"><title>Editing the XML Model</title>
+
+                    <para><filename>model/fhir.xml</filename> contains all resources and search parameters of the
+                    specification; <filename>model/fire.dtd</filename> is its DTD. A resource is served when its
+                    <property>active</property> attribute is <code>true</code>. The elements, with the plural
+                    elements and the <property>id</property> and <property>name</property> attributes left out:</para>
+
+                    <variablelist>
+
+                        <varlistentry><term><classname>resource</classname></term>
+                            <listitem><para>A resource. <property>active</property> says whether the server serves
+                            it, <property>history</property> whether its versions are kept.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>element</classname></term>
+                            <listitem><para>A data type, global or of a resource.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>property</classname></term>
+                            <listitem><para>A property of a resource or an element.
+                            <property>iscollection</property> is <code>true</code> if it can occur more than once,
+                            <property>notnull</property> if it must occur.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>variant</classname></term>
+                            <listitem><para>A possible type of a property. <property>ref</property> links to the
+                            element or, for a code with a required binding, to the
+                            <classname>codeset</classname>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>target</classname></term>
+                            <listitem><para>A resource type a reference may point to.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>codeset</classname>, <classname>code</classname></term>
+                            <listitem><para>A set of codes and a code of it.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>search</classname></term>
+                            <listitem><para>A search parameter with its
+                            <olink targetdoc="https://hl7.org/fhir/search.html#ptypes">type</olink>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>path</classname>, <classname>part</classname>, <classname>cast</classname></term>
+                            <listitem><para>A path of a search parameter, its steps through the properties, and
+                            the type a step is narrowed to.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>component</classname></term>
+                            <listitem><para>A component of a
+                            <olink targetdoc="https://hl7.org/fhir/search.html#composite">composite search parameter</olink>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><classname>upgrade</classname></term>
+                            <listitem><para>A step that lifts a database of an earlier version of the model; see
+                            <link linkend="schemas">Database Schemas</link>.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                </sect2>
+
+                <sect2 xml:id="codegen"><title>The Code Generator</title>
+
+                    <para>The generator is run by dazzle, a DSSSL processor. DSSSL is the Document Style Semantics
+                    and Specification Language; the generator uses the SGML transformation back end, which
+                    writes files of text.</para>
+
+                    <para><command>tools/generate.sh</command> runs it. Nothing it writes is kept in the
+                    repository:</para>
+
+                    <variablelist>
+
+                        <varlistentry><term><filename>server/fire.scaly</filename></term>
+                            <listitem><para>The program.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>server/fire/Model.scaly</filename></term>
+                            <listitem><para>The model as records: the types with their members, the code sets,
+                            the search tables and how a resource's values reach them, the references, the sort
+                            keys, the CapabilityStatement. Written by <filename>codegen/model.scm</filename> and
+                            <filename>codegen/search.scm</filename>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>server/fire/Schema.scaly</filename></term>
+                            <listitem><para>The SQL that creates the schema and its indexes, and the SQL of the
+                            upgrade steps, for each of the three databases.</para></listitem></varlistentry>
+
+                        <varlistentry><term><filename>server/wwwroot</filename></term>
+                            <listitem><para>The web root: the scripts of the HTML pages, a reference page for each
+                            resource, the pages of this documentation.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                    <para>The stylesheet is <filename>codegen/scaly.dsl</filename>. The parts that do not depend
+                    on the language of the server (the names, the schema, the scripts, the pages) are the files
+                    of <filename>upstream/codegen</filename>, included and not copied.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="building"><title>Building Code</title>
+
+                <para>Building needs the Scaly toolchain and dazzle.</para>
+
+                <orderedlist>
+
+                    <listitem><para>Generate:</para>
+                    <para><command>tools/generate.sh</command></para></listitem>
+
+                    <listitem><para>Build, from the root of the repository:</para>
+                    <para><command>scaly build server/fire.scaly -o server/build/fire</command></para></listitem>
+
+                    <listitem><para>Run, with the <link linkend="configuring">settings</link> in the environment:</para>
+                    <para><command>DatabaseType=Sqlite ConnectionString="Data Source=fire.db" ASPNETCORE_WEBROOT=server/wwwroot server/build/fire</command></para></listitem>
+
+                </orderedlist>
+
+                <para>Everything generated comes back after</para>
+                <para><command>rm -rf server &amp;&amp; tools/generate.sh</command></para>
+
+                <sect2 xml:id="testing"><title>Testing</title>
+
+                    <para>The tests put the Scaly server beside the C# server. They start their own database: a
+                    container for PostgreSQL and SQL Server, a file for SQLite. <parameter>FIRE_DATABASE</parameter>
+                    chooses it (<literal>postgresql</literal>, <literal>sqlite</literal>, <literal>sqlserver</literal>).</para>
+
+                    <variablelist>
+
+                        <varlistentry><term><command>tools/measure.sh scaly</command></term>
+                            <listitem><para>Runs the test suite pyrtest, black-box tests over HTTP, against the
+                            server.</para></listitem></varlistentry>
+
+                        <varlistentry><term><command>tools/measure.sh turns</command></term>
+                            <listitem><para>The two servers take turns on one database. Every answer (status,
+                            content type, body) and every row they write must be the same. The requests are the
+                            lines of <filename>tools/turns/queries.txt</filename> and
+                            <filename>tools/turns/steps.txt</filename>; a new piece of behaviour gets its lines
+                            there.</para></listitem></varlistentry>
+
+                        <varlistentry><term><command>tools/variant-test.sh</command>, <command>tools/upgrade-test.sh</command></term>
+                            <listitem><para>The same comparison for a changed model: resources without history,
+                            and a database lifted by upgrade steps.</para></listitem></varlistentry>
+
+                        <varlistentry><term><command>tools/throughput.sh</command></term>
+                            <listitem><para>Both servers under load.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="producing"><title>Producing Documentation</title>
+
+                <para>This documentation is served by the server itself, at
+                <olink targetdoc="index.html">index.html</olink>.</para>
+
+                <sect2 xml:id="writing"><title>Writing</title>
+
+                    <para>The prose is written in
+                    <olink targetdoc="https://tdg.docbook.org/tdg/5.0/docbook">DocBook</olink>, in the one file
+                    <filename>documentation/fire.xml</filename>. The reference pages of the resources are
+                    <link linkend="codegen">generated</link> from the model.</para>
+
+                </sect2>
+
+                <sect2 xml:id="generatingdoc"><title>Generating Documentation</title>
+
+                    <para><command>tools/generate.sh</command> writes the pages along with everything else: it
+                    runs dazzle with <filename>upstream/codegen/documentation.dsl</filename> on
+                    <filename>documentation/fire.xml</filename>.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+    <part xml:id="planningdeployment"><title>Planning, Deployment, and Maintenance</title>
+
+        <partintro>
+            <para>This part is about <link linkend="planning">planning an installation</link>,
+            <link linkend="deployment">deploying it</link>, and <link linkend="maintenance">maintaining it</link>.</para>
+        </partintro>
+
+        <chapter xml:id="planning"><title>Planning</title>
+
+            <para>An installation needs a decision about the <link linkend="operatingsystem">platform</link>,
+            the <link linkend="database">database</link>, and <link linkend="surroundings">what stands in front
+            of the server</link>.</para>
+
+            <sect1 xml:id="operatingsystem"><title>Platform</title>
+
+                <para>The server is a native executable, built for the machine it runs on. It needs no runtime
+                installed beside it. It has been built and tested on macOS on ARM; Scaly also builds for Linux
+                and for Intel processors. It has not been run on Windows.</para>
+
+                <para>The libraries it loads are OpenSSL (for a connection to the database inside TLS) and
+                SQLite.</para>
+
+            </sect1>
+
+            <sect1 xml:id="database"><title>Database</title>
+
+                <para>Fire stores its resources in PostgreSQL, SQL Server or SQLite. The tests pass on all
+                three.</para>
+
+                <sect2 xml:id="postgresql"><title>PostgreSQL</title>
+
+                    <para>The first choice, and the one with the most experience behind it. The database named
+                    in the connection string must exist; the server creates everything inside it.</para>
+
+                </sect2>
+
+                <sect2 xml:id="mssqlserver"><title>MS SQL Server</title>
+
+                    <para>The server logs in with a user and a password; Windows authentication is not
+                    supported. It creates the database if it is not there. The session is encrypted unless the
+                    connection string says <literal>Encrypt=False</literal>, but the server's certificate is
+                    not verified.</para>
+
+                </sect2>
+
+                <sect2 xml:id="sqlite"><title>SQLite</title>
+
+                    <para>A file, and no database server: for development, tests and small installations. Only
+                    one write happens at a time. Searching without regard to case knows the letters of
+                    ASCII only for what is stored: a stored upper-case umlaut is not found.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="surroundings"><title>In Front of the Server</title>
+
+                <para>The server listens on the loopback address, speaks HTTP without TLS and does not
+                authenticate anyone, the <link linkend="schemas">administrative routes</link> included. It is meant to
+                stand behind a proxy that terminates TLS and decides who may ask.</para>
+
+                <para>A request's body may be 16 MB at most.</para>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="deployment"><title>Deployment</title>
+
+            <para>An installation is the executable, the directory <filename>wwwroot</filename>, and, if wanted,
+            a directory of seed data. It is <link linkend="configuring">configured</link> by its environment.</para>
+
+            <sect1 xml:id="running"><title>Running</title>
+
+                <para>Start the executable in the directory that holds <filename>wwwroot</filename>, or name the
+                web root with <parameter>ASPNETCORE_WEBROOT</parameter>. At its start the server reaches the
+                database, creates or <link linkend="schemas">lifts the schema</link>, and then listens. It ends
+                with a status other than 0 when the database type is unknown (2), the database cannot be
+                reached or prepared (3), or the port cannot be listened on (4).</para>
+
+                <para><literal>/healthz</literal> says that the process is up, <literal>/readyz</literal> that
+                the database answers.</para>
+
+                <para>The server does not handle signals: it ends at once when it is stopped, without waiting
+                for the requests in flight.</para>
+
+            </sect1>
+
+            <sect1 xml:id="replacing"><title>In Place of the C# Server</title>
+
+                <para>The settings have the names the C# server reads them by, so the same environment starts
+                either. The database needs no conversion in either direction. The C# server reads
+                <filename>appsettings.json</filename> as well; the Scaly server reads the environment
+                alone.</para>
+
+            </sect1>
+
+            <sect1 xml:id="configuring"><title>Configuring</title>
+
+                <para>The settings are variables of the environment:</para>
+
+                <variablelist>
+
+                    <varlistentry>
+                        <term><parameter>DatabaseType</parameter></term>
+                            <listitem><para><literal>PostgreSql</literal> (the default), <literal>SqlServer</literal>
+                            or <literal>Sqlite</literal>.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>ConnectionString</parameter></term>
+                            <listitem><para>In the form the .NET drivers read, the keywords without regard to
+                            case. PostgreSQL: <literal>Host=localhost;Port=5432;Database=Fire;Username=postgres;Password=…</literal>.
+                            SQL Server: <literal>Server=localhost,1433;Database=Fire;User Id=sa;Password=…;TrustServerCertificate=True</literal>.
+                            SQLite: <literal>Data Source=fire.db</literal>.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>Kestrel__Endpoints__MyHttpEndpoint__Url</parameter></term>
+                            <listitem><para>The address to listen on; its port is used. The default is
+                            5080.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>ASPNETCORE_WEBROOT</parameter></term>
+                            <listitem><para>The directory of the web root. The default is
+                            <filename>wwwroot</filename> where the server is started. Without that directory the
+                            server serves no files.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>SeedDataPath</parameter></term>
+                            <listitem><para>The directory of the <link linkend="seeding">seed data</link>. The
+                            default is <filename>seed</filename> where the server is started.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>ReseedSecret</parameter></term>
+                            <listitem><para>The secret of the <link linkend="seeding">reseed route</link>. Without
+                            it that route refuses.</para></listitem></varlistentry>
+
+                    <varlistentry>
+                        <term><parameter>DATABASE_MAX_CONN</parameter></term>
+                            <listitem><para>PostgreSQL: the number of connections the server may hold.</para></listitem></varlistentry>
+
+                </variablelist>
+
+            </sect1>
+
+        </chapter>
+
+        <chapter xml:id="maintenance"><title>Maintenance</title>
+
+            <para>This chapter describes the <link linkend="schemas">management of the database schema</link>
+            and <link linkend="browsing">browsing, editing and deleting data</link> with the server itself.</para>
+
+            <sect1 xml:id="schemas"><title>Database Schemas</title>
+
+                <para>On an empty database the server creates all schemas, tables and indexes at its start, and
+                loads the <link linkend="seeding">seed data</link>.</para>
+
+                <para>On a database of an earlier version of the model it carries out the model's upgrade
+                steps, each in a transaction of its own: the step's SQL, the search tables it adds filled from
+                the stored resources, and then the new version. A step that needs a program of its own (a data
+                migration) is not supported; the server names it and does not start.</para>
+
+                <para>The routes of this section are not protected by the server; see
+                <link linkend="surroundings">In Front of the Server</link>.</para>
+
+                <sect2 xml:id="indexes"><title>Managing Indexes</title>
+
+                    <para>To drop all search indexes, for instance before a large import, and to create them
+                    again:</para>
+                    <para><literal>GET /admin/indexes/drop</literal></para>
+                    <para><literal>GET /admin/indexes/create</literal></para>
+
+                </sect2>
+
+                <sect2 xml:id="searchtables"><title>Managing Search Tables</title>
+
+                    <para>To create the table of a search parameter and fill it from all stored resources:</para>
+                    <para><literal>GET /admin/createsearch/{Resource}/{parameter}</literal></para>
+
+                    <para>To drop it:</para>
+                    <para><literal>GET /admin/dropsearch/{Resource}/{parameter}</literal></para>
+
+                </sect2>
+
+                <sect2 xml:id="purging"><title>Purging Deleted Data</title>
+
+                    <para>A deleted resource keeps its versions in the
+                    <database>resource_history</database> table. To remove the history of all deleted resources
+                    of a type for good:</para>
+                    <para><literal>GET /purgeschema/{Resource}</literal></para>
+
+                </sect2>
+
+                <sect2 xml:id="rollback"><title>Rolling Back to a Previous Version</title>
+
+                    <para>For a resource with history, the current version can be taken back. The version before
+                    it is the current one again, as if the last write had not happened:</para>
+                    <para><literal>POST /fire/{Resource}/{id}/_rollback/{vid}</literal></para>
+                    <para><literal>{vid}</literal> is the version to take back, which must be the current one.</para>
+
+                </sect2>
+
+                <sect2 xml:id="undeleting"><title>Undeleting Deleted Data</title>
+
+                    <para>A <command>DELETE</command> moves a resource's row to the
+                    <database>resource_history</database> table and leaves a mark of the deletion there. Its
+                    <olink targetdoc="https://hl7.org/fhir/http.html#history">history</olink> can still be
+                    read.</para>
+
+                    <para>To undelete one resource:</para>
+                    <para><literal>POST /fire/{Resource}/{id}/$undelete</literal></para>
+
+                    <para>To undelete all deleted resources of a type:</para>
+                    <para><literal>GET /admin/undelete/{Resource}</literal></para>
+
+                </sect2>
+
+                <sect2 xml:id="seeding"><title>Seeding Data</title>
+
+                    <para>The seed data are Bundle files (<filename>*.json</filename>) in the
+                    <link linkend="configuring">seed directory</link>. Each resource in them is stored under the
+                    id it has. They are loaded, in the order of the file names, when the server creates the
+                    schema. To load them again:</para>
+                    <para><literal>GET /admin/seed</literal></para>
+
+                    <para>To remove everything of a type and load its seed data anew:</para>
+                    <para><literal>GET /admin/{ReseedSecret}/reseed/{Resource}</literal></para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="browsing"><title>Browsing and Deleting Data</title>
+
+                <para>A browser that asks the server gets <link linkend="formats">HTML</link>. Enter a FHIR
+                search URL to get a <link linkend="bundlepage">bundle page</link>, or the address of a
+                resource to get its <link linkend="resourcepage">resource page</link>.</para>
+
+                <sect2 xml:id="bundlepage"><title>Bundle Page</title>
+
+                    <para>A search such as</para>
+                    <para><filename><olink targetdoc="/fire/Patient">/fire/Patient</olink></filename></para>
+                    <para>is shown as a table. The page lets you</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>delete selected resources, or all that match the search,</para></listitem>
+
+                        <listitem><para>download the result as a JSON bundle,</para></listitem>
+
+                        <listitem><para>go through the pages of the result,</para>
+                        <para>and</para></listitem>
+
+                        <listitem><para>go to a <link linkend="resourcepage">resource</link> by its link.</para></listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+                <sect2 xml:id="resourcepage"><title>Resource Page</title>
+
+                    <para>The resource page lets you</para>
+
+                    <orderedlist>
+
+                        <listitem><para>inspect and <link linkend="editing">edit</link> a resource,</para></listitem>
+
+                        <listitem><para>go to the resources it refers to,</para>
+                        <para>and</para></listitem>
+
+                        <listitem><para>find the resources that refer to it.</para></listitem>
+
+                    </orderedlist>
+
+                    <para><command>Download JSON</command> saves the resource as a file,
+                    <command>History</command> shows its versions.</para>
+
+                    <para>Below the editing area there is a line for each resource type that can refer to the
+                    current resource, with a link for each of its reference search parameters. A link searches
+                    for the resources of that type which refer to the current one.</para>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="editing"><title>Editing Resources</title>
+
+                <para>To change a resource:</para>
+
+                <orderedlist>
+
+                    <listitem><para>To add an element, click the <command>+</command> button beside the field's
+                    name and enter the data.</para></listitem>
+
+                    <listitem><para>To remove an element, click the <command>-</command> button.</para></listitem>
+
+                    <listitem><para>To edit a reference, select <command>edit</command> in the list before the
+                    link. <command>link</command> shows it as a link again, <command>-</command> removes
+                    it.</para></listitem>
+
+                    <listitem><para>Click <command>Save</command>.</para></listitem>
+
+                </orderedlist>
+
+                <para>To create a resource, click <command>New</command>, enter its data and click
+                <command>Save</command>.</para>
+
+                <para>To take back the current version of a resource, click <command>Rollback</command> and
+                confirm.</para>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+    <part xml:id="working"><title>Working with Data</title>
+
+        <chapter xml:id="fhirfunctionality"><title>FHIR Functionality</title>
+
+            <para>The server implements FHIR R5 for the resources that are active in the model; the
+            <olink targetdoc="resourcelist.html">resource list</olink> names them.
+            <olink targetdoc="/fire/metadata">/fire/metadata</olink> answers the CapabilityStatement.</para>
+
+            <sect1 xml:id="fhirapi"><title>FHIR API</title>
+
+                <para>The base address is <literal>/fire</literal>.</para>
+
+                <sect2 xml:id="rest"><title>REST</title>
+
+                    <variablelist>
+
+                        <varlistentry><term><literal>GET /fire/{Resource}/{id}</literal></term>
+                            <listitem><para>Read. A deleted resource answers 410, an unknown id 404.
+                            <literal>If-None-Match</literal> answers 304
+                            for what the client has.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>GET /fire/{Resource}/{id}/_history/{vid}</literal></term>
+                            <listitem><para>Read of a version.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>POST /fire/{Resource}</literal></term>
+                            <listitem><para>Create. With <literal>If-None-Exist</literal> only when the search it
+                            holds finds nothing.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>PUT /fire/{Resource}/{id}</literal></term>
+                            <listitem><para>Update, or create under the given id. With
+                            <literal>If-Match</literal> only when the version is the one named.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>PUT /fire/{Resource}?{search}</literal></term>
+                            <listitem><para>Conditional update.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>PATCH /fire/{Resource}/{id}</literal></term>
+                            <listitem><para>A change by
+                            <olink targetdoc="https://datatracker.ietf.org/doc/html/rfc6902">JSON Patch</olink>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>DELETE /fire/{Resource}/{id}</literal>, <literal>DELETE /fire/{Resource}?{search}</literal></term>
+                            <listitem><para>Delete, and conditional delete.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>GET /fire/{Resource}/{id}/_history</literal>, <literal>/fire/{Resource}/_history</literal>, <literal>/fire/_history</literal></term>
+                            <listitem><para>The history of a resource, of a type and of everything.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>GET /fire/{Resource}?{search}</literal>, <literal>POST /fire/{Resource}/_search</literal></term>
+                            <listitem><para><link linkend="querying">Search</link>.</para></listitem></varlistentry>
+
+                        <varlistentry><term><literal>POST /fire</literal></term>
+                            <listitem><para>A Bundle of type batch or transaction.</para></listitem></varlistentry>
+
+                    </variablelist>
+
+                    <para>A write answers with the resource; the <literal>Prefer</literal> header
+                    (<literal>return=minimal</literal>, <literal>return=OperationOutcome</literal>) changes
+                    that. A resource is validated before it is stored: its members and their types, the codes
+                    of a required binding, the members that must be there. An
+                    <literal>X-Provenance</literal> header stores a Provenance for the write.</para>
+
+                    <para>A read of a Binary answers its bytes under their own content type unless the request
+                    asks for FHIR.</para>
+
+                </sect2>
+
+                <sect2 xml:id="formats"><title>Formats</title>
+
+                    <para>The server reads JSON. It answers in JSON, in XML, or as an HTML page that shows the
+                    resource. The parameter <parameter>_format</parameter> decides
+                    (<literal>json</literal>, <literal>xml</literal>, <literal>html</literal>, or a media type);
+                    without it the <literal>Accept</literal> header does: <literal>application/fhir+json</literal>
+                    or <literal>application/json</literal>, then <literal>application/fhir+xml</literal>, then
+                    anything with <literal>html</literal> in it. Everything else is answered in JSON.</para>
+
+                </sect2>
+
+                <sect2 xml:id="restoperations"><title>Operations</title>
+
+                    <para>The operations beyond the standard are <link linkend="autocomplete">autocomplete</link>,
+                    <link linkend="undeleting">undelete</link>, <link linkend="rollback">rollback</link> and
+                    <link linkend="importing">import</link>. The operations FHIR defines for a resource
+                    (<literal>$validate</literal>, <literal>$everything</literal> and the like) are not
+                    implemented.</para>
+
+                </sect2>
+
+                <sect2 xml:id="restlimitations"><title>Limitations</title>
+
+                    <itemizedlist>
+
+                        <listitem><para>A resource can be sent in JSON only.</para></listitem>
+
+                        <listitem><para>The XML form is not the XML of the FHIR specification: a resource
+                        inside a Bundle loses the element that names its type, and the <literal>url</literal> of an
+                        extension and the <literal>id</literal> of an element are written as child elements. Use
+                        JSON to exchange data.</para></listitem>
+
+                        <listitem><para>In the HTML form, a <literal>--&gt;</literal> inside the data is shown
+                        as <literal>-/-&gt;</literal>.</para></listitem>
+
+                        <listitem><para>The <parameter>_since</parameter> parameter of a history is not
+                        looked at.</para></listitem>
+
+                        <listitem><para>The addresses in the history of everything
+                        (<literal>/fire/_history</literal>) begin with <literal>/fhir</literal>.</para></listitem>
+
+                        <listitem><para>There are no subscriptions, no terminology services and no
+                        authentication.</para></listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="querying"><title>Querying</title>
+
+                <para>A search is a GET on the resource type with its conditions in the query, or a POST to
+                <literal>_search</literal> with them in a form.</para>
+
+                <sect2 xml:id="queryintro"><title>Introduction</title>
+
+                    <para>Supported are</para>
+
+                    <itemizedlist>
+
+                        <listitem><para>the search parameters of the active resources, of the types string, token,
+                        date, reference, number, quantity and uri, and <parameter>_id</parameter> and
+                        <parameter>_lastUpdated</parameter>;</para></listitem>
+
+                        <listitem><para>the modifiers <literal>:exact</literal>, <literal>:contains</literal>,
+                        <literal>:missing</literal> and <literal>:not</literal>, and the prefixes of numbers and
+                        dates (<literal>eq</literal>, <literal>ne</literal>, <literal>gt</literal>,
+                        <literal>lt</literal>, <literal>ge</literal>, <literal>le</literal>, <literal>sa</literal>,
+                        <literal>eb</literal>, <literal>ap</literal>);</para></listitem>
+
+                        <listitem><para>several values in one condition (or) and a condition given several
+                        times (and);</para></listitem>
+
+                        <listitem><para>chained parameters (<literal>subject.name=…</literal>) and reverse chains
+                        (<parameter>_has</parameter>);</para></listitem>
+
+                        <listitem><para><parameter>_include</parameter> and <parameter>_revinclude</parameter>,
+                        also with <literal>:iterate</literal>;</para></listitem>
+
+                        <listitem><para>composite parameters;</para></listitem>
+
+                        <listitem><para><parameter>_sort</parameter>, <parameter>_count</parameter> and
+                        <parameter>_offset</parameter> for paging, <parameter>_total</parameter>,
+                        <parameter>_summary</parameter> and <parameter>_elements</parameter>.</para></listitem>
+
+                    </itemizedlist>
+
+                    <para><olink targetdoc="/fire/SearchParameter?base=Patient">/fire/SearchParameter?base={Resource}</olink>
+                    lists the search parameters of a resource.</para>
+
+                </sect2>
+
+                <sect2 xml:id="querylimitations"><title>Limitations</title>
+
+                    <itemizedlist>
+
+                        <listitem><para>A search parameter the server does not know is refused with 400, not
+                        passed over. That includes <parameter>_text</parameter>, <parameter>_content</parameter>
+                        and <parameter>_filter</parameter>, which are not implemented.</para></listitem>
+
+                        <listitem><para><parameter>_format</parameter> in the query of a search is refused the
+                        same way. Ask for XML or HTML of a search with the <literal>Accept</literal>
+                        header.</para></listitem>
+
+                        <listitem><para>The search parameter <literal>phonetic</literal> does no phonetic
+                        matching. It is answered exactly like <literal>name</literal>: a search for
+                        <literal>phonetic=Meier</literal> finds what <literal>name=Meier</literal> finds, and
+                        does not find <quote>Mayer</quote> or <quote>Maier</quote>.</para></listitem>
+
+                        <listitem><para><parameter>_sort</parameter> by a whole name is refused; sort by
+                        <literal>family</literal> or <literal>given</literal>.</para></listitem>
+
+                    </itemizedlist>
+
+                </sect2>
+
+            </sect1>
+
+            <sect1 xml:id="extendedapi"><title>Extended API</title>
+
+                <para>What the server offers beyond FHIR.</para>
+
+                <sect2 xml:id="autocomplete"><title>Autocomplete</title>
+
+                    <para>Each resource type has a <literal>GET /fire/{Resource}/$autocomplete</literal> operation
+                    that answers the matching values of a search table as a plain JSON array of strings. The
+                    query is that of a search: a working search URL becomes an autocomplete by putting
+                    <literal>$autocomplete</literal> into its path.</para>
+
+                    <para>Names of patients that begin with "smi":
+                    <olink targetdoc="/fire/Patient/$autocomplete?name=smi">/fire/Patient/$autocomplete?name=smi</olink></para>
+
+                    <para>The family names of the patients whose name matches "smi":
+                    <olink targetdoc="/fire/Patient/$autocomplete?name=smi&amp;_autocomplete=family">/fire/Patient/$autocomplete?name=smi&amp;_autocomplete=family</olink></para>
+
+                    <para>The name of a resource by its id, which the HTML pages use to show a reference:
+                    <olink targetdoc="/fire/Patient/$autocomplete?_id=123&amp;_autocomplete=name">/fire/Patient/$autocomplete?_id=123&amp;_autocomplete=name</olink></para>
+
+                    <para>The answer:</para>
+                    <para><literal>["Smith", "Smythe"]</literal></para>
+
+                    <variablelist>
+                        <varlistentry>
+                            <term><parameter>{search-parameter}={value}</parameter> (required)</term>
+                            <listitem><para>A search parameter and the beginning of its value, without regard to
+                            case; for <literal>_id</literal> the whole id. The parameter can be
+                            <literal>_id</literal>, a string parameter, or a token parameter with a table of its
+                            own (e.g. <literal>identifier</literal>), not one that is a column of the resource
+                            table.</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term><parameter>_autocomplete</parameter></term>
+                            <listitem><para>The search parameter whose values are answered, when it is another
+                            one than the one searched.</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term><parameter>_count</parameter>, <parameter>_offset</parameter></term>
+                            <listitem><para>How many values to answer at most, and how many to skip.</para></listitem>
+                        </varlistentry>
+                    </variablelist>
+
+                </sect2>
+
+                <sect2 xml:id="importing"><title>Importing</title>
+
+                    <para><literal>PUT /fire/{Resource}/_history/{id}</literal> stores a resource under the given
+                    id without the checks of an update: it is not validated and no version is asked for. It is
+                    meant for moving data in from another system.</para>
+
+                </sect2>
+
+            </sect1>
+
+        </chapter>
+
+    </part>
+
+</book>

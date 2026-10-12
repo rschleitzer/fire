@@ -421,9 +421,8 @@ AS text/html Observation?_count=2
 AS application/fhir+xml _history?_count=3
 AS application/fhir+xml,application/json Patient/x1
 
-# The files of the web root, which the HTML form refers to.
-FILE /
-FILE /index.html
+# The files of the web root, which the HTML form refers to. (The pages of
+# the documentation are each server's own and are not asked for.)
 FILE /js/Patient.js
 FILE /js/Bundle.js
 FILE /js/Elements.js
@@ -435,13 +434,10 @@ FILE /icon_element.gif
 FILE /tbl_spacer.png
 FILE /nope.html
 FILE /nope
-FILE /css/../index.html
 FILE /fire/index.html
 FILE /healthz
 FILE /patient.html
 FILE /resourcelist.html
-FILE /documentation.html
-FILE /design.html
 FILE /js/OperationOutcome.js
 FILE /js/Observation.js
 FILE /css/project.css
