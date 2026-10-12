@@ -142,7 +142,25 @@ function readable_date(s: Slice[u8]) returns bool
     while i < s.length
     {
         if s[i] = 84
-            return well_formed("dateTime", s) and s.length > 10
+        {
+            if s.length <= 10
+                return false
+            ; .NET's parser, which upstream hands the value to, also takes a
+            ; zone of hours alone (+01, +1): read as +01:00
+            let sign zone_sign(s)
+            let hours s.length - sign - 1
+            if sign > 0 and (hours = 1 or hours = 2) and s[sign + 1] >= 48 and s[sign + 1] <= 57 and s[s.length - 1] >= 48 and s[s.length - 1] <= 57
+            {
+                var whole Array[u8]()
+                whole.append(s.slice_to(sign + 1))
+                if hours = 1
+                    whole.append("0")
+                whole.append(s.slice_from(sign + 1))
+                whole.append(":00")
+                return well_formed("dateTime", whole.as_slice())
+            }
+            return well_formed("dateTime", s)
+        }
         i := i + 1
     }
     if date_at(s, 0) = false
@@ -781,28 +799,27 @@ procedure inline_condition(mutable q: ref[SearchQuery], alias: int, column: Slic
 ; type has none of that name.
 procedure search_line(type: Slice[u8], key: Slice[u8]) returns Slice[u8]
 {
-    let lines model_searches(type)
+    ; the table of the parameter of exactly that name ...
+    let names model_search_names(type)
+    var table names.slice_to(0)
     var at: size_t 0
+    while at < names.length and table.length = 0
+    {
+        let name line_from(names, at)
+        at := at + name.length + 1
+        if name.length > key.length + 1 and name[key.length] = 32 and name.slice_to(key.length).equals(key)
+            table := name.slice_from(key.length + 1)
+    }
+    let lines model_searches(type)
+    if table.length = 0
+        return lines.slice_to(0)
+    ; ... and the line of that table
+    at := 0
     while at < lines.length
     {
         let line line_from(lines, at)
         at := at + line.length + 1
-        let table entry(line, 32, 1)
-        ; search_ and the name, its hyphens as underscores
-        if table.length <> key.length + 7
-            continue
-        var same true
-        var i: size_t 0
-        while i < key.length
-        {
-            var c key[i]
-            if c = 45
-                c := 95
-            if c <> table[i + 7] or (key[i] >= 65 and key[i] <= 90) or key[i] = 95
-                same := false
-            i := i + 1
-        }
-        if same
+        if entry(line, 32, 1).equals(table)
             return line
     }
     lines.slice_to(0)
@@ -971,42 +988,21 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
     table_condition(q, type, line[0], entry(line, 32, 1), value, modifier, problem)
 }
 
-; What a sort key orders by, over the rows named `r2`, into out; false
-; when the key is none to sort by.
-procedure put_sort_column(mutable out: ref[Array[u8]], type: Slice[u8], key: Slice[u8], line: Slice[u8]) returns bool
+; What the model says of sorting a type by `key`: the expression over the
+; rows named `r2`, `!` for a reference parameter, nothing for a key that is
+; none to sort by.
+procedure sort_expression(type: Slice[u8], key: Slice[u8]) returns Slice[u8]
 {
-    if key.equals("_lastUpdated")
+    let lines model_sorts(type)
+    var at: size_t 0
+    while at < lines.length
     {
-        put_bytes(out, "r2.last_updated")
-        return true
+        let line line_from(lines, at)
+        at := at + line.length + 1
+        if line.length > key.length + 1 and line[key.length] = 32 and line.slice_to(key.length).equals(key)
+            return line.slice_from(key.length + 1)
     }
-    if line.length = 0
-        return false
-    var from: Slice[u8] ""
-    match line[0] as int
-        case 105
-        {
-            put_bytes(out, "r2.\"")
-            out.add(entry(line, 32, 3))
-            put_bytes(out, "\"")
-            return true
-        }
-        case 100: from := "(SELECT x.value_low FROM "
-        case 115: from := "(SELECT LOWER(x.value) FROM "
-        case 116: from := "(SELECT x.value FROM "
-    if from.length = 0
-        return false
-    put_bytes(out, from)
-    put_table(out, type)
-    out.add(46 as u8)
-    out.add(entry(line, 32, 1))
-    put_bytes(out, " x WHERE x.resource_id = r2.id")
-    ; a date of a list has a row for every item: the first one is the key
-    let shape entry(line, 32, 2)
-    if shape.equals("dates") or shape.equals("periods")
-        put_bytes(out, " ORDER BY x.id")
-    put_bytes(out, " LIMIT 1)")
-    true
+    lines.slice_to(0)
 }
 
 ; ORDER BY for the sort the search asked for, over the rows named `r2`.
@@ -1030,8 +1026,8 @@ procedure put_order(mutable q: ref[SearchQuery], type: Slice[u8], mutable out: r
             direction := " DESC"
             key := key.slice_from(1)
         }
-        let line search_line(type, key)
-        if line.length > 0 and line[0] = 114
+        let expression sort_expression(type, key)
+        if expression.equals("!")
         {
             put_bytes(problem, "Sorting by reference parameter '")
             problem.add(key)
@@ -1040,16 +1036,17 @@ procedure put_order(mutable q: ref[SearchQuery], type: Slice[u8], mutable out: r
             put_bytes(problem, ":<TargetType>.<property>.")
             return false
         }
-        put_bytes(out, "CASE WHEN ")
-        if put_sort_column(out, type, key, line) = false
+        if expression.length = 0
         {
             put_bytes(problem, "Sort '")
             problem.add(key)
             put_bytes(problem, "' is not supported.")
             return false
         }
+        put_bytes(out, "CASE WHEN ")
+        put_bytes(out, expression)
         put_bytes(out, " IS NULL THEN 1 ELSE 0 END, ")
-        put_sort_column(out, type, key, line)
+        put_bytes(out, expression)
         out.add(direction)
         put_bytes(out, ", ")
     }

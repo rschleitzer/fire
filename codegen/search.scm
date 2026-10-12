@@ -10,6 +10,7 @@
 ;   each2 F s p        of every item of the array s of every item of F, p
 ;   eachlist F p       of every item of F every string of its array p
 ;   address F          every address of F, its parts joined
+;   addressin F a      the address a of every item of F, its parts joined
 ;   list F             every string of the array F
 ;   value F            the string F
 ;   identifier F       system and value of every item of F
@@ -57,6 +58,14 @@
     (if (null? names) ""
         ($ (car names) (apply $ (map (lambda (n) ($ "." n)) (cdr names))))))
 
+; The first string search of s's resource that reads a field of an address
+; below an array of elements.
+(define (scaly-first-backbone-address-field s)
+    (car (filter (lambda (x) (and (string=? "string" (% "type" x))
+                                  (search-is-address-through-backbone? x)
+                                  (not (search-last-is-address? x))))
+                 (node-list->list (table-searches (parent (parent s)))))))
+
 ; The shape of a string search (model-string-section and
 ; repo-string-extractor-call); the lists are the resource's string searches
 ; that share one extractor.
@@ -78,7 +87,16 @@
             ((search-is-address? s)
                 (let ((last (search-property-last s)))
                     ($ "each " (search-fhir-field-name (car addr-fields)) " " (if last (% "name" last) ""))))
-            ((search-is-address-through-backbone? s) "none")
+            ; an address below an array of elements (contact.address): as a
+            ; whole, or one of its fields -- upstream writes ONE extractor
+            ; for the fields, with the path of the first such search
+            ((and (search-is-address-through-backbone? s) (search-last-is-address? s))
+                ($ "addressin " (scaly-part-name parts 0 "") " " (scaly-part-name parts 1 "")))
+            ((search-is-address-through-backbone? s)
+                (let* ((first-parts (search-path-parts (scaly-first-backbone-address-field s)))
+                       (last (search-property-last s)))
+                    ($ "each " (scaly-part-name first-parts 0 "") " "
+                       (scaly-part-name first-parts 1 "") "." (if last (% "name" last) ""))))
             ((> (length parts) 1)
                 (let ((prop (search-property s))
                       (last (search-property-last s)))

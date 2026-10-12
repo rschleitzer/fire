@@ -276,7 +276,7 @@ procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable 
             if tombstone = false
             {
                 w.key("resource")
-                w.raw(found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
+                put_stored(&w, found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
             }
             w.key("request")
             w.begin_object()

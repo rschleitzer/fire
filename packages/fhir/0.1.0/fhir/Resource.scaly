@@ -94,3 +94,16 @@ procedure write_resource(root: JsonValue, id: Slice[u8], version_id: i64, now: I
     w.value_dotnet(resource)
     content.add(w.bytes())
 }
+
+; A stored content as a value of a Bundle, the way upstream writes it there:
+; read and written anew (JsonNode.Parse, then System.Text.Json's text). For
+; what this server or upstream stored that changes nothing; a row that came
+; into the table another way -- a migration -- has its own text, and a
+; Bundle does not show it. What cannot be read goes as it is.
+procedure put_stored(mutable w: ref[JsonWriter], content: Slice[u8])
+{
+    let parsed JsonValue.parse(content)
+    if parsed.ok() = false
+        return w.raw(content)
+    w.value_dotnet(parsed.value)
+}

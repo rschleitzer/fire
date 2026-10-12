@@ -175,6 +175,54 @@ function days_in(year: i64, month: i64) returns i64
     31
 }
 
+; An instant as it is sent to the database: the digits of its second's
+; fraction beyond the sixth are left out. .NET keeps seven and Npgsql sends
+; microseconds, the seventh cut off -- the database would round it.
+procedure put_instant_text(mutable out: ref[Array[u8]], date: Slice[u8])
+{
+    var i: size_t 0
+    var fraction: i64 0 - 1
+    while i < date.length
+    {
+        let c date[i]
+        if fraction >= 0 and c >= 48 and c <= 57
+        {
+            fraction := fraction + 1
+            if fraction > 6
+            {
+                i := i + 1
+                continue
+            }
+        }
+        else
+        {
+            if c = 46
+                fraction := 0
+            else
+                fraction := 0 - 1
+        }
+        out.add(c)
+        i := i + 1
+    }
+}
+
+; Where the zone of a date with a time begins -- the sign behind its T --,
+; 0 when it has none.
+function zone_sign(date: Slice[u8]) returns size_t
+{
+    var i: size_t 0
+    var timed false
+    while i < date.length
+    {
+        if date[i] = 84
+            timed := true
+        if timed and (date[i] = 43 or date[i] = 45)
+            return i
+        i := i + 1
+    }
+    0
+}
+
 ; The span a FHIR date covers, as upstream's ParseFhirDateRange gives it:
 ; one instant for a value with a time (UTC where it names no zone), else
 ; the whole year, month or day up to its last millisecond.
@@ -191,7 +239,8 @@ procedure range_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64
     if timed
     {
         let n date.length
-        let zoned date[n - 1] = 90 or (n > 6 and (date[n - 6] = 43 or date[n - 6] = 45) and date[n - 3] = 58)
+        ; (a zone of hours alone, +01 or +1, is one too: a search value may have it)
+        let zoned date[n - 1] = 90 or zone_sign(date) > 0
         var times 0
         if low
             times := times + 1
@@ -200,7 +249,7 @@ procedure range_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64
         while times > 0
         {
             open_cell(text, cells)
-            text.add(date)
+            put_instant_text(text, date)
             if zoned = false
                 put_bytes(text, "+00")
             close_cell(text, cells)
@@ -534,14 +583,18 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
         }
         if shape.equals("eachlist")
             string_rows(text, cells, token, item.get(second))
-        if shape.equals("address")
+        if shape.equals("address") or shape.equals("addressin")
         {
+            ; (the address itself, or the one an element holds)
+            var address item
+            if shape.equals("addressin")
+                address := item.get(second)
             ; the cell is taken back when the address has no part
             let before_text text.length
             let before_cells cells.length
             open_cell(text, cells)
             var parts 0
-            let lines item.get("line")
+            let lines address.get("line")
             var l: size_t 0
             while l < lines.length()
             {
@@ -552,7 +605,7 @@ procedure search_rows(line: Slice[u8], root: JsonValue, mutable text: ref[Array[
             var r: size_t 0
             while entry(rest, 32, r).length > 0
             {
-                parts := parts + address_part(text, item.get(entry(rest, 32, r)), parts)
+                parts := parts + address_part(text, address.get(entry(rest, 32, r)), parts)
                 r := r + 1
             }
             if parts > 0

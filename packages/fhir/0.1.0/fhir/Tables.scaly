@@ -135,6 +135,17 @@ procedure model_search_parameters(name: Slice[u8]) returns Slice[u8]
 procedure model_types() returns Slice[u8]
     model_value(61, "types")
 
+; The search parameters of a type by their names: a line each, the name
+; and behind a blank its table (a name does not follow from a table's:
+; `_security`, a name with a capital in it, and a hyphen is an underscore there).
+procedure model_search_names(name: Slice[u8]) returns Slice[u8]
+    model_value(78, name)
+
+; What a type can be sorted by: a line per key, the key and behind a
+; blank the expression over the row r2, or ! for a reference parameter.
+procedure model_sorts(name: Slice[u8]) returns Slice[u8]
+    model_value(79, name)
+
 procedure model_unversioned() returns Slice[u8]
     model_value(61, "unversioned")
 

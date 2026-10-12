@@ -163,6 +163,8 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutabl
 ;   K  the columns it keeps beside its content, in the model's order, as
 ;      column:member:kind separated by commas (b a boolean, t a text, d an
 ;      instant, i an int, l a long, m a decimal)
+;   N  its search parameters by name: a line each, the name and its table
+;   O  what it can be sorted by, a line per key (see _sort below)
 ;   Q  the members a resource of it must have, separated by blanks
 ;   U  an upgrade step's actions beside its SQL, one per line (the steps'
 ;      versions, in order: =:upgrades)
@@ -192,6 +194,8 @@ procedure model_write(mutable out: ref[Array[u8]])
             (for active scaly-searches)
             (for active (lambda (r) (scaly-references r active-names)))
             (for active scaly-columns)
+            (for active (lambda (r) (scaly-sorts r root)))
+            (for active scaly-search-names)
             (for active scaly-required)
             (for active scaly-search-parameters)
             (scaly-upgrades root)
@@ -340,6 +344,130 @@ procedure model_write(mutable out: ref[Array[u8]])
                         inline))
                "\\n\")
 "))))
+
+; The search parameters of a type by their names: the name and its table.
+(define (scaly-search-names resource)
+    ($ "    record(out, \"@@N:" (name-of resource) "\\n"
+       (apply $ (map (lambda (s) ($ (% "name" s) " " (search-table-name s) "\\n"))
+                     (append (node-list->list (inline-searches resource))
+                             (node-list->list (table-searches resource)))))
+       "\\n\")
+"))
+
+; --- _sort ---
+;
+; What a type can be sorted by, as upstream's BuildOrderBy has it: a line
+; per key, the key and behind a blank the expression over the row `r2` --
+; or `!` for a reference parameter, which upstream refuses with a hint at
+; the chain. In upstream's order; the first line of a key is the one.
+;   its own: a column, _lastUpdated, a date, a number, a string (of a
+;     HumanName only family and given), a token
+;   a chain: reference:Type.key for every active target of the reference's
+;     first path -- its columns, _lastUpdated, its string, token, date and
+;     number tables
+;   a reverse chain: _has:Type:reference:key, where the model declares one
+;     (a param with ref and chain below repos, for another type)
+
+(define (scaly-quoted name) ($ "\\\"" name "\\\""))
+
+(define (scaly-sort-table schema search)
+    ($ (scaly-quoted schema) "." (search-table-name search)))
+
+(define (scaly-sort-own resource search column order)
+    ($ (% "name" search) " (SELECT x." column " FROM " (scaly-sort-table (name-of resource) search)
+       " x WHERE x.resource_id = r2.id" order " LIMIT 1)\\n"))
+
+(define (scaly-sortable-table? search)
+    (let ((t (% "type" search)))
+        (or (string=? "string" t) (string=? "token" t) (string=? "date" t) (string=? "number" t))))
+
+(define (scaly-sort-chain resource ref-search)
+    (let* ((paths-node (select-children "paths" ref-search))
+           (path-nodes (if (node-list-empty? paths-node) (empty-node-list)
+                          (select-children "path" (node-list-first paths-node))))
+           (first-path (if (node-list-empty? path-nodes) #f (node-list-first path-nodes)))
+           (targets-node (if first-path (select-children "targets" first-path) (empty-node-list)))
+           (targets (if (node-list-empty? targets-node) '()
+                        (node-list->list (children (node-list-first targets-node)))))
+           (from ($ " FROM " (scaly-sort-table (name-of resource) ref-search) " src JOIN ")))
+        (apply $ (map (lambda (tgt)
+            (let* ((tgt-rn (% "resource" tgt))
+                   (tgt-elem (if tgt-rn (element-with-id (downcase-string tgt-rn)) #f))
+                   (key ($ (% "name" ref-search) ":" tgt-rn ".")))
+                (if (and tgt-elem (active? tgt-elem))
+                    ($ (apply $ (map (lambda (s)
+                            ($ key (% "name" s) " (SELECT t." (scaly-quoted (search-col s)) from (scaly-quoted tgt-rn)
+                               " t ON t.id = src.target_id WHERE src.resource_id = r2.id LIMIT 1)\\n"))
+                            (node-list->list (inline-searches tgt-elem))))
+                       key "_lastUpdated (SELECT t.last_updated" from (scaly-quoted tgt-rn)
+                       " t ON t.id = src.target_id WHERE src.resource_id = r2.id LIMIT 1)\\n"
+                       (apply $ (map (lambda (s)
+                            ($ key (% "name" s) " (SELECT c." (if (string=? "date" (% "type" s)) "value_low" "value")
+                               from (scaly-sort-table tgt-rn s)
+                               " c ON c.resource_id = src.target_id WHERE src.resource_id = r2.id LIMIT 1)\\n"))
+                            (filter scaly-sortable-table? (node-list->list (table-searches tgt-elem))))))
+                    "")))
+            targets))))
+
+(define (scaly-sort-reverse resource root)
+    (let* ((rn-lc (downcase-string (name-of resource)))
+           (repos-nl (select-children "repos" root))
+           (repo-nl (if (node-list-empty? repos-nl) (empty-node-list)
+                        (node-list-filter
+                            (lambda (r) (let ((at (% "ref" r))) (if at (string=? (downcase-string at) rn-lc) #f)))
+                            (select-children "repo" (node-list-first repos-nl)))))
+           (params (if (node-list-empty? repo-nl) '()
+                       (node-list->list (select-descendants "param" (node-list-first repo-nl))))))
+        (apply $ (map (lambda (param)
+            (let* ((chain-attr (% "chain" param))
+                   (ref-attr (% "ref" param))
+                   (ref-search (if (and chain-attr ref-attr) (element-with-id ref-attr) #f))
+                   (src-res (if ref-search (parent (parent ref-search)) #f))
+                   (src-id (if src-res (% "id" src-res) #f))
+                   (chain-search (if ref-search (element-with-id chain-attr) #f)))
+                (if (and src-id (not (string=? src-id rn-lc)) chain-search
+                         (% "type" chain-search) (scaly-sortable-table? chain-search))
+                    (let* ((src-rn (name-of src-res))
+                           (key ($ "_has:" src-rn ":" (% "name" ref-search) ":" (% "name" chain-search)))
+                           (through ($ " t JOIN " (scaly-sort-table src-rn ref-search)
+                                       " rs ON rs.resource_id = t.id WHERE rs.target_id = r2.id LIMIT 1)\\n")))
+                        (cond
+                            ((search-is-inline? chain-search)
+                                ($ key " (SELECT t." (scaly-quoted (search-col chain-search)) " FROM " (scaly-quoted src-rn) through))
+                            ((search-is-last-updated? chain-search)
+                                ($ key " (SELECT t.last_updated FROM " (scaly-quoted src-rn) through))
+                            (else
+                                ($ key " (SELECT c." (if (string=? "date" (% "type" chain-search)) "value_low" "value")
+                                   " FROM " (scaly-sort-table src-rn ref-search) " rs JOIN " (scaly-sort-table src-rn chain-search)
+                                   " c ON c.resource_id = rs.resource_id WHERE rs.target_id = r2.id LIMIT 1)\\n"))))
+                    "")))
+            params))))
+
+(define (scaly-sorts resource root)
+    (let* ((inline (node-list->list (inline-searches resource)))
+           (tables (filter (lambda (s) (member (% "type" s) '("string" "token" "date" "reference" "number" "quantity" "uri")))
+                           (node-list->list (table-searches resource))))
+           (of-type (lambda (type) (filter (lambda (s) (string=? type (% "type" s))) tables)))
+           (strings (of-type "string"))
+           (names (lambda (field) (filter (lambda (s) (and (search-is-humanname? s) (equal? field (search-humanname-field s)))) strings)))
+           (references (of-type "reference"))
+           (own (lambda (column) (lambda (s) (scaly-sort-own resource s column "")))))
+        ($ "    record(out, \"@@O:" (name-of resource) "\\n"
+           (apply $ (map (lambda (s) ($ (% "name" s) " r2." (scaly-quoted (search-col s)) "\\n")) inline))
+           "_lastUpdated r2.last_updated\\n"
+           (apply $ (map (lambda (s) (scaly-sort-own resource s "value_low" (if (search-is-date-list? s) " ORDER BY x.id" "")))
+                         (filter (lambda (s) (not (search-is-inline-instant? s))) (of-type "date"))))
+           (apply $ (map (own "value") (of-type "number")))
+           (apply $ (map (lambda (s) ($ (% "name" s) " (SELECT LOWER(x.value) FROM " (scaly-sort-table (name-of resource) s)
+                                        " x WHERE x.resource_id = r2.id LIMIT 1)\\n"))
+                         (append (names "family") (names "given")
+                                 (filter (lambda (s) (not (search-is-humanname? s))) strings))))
+           (apply $ (map (own "value") (filter (lambda (s) (not (search-is-inline? s))) (of-type "token"))))
+           (apply $ (map (lambda (s) (scaly-sort-chain resource s)) references))
+           (apply $ (map (lambda (s) ($ (% "name" s) " !\\n")) references))
+           (scaly-sort-reverse resource root)
+           "\\n\")
+")))
 
 (define (scaly-required resource)
     (let* ((props-node (select-children "properties" resource))

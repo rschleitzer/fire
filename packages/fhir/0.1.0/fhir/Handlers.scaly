@@ -899,7 +899,7 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
             if tombstone = false
             {
                 w.key("resource")
-                w.raw(found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
+                put_stored(&w, found.as_slice().subslice(rows[i * 8 + 6] as size_t, (rows[i * 8 + 6] + rows[i * 8 + 7]) as size_t))
             }
             w.key("request")
             w.begin_object()
@@ -1075,7 +1075,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         if cut
             write_subset(&w, found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t), summary, has_elements, elements)
         else
-            w.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
+            put_stored(&w, found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
         w.key("search")
         w.begin_object()
         w.key("mode")
@@ -1097,7 +1097,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         if cut
             write_subset(&w, included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t), summary, has_elements, elements)
         else
-            w.raw(included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t))
+            put_stored(&w, included.as_slice().subslice(included_cells[i * 4 + 2] as size_t, (included_cells[i * 4 + 2] + included_cells[i * 4 + 3]) as size_t))
         w.key("search")
         w.begin_object()
         w.key("mode")

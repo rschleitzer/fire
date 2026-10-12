@@ -324,3 +324,31 @@ GET Patient/seed-never
 GET Patient/seed-not-a-bundle
 GET Patient?family=NoId
 GET Patient?general-practitioner=Practitioner/seed-gp1&_include=Patient:general-practitioner
+
+# what can be sorted by, and what cannot: a HumanName as a whole, a
+# reference without its chain, a quantity; the chain to a target's column,
+# its time and its tables
+GET Patient?_sort=name
+GET Patient?_sort=phonetic
+GET Patient?_sort=general-practitioner
+GET Patient?_sort=general-practitioner:Practitioner.family
+GET Patient?_sort=-general-practitioner:Practitioner.family,family
+GET Patient?_sort=general-practitioner:Practitioner.gender
+GET Patient?_sort=-general-practitioner:Practitioner._lastUpdated
+GET Patient?_sort=general-practitioner:Practitioner.name
+GET Patient?_sort=general-practitioner:Nobody.family
+GET Patient?_sort=general-practitioner:Practitioner.nothing
+GET Observation?_sort=patient:Patient.birthdate
+GET Observation?_sort=-subject:Patient.family,_id
+GET Observation?_sort=value-quantity
+GET Observation?_sort=code-value-quantity
+GET Practitioner?_sort=qualification-period
+
+# a zone of hours alone, which .NET's parser takes
+GET Observation?date=ge2020-01-02T03:04:05%2B01&_sort=_lastUpdated
+GET Provenance?recorded=ge2020-01-01T00:00:00%2B00
+GET Provenance?recorded=2020-01-01T00:00:00%2B0
+# a name is a parameter's only as it is written
+GET Patient?Family=brown
+GET Patient?address_city=x
+GET Patient?_family=brown

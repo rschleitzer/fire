@@ -77,6 +77,16 @@ procedure column_param(mutable c: ref[PgConn], column: Slice[u8], root: JsonValu
     }
     else
     {
+        let kind column[column.length - 1]
+        ; a number as it stands in the resource: the database reads it
+        if (kind = 105 or kind = 108 or kind = 109) and value.is_number()
+            return c.param_text(value.number_text())
+        if value.is_text() and kind = 100
+        {
+            var instant Array[u8]()
+            put_instant_text(&instant, value.text())
+            return c.param_text(instant.as_slice())
+        }
         if value.is_text()
             c.param_text(value.text())
         else

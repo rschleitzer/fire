@@ -27,7 +27,7 @@ procedure answer_entry(mutable e: ref[JsonWriter], status: Slice[u8], location: 
     if resource.length > 0
     {
         e.key("resource")
-        e.raw(resource)
+        put_stored(e, resource)
     }
     e.end_object()
 }
@@ -265,7 +265,7 @@ procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e
             bundle.key("fullUrl")
             bundle.text_dotnet(full.as_slice())
             bundle.key("resource")
-            bundle.raw(found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
+            put_stored(&bundle, found.as_slice().subslice(rows[i * 4 + 2] as size_t, (rows[i * 4 + 2] + rows[i * 4 + 3]) as size_t))
             bundle.key("search")
             bundle.begin_object()
             bundle.key("mode")
