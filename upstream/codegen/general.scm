@@ -91,11 +91,11 @@
     ((SqlServer) "DATETIME2")
     ((Sqlite) "TEXT")))
 
+;; (quoted on SQLite too: a resource may be named by a word of SQL -- Group)
 (define (db-public-table rn db)
   (case db
-    ((PostgreSql) ($ "\"" rn "\""))
-    ((SqlServer) ($ "[" rn "]"))
-    ((Sqlite) rn)))
+    ((PostgreSql Sqlite) ($ "\"" rn "\""))
+    ((SqlServer) ($ "[" rn "]"))))
 
 (define (db-schema-prefix schema db)
   (case db

@@ -118,7 +118,7 @@ mkdir -p "$WORK/model" && cp "$ROOT"/model/* "$WORK/model/"
 python3 "$HERE/model.py" "$ROOT/model/fhir.xml" "$WORK/model/fhir.xml" || die "the variant's model is not made"
 
 echo "variant-test: the Scaly server of it"
-mkdir -p "$WORK/scaly" && ln -s "$ROOT/packages" "$WORK/scaly/packages"
+mkdir -p "$WORK/scaly/packages" && cp -R "$ROOT/packages/fhir" "$ROOT/packages/fhirclient" "$WORK/scaly/packages/"
 (cd "$WORK/scaly" && "$DAZZLE" -t sgml -d "$ROOT/codegen/scaly.dsl" "$WORK/model/fhir.xml") > "$WORK/generate.s.log" 2>&1 || die "the Scaly generator"
 grep -q ':E:' "$WORK/generate.s.log" && die "the Scaly generator: $(grep -m1 ':E:' "$WORK/generate.s.log" | cut -c1-200)"
 FIRE_OUT="$WORK/scaly" "$ROOT/tools/schema.sh" fire || die "tools/schema.sh"

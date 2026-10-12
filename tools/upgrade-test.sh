@@ -99,7 +99,7 @@ else
 fi
 
 echo "upgrade-test: 2 -- the Scaly server of the model with steps upgrades its copy"
-mkdir -p "$WORK/scaly" && ln -s "$ROOT/packages" "$WORK/scaly/packages"
+mkdir -p "$WORK/scaly/packages" && cp -R "$ROOT/packages/fhir" "$ROOT/packages/fhirclient" "$WORK/scaly/packages/"
 (cd "$WORK/scaly" && "$DAZZLE" -t sgml -d "$ROOT/codegen/scaly.dsl" "$WORK/model/fhir.xml") > "$WORK/generate.s.log" 2>&1 || die "the Scaly generator on the model with steps"
 FIRE_OUT="$WORK/scaly" "$ROOT/tools/schema.sh" fire || die "tools/schema.sh on the model with steps"
 mkdir -p "$WORK/scaly/server/build"

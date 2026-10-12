@@ -349,7 +349,7 @@ namespace " (project-name) ".Search;
                                (prop-type (if prop (% "type" prop) "code"))
                                (cs-type (csharp-type prop-type))
                                (col (search-query-camel s))
-                               (json-name (if prop (% "name" prop) col)))
+                               (json-name (if prop (% "name" prop) (first-letter-downcase (search-query s)))))
                             ; FHIR `instant` is the only date-ish type that gets inlined
                             ; (see search-is-inline-instant? in migration.scm). It's encoded as a
                             ; JSON string, so GetValue<""DateTime>() throws — read raw and parse.

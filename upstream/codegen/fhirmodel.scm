@@ -31,10 +31,25 @@
                 ($ (name-of parent-element) "." (fhir-model-explicit-name element))
                 (fhir-model-explicit-name element)))))
 
-; Use explicit name if available, otherwise use name
+; Can s name a class: a letter or an underscore, then letters, digits, underscores?
+(define (fhir-model-letter? c) (or (is-upper? c) (is-lower? c) (char=? c #\_)))
+(define (fhir-model-digit? c) (if (member c (string->list "0123456789")) #t #f))
+(define (fhir-model-identifier? s)
+    (let ((chars (string->list s)))
+        (and (not (null? chars))
+             (fhir-model-letter? (car chars))
+             (let loop ((rest (cdr chars)))
+                (or (null? rest)
+                    (and (or (fhir-model-letter? (car rest)) (fhir-model-digit? (car rest)))
+                         (loop (cdr rest))))))))
+
+; Use explicit name if available, otherwise use name. The definitions give some elements an
+; explicit name that is none (two numbers and a semicolon): those keep their own name. And a
+; class begins with a capital: Consent's "provision" would be the name of the property that
+; holds it, which C# does not take.
 (define (fhir-model-explicit-name element)
     (let ((explicit (% "explicit" element)))
-        (if explicit explicit (name-of element))))
+        (if (and explicit (fhir-model-identifier? explicit)) (first-letter-upcase explicit) (name-of element))))
 
 ; --- Resource class file ---
 

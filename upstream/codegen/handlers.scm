@@ -6,6 +6,15 @@
 ; Main handler function
 ; ===================================================================
 
+; A resource may be named Task, and a handler sees the model's classes beside
+; System.Threading.Tasks: with it active, the plain Task of a signature is named in full, and
+; so is the model's class in its own handler. Without it nothing changes.
+(define (handler-plain-task)
+    (if (member "Task" (map name-of (node-list->list (node-list-filter active? (children (parent (current-node)))))))
+        "System.Threading.Tasks.Task" "Task"))
+(define (handler-model-class rn)
+    (if (string=? rn "Task") ($ (project-name) ".Model.Task") rn))
+
 (define (handler)
     (let* ((resource (current-node))
            (rn (name-of resource))
@@ -137,10 +146,10 @@ public static class "rn"Handlers
 ; --- Model deserialization + validation ---
 (define (handler-model-validation rn)
     ($
-"        "rn" model;
+"        "(handler-model-class rn)" model;
         try
         {
-            model = content.Deserialize<"rn">()!;
+            model = content.Deserialize<"(handler-model-class rn)">()!;
         }
         catch (JsonException ex)
         {
@@ -751,7 +760,7 @@ public static class "rn"Handlers
     // goes as well - hard, without a tombstone of its own, otherwise the undone version would
     // leave a trace after all. Server-written provenance targets carry no version, so the time
     // of the write is what tells the provenance of that version from the older ones.
-    private static async Task RemoveProvenanceAsync(HttpContext ctx, string id, DateTime since)
+    private static async "(handler-plain-task)" RemoveProvenanceAsync(HttpContext ctx, string id, DateTime since)
     {
         var provenanceRepo = ctx.RequestServices.GetRequiredService<""IProvenanceRepository>();
         var query = new QueryCollection(new Dictionary<""string, StringValues>

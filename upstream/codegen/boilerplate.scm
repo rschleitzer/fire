@@ -981,7 +981,7 @@ public static class Database
         {
             Console.WriteLine($\"Found legacy database version {legacyVersion}, migrating to {SoftwareVersion}...\");
             Console.WriteLine(\"Creating new schema alongside legacy data...\");
-            await db.ExecuteSqlAsync(db.InitialSchema);
+            await ExecuteInitialSchema(db);
             await db.ExecuteSqlAsync(db.CreateDbInfoTableSql);
             await db.ExecuteSqlAsync(db.InsertVersionSql(SoftwareVersion));
             return new Version(SoftwareVersion);
@@ -1017,10 +1017,23 @@ public static class Database
         catch { return false; }
     }
 
+    // The initial schema, one resource at a time (the script begins each with a header line).
+    // As one statement it is one transaction, and PostgreSQL keeps a lock for every table and
+    // index made in it: a model with many resources ends in \"out of shared memory\". Every
+    // statement of the script is IF NOT EXISTS, so a creation that was interrupted is finished
+    // by the next start.
+    private static async Task ExecuteInitialSchema(IDatabaseProvider db)
+    {
+        var parts = System.Text.RegularExpressions.Regex.Split(db.InitialSchema, \"(?m)^(?=-- .* FHIR Server - .* Schema\\r?$)\");
+        foreach (var part in parts)
+            if (part.Trim().Length > 0)
+                await db.ExecuteSqlAsync(part);
+    }
+
     private static async Task CreateAllSchemas(IDatabaseProvider db, IServiceProvider? services)
     {
         Console.WriteLine(\"Creating database schema...\");
-        await db.ExecuteSqlAsync(db.InitialSchema);
+        await ExecuteInitialSchema(db);
 
         if (services != null)
             await ImportSeedData(services);

@@ -200,7 +200,9 @@
 (define (software-version) (% "version" (tree-root (current-node))))
 
 (define (search-query search) (or (% "query" search) (% "name" search)))
-(define (search-query-camel search) (first-letter-downcase (search-query search)))
+; A search parameter as a C# name -- with the @ a keyword needs (StructureDefinition's
+; "abstract"); escape-csharp-keyword is defined below.
+(define (search-query-camel search) (escape-csharp-keyword (first-letter-downcase (search-query search))))
 (define (search-col search) (string-replace (% "name" search) "-" "_"))
 
 (define (dotnet-version) "9")

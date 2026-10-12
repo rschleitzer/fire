@@ -33,9 +33,8 @@
 ; Public table name: quoted resource name (escaped for C# strings)
 (define (tbl-public rn db)
     (case db
-        ((PostgreSql) ($ "\\\""rn"\\\""))
-        ((SqlServer) ($ "["rn"]"))
-        ((Sqlite) rn)))
+        ((PostgreSql Sqlite) ($ "\\\""rn"\\\""))
+        ((SqlServer) ($ "["rn"]"))))
 
 ; Table name for C# interpolated strings: schema.{var} or schema_{var}
 (define (tbl-interp schema var-name db)
