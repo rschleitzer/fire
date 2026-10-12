@@ -11,6 +11,10 @@ define SqlServerProvider
     user: String
     password: String
     database: String
+    ; the session inside TLS, and whether the string trusts the server's
+    ; certificate as it is
+    encrypt: bool
+    trusting: bool
 )
 {
     ; From a connection string of the form upstream takes
@@ -19,8 +23,11 @@ define SqlServerProvider
     ; The keywords are read without regard to case (Data Source and
     ; Initial Catalog say the same as Server and Database); the port stands
     ; behind a comma and defaults to 1433; `tcp:` before the host is passed
-    ; over. What else it names -- Encrypt, TrustServerCertificate -- is not
-    ; looked at: the session is not encrypted (the package tds says so).
+    ; over. Encrypt is SqlClient's: the session runs inside TLS unless it
+    ; says False, No or Optional (Strict, TDS 8.0, is not there: it is taken
+    ; for True). ★The server's certificate is never verified, whatever
+    ; TrustServerCertificate says -- where SqlClient would refuse a
+    ; certificate it cannot verify, this connects, and says so at the start.
     procedure parse(page: ref[Page], text: Slice[u8]) returns SqlServerProvider
     {
         var host text.slice_to(0)
@@ -28,6 +35,8 @@ define SqlServerProvider
         var password text.slice_to(0)
         var database text.slice_to(0)
         var port 1433
+        var encrypt true
+        var trusting false
         var at: size_t 0
         while at < text.length
         {
@@ -59,6 +68,10 @@ define SqlServerProvider
                     user := value
                 if keyword_is(key, "password") or keyword_is(key, "pwd")
                     password := value
+                if keyword_is(key, "encrypt")
+                    encrypt := (keyword_is(value, "false") or keyword_is(value, "no") or keyword_is(value, "optional")) = false
+                if keyword_is(key, "trustservercertificate") or keyword_is(key, "trust server certificate")
+                    trusting := keyword_is(value, "true") or keyword_is(value, "yes")
             }
             at := end + 1
         }
@@ -67,7 +80,9 @@ define SqlServerProvider
             port,
             String^page(user.data as pointer[const_char], user.length),
             String^page(password.data as pointer[const_char], password.length),
-            String^page(database.data as pointer[const_char], database.length)
+            String^page(database.data as pointer[const_char], database.length),
+            encrypt,
+            trusting
         )
     }
 
@@ -79,9 +94,11 @@ define SqlServerProvider
     procedure initialize(this, software_version: Slice[u8]) returns bool
     {
         var reason Array[u8]()
+        if encrypt and trusting = false
+            Console.println("Warning: the SQL Server's certificate is not verified (this server never does; TrustServerCertificate=True says the same).")
         ; the database itself, asked of `master`
         var h String(host)
-        let first TdsConn.open(h, port, user.as_slice(), password.as_slice(), "master", &reason)
+        let first TdsConn.open(h, port, user.as_slice(), password.as_slice(), "master", encrypt, &reason)
         if first = null
         {
             Console.println("Cannot connect to SQL Server at `host`,`port`: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
@@ -111,7 +128,7 @@ define SqlServerProvider
 
         reason.length := 0
         var h2 String(host)
-        let got TdsConn.open(h2, port, user.as_slice(), password.as_slice(), database.as_slice(), &reason)
+        let got TdsConn.open(h2, port, user.as_slice(), password.as_slice(), database.as_slice(), encrypt, &reason)
         if got = null
         {
             Console.println("Cannot connect to SQL Server at `host`,`port`, database `database`: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
@@ -127,7 +144,7 @@ define SqlServerProvider
         }
         c.close()
         if ok
-            tds_configure(host.as_slice(), port, user.as_slice(), password.as_slice(), database.as_slice())
+            tds_configure(host.as_slice(), port, user.as_slice(), password.as_slice(), database.as_slice(), encrypt)
         ok
     }
 }
