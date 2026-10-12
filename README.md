@@ -31,15 +31,21 @@ Licence of `upstream/`: MIT, `upstream/LICENSE`.
 
 ## model/
 
-The input both generators read: `fhir.xml` as upstream's converter wrote it,
-with the DTD it is valid against. It is a copy held fast, so the port needs
-neither dotnet nor the definitions; `tools/pin-model.sh` renews it after a
-run of `upstream/fire.sh`.
+The input both generators read: `fhir.xml`, made of HL7's FHIR R5
+definitions by `tools/fhir-to-xml`, with the DTD it is valid against. It is
+held fast, so a build needs neither the definitions nor a converter;
+`tools/pin-model.sh` makes it anew, and `tools/pin-model.sh --check` says
+whether the converter still writes it byte for byte.
+
+`tools/fhir-to-xml` is upstream's converter (`upstream/tools/fhir-to-xml`,
+C#) ported to Scaly, routine for routine; both write the same file.
 
 ## Licence
 
-MIT, `LICENSE`. `upstream/` carries its own, `upstream/LICENSE`, also MIT,
-and `model/` is under that one: it is what upstream's converter wrote.
+MIT, `LICENSE`. `upstream/` carries its own, `upstream/LICENSE`, also MIT.
+`tools/fhir-to-xml` is a port of upstream's converter: what it takes from
+it stays under `upstream/LICENSE`. `model/fhir.xml` is what that port
+writes of HL7's definitions; the DTD beside it is upstream's.
 
 The server product this generator was developed for, its configuration and
 any data are not in this repository.

@@ -1,0 +1,2077 @@
+; fhir-to-xml -- HL7's definitions of FHIR R5 as the model both generators
+; read: model/fhir.xml.
+;
+;   fhir-to-xml DEFINITIONS OUTPUT
+;
+; DEFINITIONS is the directory HL7's definitions.json.zip unpacks to (its
+; profiles-resources.json, profiles-types.json, search-parameters.json and
+; valuesets.json are read), OUTPUT the file to write.
+;
+; It is upstream's converter (upstream/tools/fhir-to-xml, C#) in Scaly,
+; routine for routine, and is measured by it: both write the same file,
+; byte for byte. So what looks odd here is upstream's and is kept -- the
+; order of every list is the order the definitions are met in, a name's
+; last characters go where upstream's TrimEnd takes them, and which
+; resources are active is a constant of the tool.
+
+package scaly 0.1.0
+package json 0.1.1
+
+use json.Value.JsonValue
+
+; The resource types of FHIR R5, separated by blanks.
+function resource_names() returns Slice[u8]
+    "Resource Account ActivityDefinition ActorDefinition AdministrableProductDefinition AdverseEvent AllergyIntolerance Appointment AppointmentResponse ArtifactAssessment AuditEvent Basic Binary BiologicallyDerivedProduct BiologicallyDerivedProductDispense BodyStructure Bundle CapabilityStatement CarePlan CareTeam CatalogEntry ChargeItem ChargeItemDefinition Citation Claim ClaimResponse ClinicalImpression ClinicalUseDefinition CodeSystem Communication CommunicationRequest CompartmentDefinition Composition ConceptMap Condition ConditionDefinition Consent Contract Coverage CoverageEligibilityRequest CoverageEligibilityResponse DetectedIssue Device DeviceAssociation DeviceDefinition DeviceDispense DeviceMetric DeviceRequest DeviceUsage DeviceUseStatement DiagnosticReport DocumentManifest DocumentReference Encounter EncounterHistory Endpoint EnrollmentRequest EnrollmentResponse EpisodeOfCare EventDefinition Evidence EvidenceReport EvidenceVariable ExampleScenario ExplanationOfBenefit FamilyMemberHistory Flag FormularyItem GenomicStudy Goal GraphDefinition Group GuidanceResponse HealthcareService ImagingSelection ImagingStudy Immunization ImmunizationEvaluation ImmunizationRecommendation ImplementationGuide Ingredient InsurancePlan InventoryItem InventoryReport Invoice Library Linkage List Location ManufacturedItemDefinition Measure MeasureReport Media Medication MedicationAdministration MedicationDispense MedicationKnowledge MedicationRequest MedicationStatement MedicinalProductDefinition MessageDefinition MessageHeader MolecularSequence NamingSystem NutritionIntake NutritionOrder NutritionProduct Observation ObservationDefinition OperationDefinition OperationOutcome Organization OrganizationAffiliation PackagedProductDefinition Parameters Patient PaymentNotice PaymentReconciliation Permission Person PlanDefinition Practitioner PractitionerRole Procedure Provenance Questionnaire QuestionnaireResponse RegulatedAuthorization RelatedPerson RequestGroup RequestOrchestration Requirements ResearchDefinition ResearchElementDefinition ResearchStudy ResearchSubject RiskAssessment Schedule SearchParameter ServiceRequest Slot Specimen SpecimenDefinition StructureDefinition StructureMap Subscription SubscriptionStatus SubscriptionTopic Substance SubstanceDefinition SupplyDelivery SupplyRequest Task TerminologyCapabilities TestPlan TestReport TestScript Transport ValueSet VerificationResult VisionPrescription"
+
+; The primitive types, separated by blanks.
+function primitive_names() returns Slice[u8]
+    "date dateTime string integer integer64 oid canonical uri uuid url instant boolean base64Binary unsignedInt markdown id time positiveInt decimal code xhtml"
+
+; The data types that become elements of the model, separated by blanks.
+function data_type_names() returns Slice[u8]
+    "Meta Address Age Availability Attachment Contributor Count DataRequirement Distance Dosage Duration Element ExtendedContactDetail Money MonetaryComponent HumanName ContactPoint MarketingStatus Identifier SubstanceAmount Coding SampledData Population Ratio Range Reference TriggerDefinition Quantity Period RelatedArtifact Annotation ProductShelfLife ContactDetail UsageContext Expression Signature Timing RelativeTime ProdCharacteristic CodeableConcept ParameterDefinition ElementDefinition Narrative CodeableReference RatioRange VirtualServiceDetail"
+
+; The code sets more than one type uses: they are the model's, not a type's, separated by blanks.
+function shared_codeset_names() returns Slice[u8]
+    "administrativegender consentprovisiontype codesystemcontentmode consentdatameaning searchcomparator searchmodifiercode encounterstatus eventstatus evidencevariablehandling examplescenarioactortype devicenametype observationstatus publicationstatus daysofweek quantitycomparator participationstatus financialresourcestatuscodes use requestpriority requeststatus requestintent claimprocessingcodes documentreferencestatus documentrelationshiptype compositionstatus listmode notetype compartmenttype invoicecomponenttype invoicepricecomponenttype searchparamtype actionparticipanttype actionconditionkind actionrelationshiptype actiongroupingbehavior actionselectionbehavior actionrequiredbehavior actionprecheckbehavior actioncardinalitybehavior evidencevariabletype groupmeasure fhirversion fhirtypes capabilitystatementkind filteroperator bindingstrength operationparameteruse medicationstatuscodes remittanceoutcome subscriptionstatuscodes resourcetype mimetypes fhiralltypes alllanguages commonlanguages versionindependentresourcetypesall"
+
+; --- text ---
+
+function is_one_of(list: Slice[u8], name: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    while at < list.length
+    {
+        var end at
+        while end < list.length and list[end] <> 32
+            end := end + 1
+        if list.subslice(at, end).equals(name)
+            return true
+        at := end + 1
+    }
+    false
+}
+
+function begins_with(s: Slice[u8], head: Slice[u8]) returns bool
+{
+    if s.length < head.length
+        return false
+    s.slice_to(head.length).equals(head)
+}
+
+function ends_with(s: Slice[u8], tail: Slice[u8]) returns bool
+{
+    if s.length < tail.length
+        return false
+    s.slice_from(s.length - tail.length).equals(tail)
+}
+
+; Where needle begins in s at or behind `from`; -1 when it is not there.
+function position_of(s: Slice[u8], needle: Slice[u8], from: size_t) returns i64
+{
+    if needle.length = 0
+        return from as i64
+    var i from
+    while i + needle.length <= s.length
+    {
+        if s[i] = needle[0] and s.subslice(i, i + needle.length).equals(needle)
+            return i as i64
+        i := i + 1
+    }
+    0 - 1
+}
+
+function contains_text(s: Slice[u8], needle: Slice[u8]) returns bool
+    position_of(s, needle, 0) >= 0
+
+; .NET's white space among the ASCII characters.
+function is_blank(c: u8) returns bool
+    c = 32 or (c >= 9 and c <= 13) or (c >= 28 and c <= 31)
+
+function trimmed_text(s: Slice[u8]) returns Slice[u8]
+{
+    var from: size_t 0
+    var to s.length
+    while from < to and is_blank(s[from])
+        from := from + 1
+    while to > from and is_blank(s[to - 1])
+        to := to - 1
+    s.subslice(from, to)
+}
+
+; How often c stands in s.
+function count_of(s: Slice[u8], c: u8) returns i64
+{
+    var n: i64 0
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] = c
+            n := n + 1
+        i := i + 1
+    }
+    n
+}
+
+; The k-th piece of s cut at every c; and how many there are.
+function piece(s: Slice[u8], c: u8, k: i64) returns Slice[u8]
+{
+    var at: size_t 0
+    var n: i64 0
+    while at <= s.length
+    {
+        var end at
+        while end < s.length and s[end] <> c
+            end := end + 1
+        if n = k
+            return s.subslice(at, end)
+        n := n + 1
+        at := end + 1
+    }
+    s.slice_to(0)
+}
+
+function pieces(s: Slice[u8], c: u8) returns i64
+    count_of(s, c) + 1
+
+function lower_byte(c: u8) returns u8
+{
+    if c >= 65 and c <= 90
+        return c + 32
+    c
+}
+
+function upper_byte(c: u8) returns u8
+{
+    if c >= 97 and c <= 122
+        return c - 32
+    c
+}
+
+procedure put_lower(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        out.add(lower_byte(s[i]))
+        i := i + 1
+    }
+}
+
+; s in lower case and without its dots.
+procedure put_lower_joined(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] <> 46
+            out.add(lower_byte(s[i]))
+        i := i + 1
+    }
+}
+
+; s with every `from` replaced by `to`.
+procedure put_replaced(mutable out: ref[Array[u8]], s: Slice[u8], from: Slice[u8], to: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        if i + from.length <= s.length and s[i] = from[0] and s.subslice(i, i + from.length).equals(from)
+        {
+            out.append(to)
+            i := i + from.length
+        }
+        else
+        {
+            out.add(s[i])
+            i := i + 1
+        }
+    }
+}
+
+; s without line feeds, carriage returns and apostrophes (what every
+; description loses first).
+procedure put_plain(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        if c <> 10 and c <> 13 and c <> 39
+            out.add(c)
+        i := i + 1
+    }
+}
+
+; s without what is not ASCII.
+procedure put_ascii(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] < 128
+            out.add(s[i])
+        i := i + 1
+    }
+}
+
+; Every piece of s cut at '-' with its first letter in upper case, joined.
+procedure put_pascal(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var first true
+    var i: size_t 0
+    while i < s.length
+    {
+        if s[i] = 45
+            first := true
+        else
+        {
+            if first
+                out.add(upper_byte(s[i]))
+            else
+                out.add(s[i])
+            first := false
+        }
+        i := i + 1
+    }
+}
+
+; --- the model, as tables ---
+;
+; Every text is kept once in `text`; a table's cell holds its handle (the
+; number of its entry in `strs`), -1 for none. A table is rows of a fixed
+; number of cells; a list an object holds is a range of rows of another.
+
+define Model
+(
+    var text: Array[u8]
+    var strs: Array[i64]
+    ; resources: id, name, active, description
+    var res: Array[i64]
+    ; the model's elements (the data types): id, name, backbone, description
+    var mel: Array[i64]
+    ; elements below a parent (backbone elements): parent, id, name, explicit, description
+    var nel: Array[i64]
+    ; what has lists of elements and properties: key, and the first row of
+    ; each table that counts for it (a key set anew begins empty lists)
+    var keys: Array[i64]
+    ; properties: parent, id, name, description, iscollection, notnull,
+    ; summary, modifier, the range of its variants
+    var props: Array[i64]
+    ; the property last seen under a key: key, the range of its variants
+    var dprop: Array[i64]
+    ; variants: type, ref, the range of its targets; targets: resource
+    var vars: Array[i64]
+    var tgts: Array[i64]
+    ; code sets: kind (0 the model's, 1 a resource's, 2 an element's),
+    ; owner, id, name, description, the range of its codes; codes: name,
+    ; value, description
+    var csets: Array[i64]
+    var codes: Array[i64]
+    ; searches: resource, name, query, type, the range of its paths
+    var srch: Array[i64]
+    ; paths: the ranges of its parts, targets and components, and its cast
+    var paths: Array[i64]
+    ; parts: ref, resolve, property, type, first, notnull, variant, op, value
+    var parts: Array[i64]
+    ; components: ref, cast
+    var comps: Array[i64]
+    ; operations: resource, name, description; parameters: operation, in
+    ; (1) or out (0), name, description, type, ref, iscollection, notnull
+    var ops: Array[i64]
+    var params: Array[i64]
+)
+
+; Keep a text: its handle.
+procedure keep(mutable m: ref[Model], s: Slice[u8]) returns i64
+{
+    m.strs.add(m.text.length as i64)
+    m.strs.add(s.length as i64)
+    m.text.append(s)
+    (m.strs.length / 2 - 1) as i64
+}
+
+; The text of a handle; empty for none. ★It points into the model's text:
+; not to be held while a text is kept.
+procedure text_of(m: ref[Model], h: i64) returns Slice[u8]
+{
+    if h < 0
+        return m.text.as_slice().slice_to(0)
+    let at m.strs[(h * 2) as size_t] as size_t
+    m.text.as_slice().subslice(at, at + (m.strs[(h * 2 + 1) as size_t] as size_t))
+}
+
+procedure is_text(m: ref[Model], h: i64, s: Slice[u8]) returns bool
+{
+    if h < 0
+        return false
+    text_of(m, h).equals(s)
+}
+
+; The row of `key` among the keys, -1 when it has none.
+procedure key_row(m: ref[Model], key: Slice[u8]) returns i64
+{
+    var r: size_t 0
+    while r * 3 < m.keys.length
+    {
+        if is_text(m, m.keys[r * 3], key)
+            return r as i64
+        r := r + 1
+    }
+    0 - 1
+}
+
+; Begin (or begin anew) the lists of `key`.
+procedure set_key(mutable m: ref[Model], key: Slice[u8])
+{
+    let r key_row(m, key)
+    if r >= 0
+    {
+        m.keys.put((r * 3 + 1) as size_t, (m.nel.length / 5) as i64)
+        m.keys.put((r * 3 + 2) as size_t, (m.props.length / 10) as i64)
+        return
+    }
+    let h keep(m, key)
+    m.keys.add(h)
+    m.keys.add((m.nel.length / 5) as i64)
+    m.keys.add((m.props.length / 10) as i64)
+}
+
+; The row of the property last seen under `key`, -1 for none.
+procedure dprop_row(m: ref[Model], key: Slice[u8]) returns i64
+{
+    var r: size_t 0
+    while r * 3 < m.dprop.length
+    {
+        if is_text(m, m.dprop[r * 3], key)
+            return r as i64
+        r := r + 1
+    }
+    0 - 1
+}
+
+; The row of the resource (or of the model's element) of that name.
+procedure resource_row(m: ref[Model], name: Slice[u8]) returns i64
+{
+    var r: size_t 0
+    while r * 4 < m.res.length
+    {
+        if is_text(m, m.res[r * 4 + 1], name)
+            return r as i64
+        r := r + 1
+    }
+    0 - 1
+}
+
+procedure element_row(m: ref[Model], name: Slice[u8]) returns i64
+{
+    var r: size_t 0
+    while r * 4 < m.mel.length
+    {
+        if is_text(m, m.mel[r * 4 + 1], name)
+            return r as i64
+        r := r + 1
+    }
+    0 - 1
+}
+
+; --- the definitions ---
+
+; The text of a member; empty when it is not there or no text.
+function member_text(v: JsonValue, name: Slice[u8]) returns Slice[u8]
+{
+    let found v.get(name)
+    if found.is_text()
+        return found.text()
+    name.slice_to(0)
+}
+
+; The resource of a Bundle of that type and url; a null value for none.
+procedure find_by_url(bundle: JsonValue, type: Slice[u8], url: Slice[u8]) returns JsonValue
+{
+    let entries bundle.get("entry")
+    var i: size_t 0
+    while i < entries.length()
+    {
+        let r entries.item(i).get("resource")
+        if member_text(r, "resourceType").equals(type) and member_text(r, "url").equals(url)
+            return r
+        i := i + 1
+    }
+    bundle.get("no such member")
+}
+
+; --- code sets ---
+
+; A code's name: every piece of the code cut at '-' with its first letter
+; in upper case, a point as an underscore, N before a digit; the
+; comparators by their names.
+procedure put_code_name(mutable out: ref[Array[u8]], code: Slice[u8])
+{
+    var joined Array[u8]()
+    put_pascal(&joined, code)
+    var name Array[u8]()
+    if joined.length > 0 and joined[0] >= 48 and joined[0] <= 57
+        name.add(78 as u8)
+    var i: size_t 0
+    while i < joined.length
+    {
+        if joined[i] = 46
+            name.add(95 as u8)
+        else
+            name.add(joined[i])
+        i := i + 1
+    }
+    let n name.as_slice()
+    if n.equals("=")
+        return out.append("Equal")
+    if n.equals("!=")
+        return out.append("NotEqual")
+    if n.equals(">")
+        return out.append("GreaterThan")
+    if n.equals("<")
+        return out.append("LessThan")
+    if n.equals(">=")
+        return out.append("GreaterOrEqual")
+    if n.equals("<=")
+        return out.append("LessOrEqual")
+    out.append(n)
+}
+
+procedure add_code(mutable m: ref[Model], code: Slice[u8], description: Slice[u8])
+{
+    var name Array[u8]()
+    put_code_name(&name, code)
+    var plain Array[u8]()
+    put_plain(&plain, description)
+    var said Array[u8]()
+    put_replaced(&said, plain.as_slice(), "&", "and")
+    let n keep(m, name.as_slice())
+    let v keep(m, code)
+    let d keep(m, said.as_slice())
+    m.codes.add(n)
+    m.codes.add(v)
+    m.codes.add(d)
+}
+
+; The codes of a code system's concept, and of the concepts below it.
+procedure add_system_codes(mutable m: ref[Model], concept: JsonValue)
+{
+    var selectable true
+    let properties concept.get("property")
+    var p: size_t 0
+    while p < properties.length()
+    {
+        if member_text(properties.item(p), "code").equals("notSelectable")
+            selectable := false
+        p := p + 1
+    }
+    if selectable
+        add_code(m, member_text(concept, "code"), member_text(concept, "definition"))
+    let below concept.get("concept")
+    var c: size_t 0
+    while c < below.length()
+    {
+        add_system_codes(m, below.item(c))
+        c := c + 1
+    }
+}
+
+; The row of the code set of that name among those of an owner, -1 for none.
+procedure codeset_row(m: ref[Model], kind: i64, owner: i64, name: Slice[u8], by_id: bool) returns i64
+{
+    var r: size_t 0
+    while r * 7 < m.csets.length
+    {
+        if m.csets[r * 7] = kind and m.csets[r * 7 + 1] = owner
+        {
+            var cell m.csets[r * 7 + 3]
+            if by_id
+                cell := m.csets[r * 7 + 2]
+            if is_text(m, cell, name)
+                return r as i64
+        }
+        r := r + 1
+    }
+    0 - 1
+}
+
+; Add the code set of a value set to an owner's (kind and owner row; the
+; model's are kind 0, owner 0). True when it is there afterwards.
+procedure add_codeset(mutable m: ref[Model], kind: i64, owner: i64, value_set: JsonValue, valuesets: JsonValue) returns bool
+{
+    var name Array[u8]()
+    put_replaced(&name, member_text(value_set, "name"), " ", "")
+    if codeset_row(m, kind, owner, name.as_slice(), false) >= 0
+        return true
+    var id Array[u8]()
+    put_lower(&id, name.as_slice())
+    if id.as_slice().equals("biologicallyderivedproductdispense") or id.as_slice().equals("subscriptionstatus")
+        id.append("code")
+    var plain Array[u8]()
+    put_plain(&plain, member_text(value_set, "description"))
+    var description Array[u8]()
+    put_replaced(&description, plain.as_slice(), "--", "-")
+    let from (m.codes.length / 3) as i64
+    let includes value_set.get("compose").get("include")
+    var i: size_t 0
+    while i < includes.length()
+    {
+        let include includes.item(i)
+        i := i + 1
+        let concepts include.get("concept")
+        if concepts.is_null() = false
+        {
+            var c: size_t 0
+            while c < concepts.length()
+            {
+                let concept concepts.item(c)
+                c := c + 1
+                ; the description: the extension that defines the concept
+                var said concept.get("no such member")
+                let extensions concept.get("extension")
+                var e: size_t 0
+                while e < extensions.length()
+                {
+                    if said.is_null() and member_text(extensions.item(e), "url").equals("http://hl7.org/fhir/StructureDefinition/valueset-concept-definition")
+                        said := extensions.item(e)
+                    e := e + 1
+                }
+                add_code(m, member_text(concept, "code"), member_text(said, "valueString"))
+            }
+            continue
+        }
+        if include.get("system").is_text()
+        {
+            let system find_by_url(valuesets, "CodeSystem", include.get("system").text())
+            let system_concepts system.get("concept")
+            var c: size_t 0
+            while c < system_concepts.length()
+            {
+                add_system_codes(m, system_concepts.item(c))
+                c := c + 1
+            }
+        }
+    }
+    let to (m.codes.length / 3) as i64
+    if to = from
+        return false
+    let h_id keep(m, id.as_slice())
+    let h_name keep(m, name.as_slice())
+    let h_description keep(m, description.as_slice())
+    m.csets.add(kind)
+    m.csets.add(owner)
+    m.csets.add(h_id)
+    m.csets.add(h_name)
+    m.csets.add(h_description)
+    m.csets.add(from)
+    m.csets.add(to)
+    true
+}
+
+; --- elements and properties ---
+
+; One element of a snapshot: a backbone element, a property, or both.
+procedure handle_element(mutable m: ref[Model], definition: JsonValue, valuesets: JsonValue)
+{
+    let id member_text(definition, "id")
+    let count pieces(id, 46)
+    if count = 1
+        return
+    let name piece(id, 46, count - 1)
+    if name.equals("contained") or name.equals("extension") or name.equals("modifierExtension")
+        return
+    let first piece(id, 46, 0)
+    var parent Array[u8]()
+    put_lower_joined(&parent, id.slice_to(id.length - name.length - 1))
+    let types definition.get("type")
+    let type_count types.length()
+    var first_code: Slice[u8] ""
+    if type_count > 0
+        first_code := member_text(types.item(0), "code")
+
+    ; a backbone element
+    if type_count > 0 and (first_code.equals("BackboneElement") or first_code.equals("Element"))
+    {
+        var explicit: i64 0 - 1
+        let extensions definition.get("extension")
+        var e: size_t 0
+        while e < extensions.length()
+        {
+            if explicit < 0 and extensions.item(e).get("valueString").is_text()
+                explicit := keep(m, extensions.item(e).get("valueString").text())
+            e := e + 1
+        }
+        var element_id Array[u8]()
+        put_lower_joined(&element_id, id)
+        var element_name Array[u8]()
+        element_name.add(upper_byte(name[0]))
+        element_name.append(name.slice_from(1))
+        var description Array[u8]()
+        description.append("Backbone element for ")
+        description.append(first)
+        description.append(".")
+        if key_row(m, parent.as_slice()) >= 0
+        {
+            let h_parent keep(m, parent.as_slice())
+            let h_id keep(m, element_id.as_slice())
+            let h_name keep(m, element_name.as_slice())
+            let h_description keep(m, description.as_slice())
+            m.nel.add(h_parent)
+            m.nel.add(h_id)
+            m.nel.add(h_name)
+            m.nel.add(explicit)
+            m.nel.add(h_description)
+        }
+        set_key(m, element_id.as_slice())
+    }
+
+    ; the property
+    var property_id Array[u8]()
+    put_lower(&property_id, id)
+    var property_name name
+    if type_count > 1
+    {
+        ; (upstream's TrimEnd of the characters [, x and ] -- which takes more
+        ; than a suffix: every one of them at the end)
+        while property_name.length > 0 and (property_name[property_name.length - 1] = 91 or property_name[property_name.length - 1] = 120 or property_name[property_name.length - 1] = 93)
+            property_name := property_name.slice_to(property_name.length - 1)
+        if ends_with(name, "[x]")
+            property_name := name.slice_to(name.length - 3)
+    }
+    var plain Array[u8]()
+    put_plain(&plain, member_text(definition, "definition"))
+    var greater Array[u8]()
+    put_replaced(&greater, plain.as_slice(), ">=", "greater or equal ")
+    var lower_equal Array[u8]()
+    put_replaced(&lower_equal, greater.as_slice(), "<=", "lower or equal ")
+    var description Array[u8]()
+    put_replaced(&description, lower_equal.as_slice(), "<", "lower than")
+
+    let variants_from (m.vars.length / 4) as i64
+    if type_count = 0 and definition.get("contentReference").is_text()
+    {
+        var content_class Array[u8]()
+        put_lower_joined(&content_class, definition.get("contentReference").text().slice_from(1))
+        let h_type keep(m, "element")
+        let h_ref keep(m, content_class.as_slice())
+        m.vars.add(h_type)
+        m.vars.add(h_ref)
+        m.vars.add((m.tgts.length) as i64)
+        m.vars.add((m.tgts.length) as i64)
+    }
+    var t: size_t 0
+    while t < type_count
+    {
+        let type types.item(t)
+        t := t + 1
+        let code member_text(type, "code")
+        var v_type: i64 0 - 1
+        var v_ref: i64 0 - 1
+        let targets_from m.tgts.length as i64
+        if is_one_of(primitive_names(), code)
+        {
+            if code.equals("string") = false
+                v_type := keep(m, code)
+            let binding definition.get("binding")
+            if code.equals("code") and member_text(binding, "strength").equals("required") and binding.get("valueSet").is_text()
+            {
+                let uri piece(binding.get("valueSet").text(), 124, 0)
+                let value_set find_by_url(valuesets, "ValueSet", uri)
+                if value_set.is_null() = false
+                {
+                    var spaceless Array[u8]()
+                    put_replaced(&spaceless, member_text(value_set, "name"), " ", "")
+                    var set_id Array[u8]()
+                    put_lower(&set_id, spaceless.as_slice())
+                    if set_id.as_slice().equals("mimetypes") = false
+                    {
+                        if set_id.as_slice().equals("biologicallyderivedproductdispense") or set_id.as_slice().equals("subscriptionstatus")
+                            set_id.append("code")
+                        var added false
+                        if is_one_of(shared_codeset_names(), set_id.as_slice())
+                        {
+                            if codeset_row(m, 0, 0, set_id.as_slice(), true) < 0
+                                added := add_codeset(m, 0, 0, value_set, valuesets)
+                            else
+                                added := true
+                        }
+                        else
+                        {
+                            let of_resource resource_row(m, first)
+                            if of_resource >= 0
+                                added := add_codeset(m, 1, of_resource, value_set, valuesets)
+                            let of_element element_row(m, first)
+                            if of_element >= 0
+                                added := add_codeset(m, 2, of_element, value_set, valuesets)
+                        }
+                        if added
+                            v_ref := keep(m, set_id.as_slice())
+                    }
+                }
+                if uri.equals("http://hl7.org/fhir/ValueSet/resource-types")
+                    v_ref := keep(m, "resourcetype")
+                if uri.equals("http://hl7.org/fhir/ValueSet/units-of-time")
+                    v_ref := keep(m, "unitsoftime")
+                if uri.equals("http://hl7.org/fhir/ValueSet/days-of-week")
+                    v_ref := keep(m, "daysofweek")
+            }
+        }
+        else
+        {
+            if code.equals("http://hl7.org/fhirpath/System.String") = false and code.length > 0
+            {
+                ; a complex type
+                v_type := keep(m, "element")
+                var referred Array[u8]()
+                if code.equals("BackboneElement") or code.equals("Element")
+                    put_lower_joined(&referred, id)
+                else
+                    put_lower(&referred, code)
+                v_ref := keep(m, referred.as_slice())
+                let profiles type.get("targetProfile")
+                if code.equals("Reference") and profiles.is_null() = false
+                {
+                    var p: size_t 0
+                    while p < profiles.length()
+                    {
+                        let profile profiles.item(p).text()
+                        p := p + 1
+                        if pieces(profile, 47) >= 6
+                        {
+                            let h keep(m, piece(profile, 47, 5))
+                            m.tgts.add(h)
+                        }
+                    }
+                }
+            }
+        }
+        if property_name.equals("id")
+            v_type := keep(m, "id")
+        m.vars.add(v_type)
+        m.vars.add(v_ref)
+        m.vars.add(targets_from)
+        m.vars.add(m.tgts.length as i64)
+    }
+    let variants_to (m.vars.length / 4) as i64
+
+    ; how often it may stand
+    var is_collection: i64 0
+    var not_null: i64 0
+    let max definition.get("max")
+    if max.is_text()
+    {
+        if max.text().equals("0")
+            return
+        if max.text().equals("*")
+            is_collection := 1
+        if max.text().equals("1") and definition.get("min").is_number() and definition.get("min").as_i64() = 1
+            not_null := 1
+    }
+    var summary: i64 0
+    if definition.get("isSummary").is_bool() and definition.get("isSummary").as_bool()
+        summary := 1
+    var modifier: i64 0
+    if definition.get("isModifier").is_bool() and definition.get("isModifier").as_bool()
+        modifier := 1
+    if variants_to = variants_from
+        return
+    if key_row(m, parent.as_slice()) >= 0
+    {
+        let h_parent keep(m, parent.as_slice())
+        let h_id keep(m, property_id.as_slice())
+        let h_name keep(m, property_name)
+        let h_description keep(m, description.as_slice())
+        m.props.add(h_parent)
+        m.props.add(h_id)
+        m.props.add(h_name)
+        m.props.add(h_description)
+        m.props.add(is_collection)
+        m.props.add(not_null)
+        m.props.add(summary)
+        m.props.add(modifier)
+        m.props.add(variants_from)
+        m.props.add(variants_to)
+    }
+    ; the property of this key, for the searches: without [x]
+    var under property_id.as_slice()
+    if ends_with(under, "[x]")
+        under := under.slice_to(under.length - 3)
+    let known dprop_row(m, under)
+    if known >= 0
+    {
+        m.dprop.put((known * 3 + 1) as size_t, variants_from)
+        m.dprop.put((known * 3 + 2) as size_t, variants_to)
+        return
+    }
+    let h_key keep(m, under)
+    m.dprop.add(h_key)
+    m.dprop.add(variants_from)
+    m.dprop.add(variants_to)
+}
+
+; --- searches ---
+
+; A part of a path: its nine cells, all but the ref empty.
+procedure add_part(mutable m: ref[Model], ref: Slice[u8]) returns size_t
+{
+    let h keep(m, ref)
+    m.parts.add(h)
+    var k 0
+    while k < 8
+    {
+        m.parts.add(0 - 1)
+        k := k + 1
+    }
+    m.parts.length / 9 - 1
+}
+
+procedure set_part(mutable m: ref[Model], row: size_t, cell: size_t, value: Slice[u8])
+{
+    let h keep(m, value)
+    m.parts.put(row * 9 + cell, h)
+}
+
+; expr without the pairs of parentheses that stand around all of it.
+function without_outer_parentheses(expression: Slice[u8]) returns Slice[u8]
+{
+    var expr trimmed_text(expression)
+    while expr.length >= 2 and expr[0] = 40
+    {
+        var depth 0
+        var close: i64 0 - 1
+        var i: size_t 0
+        while i < expr.length
+        {
+            if expr[i] = 40
+                depth := depth + 1
+            else
+            {
+                if expr[i] = 41
+                {
+                    depth := depth - 1
+                    if depth = 0
+                    {
+                        close := i as i64
+                        break
+                    }
+                }
+            }
+            i := i + 1
+        }
+        if close <> ((expr.length - 1) as i64)
+            break
+        expr := trimmed_text(expr.subslice(1, expr.length - 1))
+    }
+    expr
+}
+
+; One path of a FHIRPath expression as parts, a cast and targets: its row
+; among the paths, -1 when it is none of the resource's or has no part.
+procedure parse_path(mutable m: ref[Model], expression: Slice[u8], resource: Slice[u8], parameter: JsonValue) returns i64
+{
+    let parts_from m.parts.length / 9
+    var target: Slice[u8] ""
+    var expr without_outer_parentheses(expression)
+
+    ; .where(resolve() is Type)
+    let resolved position_of(expr, ".where(resolve() is ", 0)
+    if resolved >= 0
+    {
+        let type_at (resolved as size_t) + 20
+        let closed position_of(expr, ")", type_at)
+        if closed >= 0
+        {
+            target := trimmed_text(expr.subslice(type_at, closed as size_t))
+            expr := expr.slice_to(resolved as size_t)
+        }
+    }
+
+    ; a cast: .ofType(T), .as(T), or " as T"; what follows it is a path
+    ; into the type cast to
+    var cast: Slice[u8] ""
+    var has_cast false
+    var tail: Slice[u8] ""
+    let of_type position_of(expr, ".ofType(", 0)
+    let as_method position_of(expr, ".as(", 0)
+    let as_word position_of(expr, " as ", 0)
+    if of_type >= 0
+    {
+        let closed position_of(expr, ")", (of_type as size_t) + 8)
+        if closed >= 0
+        {
+            cast := expr.subslice((of_type as size_t) + 8, closed as size_t)
+            has_cast := true
+            tail := expr.slice_from((closed as size_t) + 1)
+        }
+        expr := expr.slice_to(of_type as size_t)
+    }
+    else
+    {
+        if as_method >= 0
+        {
+            let closed position_of(expr, ")", (as_method as size_t) + 4)
+            if closed >= 0
+            {
+                cast := expr.subslice((as_method as size_t) + 4, closed as size_t)
+                has_cast := true
+                tail := expr.slice_from((closed as size_t) + 1)
+            }
+            expr := expr.slice_to(as_method as size_t)
+        }
+        else
+        {
+            if as_word >= 0
+            {
+                cast := trimmed_text(expr.slice_from((as_word as size_t) + 4))
+                has_cast := true
+                expr := expr.slice_to(as_word as size_t)
+            }
+        }
+    }
+
+    ; .where(...)
+    var where_clause: Slice[u8] ""
+    var has_where false
+    let where_at position_of(expr, ".where(", 0)
+    if where_at >= 0
+    {
+        let closed position_of(expr, ")", (where_at as size_t) + 7)
+        if closed >= 0
+        {
+            where_clause := expr.subslice((where_at as size_t) + 7, closed as size_t)
+            has_where := true
+        }
+        expr := expr.slice_to(where_at as size_t)
+    }
+
+    var current Array[u8]()
+    put_lower(&current, resource)
+    let count pieces(expr, 46)
+    var i: i64 0
+    while i < count
+    {
+        var segment piece(expr, 46, i)
+        i := i + 1
+        if i = 1
+        {
+            var a Array[u8]()
+            put_lower(&a, segment)
+            var b Array[u8]()
+            put_lower(&b, resource)
+            if a.as_slice().equals(b.as_slice()) = false
+            {
+                m.parts.length := parts_from * 9
+                return 0 - 1
+            }
+            continue
+        }
+        var is_first false
+        if ends_with(segment, "[0]")
+        {
+            segment := segment.slice_to(segment.length - 3)
+            is_first := true
+        }
+        else
+        {
+            if segment.equals("first()")
+            {
+                if m.parts.length / 9 > parts_from
+                    set_part(m, m.parts.length / 9 - 1, 4, "true")
+                continue
+            }
+        }
+        var property_id Array[u8]()
+        property_id.append(current.as_slice())
+        property_id.add(46 as u8)
+        put_lower(&property_id, segment)
+        let row add_part(m, property_id.as_slice())
+        if is_first
+            set_part(m, row, 4, "true")
+        ; the where clause on the last segment: property = 'type'
+        if has_where and i = count
+        {
+            let equals_at position_of(where_clause, "=", 0)
+            if equals_at >= 0
+            {
+                set_part(m, row, 2, trimmed_text(where_clause.slice_to(equals_at as size_t)))
+                var value trimmed_text(where_clause.slice_from((equals_at as size_t) + 1))
+                while value.length > 0 and (value[0] = 39 or value[0] = 34)
+                    value := value.slice_from(1)
+                while value.length > 0 and (value[value.length - 1] = 39 or value[value.length - 1] = 34)
+                    value := value.slice_to(value.length - 1)
+                set_part(m, row, 3, value)
+            }
+        }
+        ; where the next segment is looked for
+        var next Array[u8]()
+        next.append(property_id.as_slice())
+        let known dprop_row(m, property_id.as_slice())
+        if known >= 0 and m.dprop[(known * 3 + 2) as size_t] > m.dprop[(known * 3 + 1) as size_t]
+        {
+            let ref m.vars[(m.dprop[(known * 3 + 1) as size_t] * 4 + 1) as size_t]
+            if ref >= 0
+            {
+                var referred Array[u8]()
+                referred.append(text_of(m, ref))
+                var joined Array[u8]()
+                put_lower_joined(&joined, property_id.as_slice())
+                if referred.as_slice().equals(joined.as_slice()) = false
+                {
+                    next.length := 0
+                    if dprop_row(m, referred.as_slice()) >= 0
+                        next.append(referred.as_slice())
+                    else
+                    {
+                        ; the first key that is the reference when its dots are taken out
+                        var found false
+                        var r: size_t 0
+                        while r * 3 < m.dprop.length and found = false
+                        {
+                            let key text_of(m, m.dprop[r * 3])
+                            r := r + 1
+                            if count_of(key, 46) >= 1 and key.length - (count_of(key, 46) as size_t) = referred.length
+                            {
+                                var bare Array[u8]()
+                                put_lower_joined(&bare, key)
+                                ; (the keys are in lower case already: only the dots go)
+                                if bare.as_slice().equals(referred.as_slice())
+                                {
+                                    next.append(key)
+                                    found := true
+                                }
+                            }
+                        }
+                        if found = false
+                            next.append(referred.as_slice())
+                    }
+                }
+            }
+        }
+        current.length := 0
+        current.append(next.as_slice())
+    }
+
+    var cast_handle: i64 0 - 1
+    if has_cast
+    {
+        cast_handle := keep(m, cast)
+        var cast_path Array[u8]()
+        put_lower(&cast_path, cast)
+        let tails pieces(tail, 46)
+        var k: i64 0
+        while k < tails
+        {
+            let step piece(tail, 46, k)
+            k := k + 1
+            if step.length = 0
+                continue
+            var tail_id Array[u8]()
+            tail_id.append(cast_path.as_slice())
+            tail_id.add(46 as u8)
+            put_lower(&tail_id, step)
+            if dprop_row(m, tail_id.as_slice()) < 0
+                break
+            add_part(m, tail_id.as_slice())
+            cast_path.length := 0
+            cast_path.append(tail_id.as_slice())
+        }
+    }
+
+    let parts_to m.parts.length / 9
+    if parts_to = parts_from
+        return 0 - 1
+    let targets_from m.tgts.length as i64
+    if member_text(parameter, "type").equals("reference")
+    {
+        if target.length > 0
+        {
+            let h keep(m, target)
+            m.tgts.add(h)
+        }
+        else
+        {
+            let targets parameter.get("target")
+            var t: size_t 0
+            while t < targets.length()
+            {
+                let h keep(m, targets.item(t).text())
+                m.tgts.add(h)
+                t := t + 1
+            }
+        }
+    }
+    m.paths.add(parts_from as i64)
+    m.paths.add(parts_to as i64)
+    m.paths.add(cast_handle)
+    m.paths.add(targets_from)
+    m.paths.add(m.tgts.length as i64)
+    m.paths.add((m.comps.length / 2) as i64)
+    m.paths.add((m.comps.length / 2) as i64)
+    (m.paths.length / 7 - 1) as i64
+}
+
+; The components of a composite search for one of its paths.
+procedure add_components(mutable m: ref[Model], path: size_t, components: JsonValue)
+{
+    let last (m.paths[path * 7 + 1] - 1) as size_t
+    var last_ref Array[u8]()
+    last_ref.append(text_of(m, m.parts[last * 9]))
+    ; the element the components' expressions are meant in
+    var context Array[u8]()
+    var by_variant false
+    let known dprop_row(m, last_ref.as_slice())
+    if known >= 0 and m.dprop[(known * 3 + 2) as size_t] - m.dprop[(known * 3 + 1) as size_t] = 1
+    {
+        let ref m.vars[(m.dprop[(known * 3 + 1) as size_t] * 4 + 1) as size_t]
+        if ref >= 0
+        {
+            by_variant := true
+            var referred Array[u8]()
+            referred.append(text_of(m, ref))
+            var joined Array[u8]()
+            put_lower_joined(&joined, last_ref.as_slice())
+            if contains_text(referred.as_slice(), ".") = false and contains_text(last_ref.as_slice(), ".") and referred.as_slice().equals(joined.as_slice())
+                context.append(last_ref.as_slice())
+            else
+                context.append(referred.as_slice())
+        }
+    }
+    if by_variant = false
+    {
+        if pieces(last_ref.as_slice(), 46) >= 3
+            context.append(last_ref.as_slice())
+        else
+            put_lower(&context, piece(last_ref.as_slice(), 46, pieces(last_ref.as_slice(), 46) - 1))
+    }
+    var context_lower Array[u8]()
+    put_lower(&context_lower, context.as_slice())
+
+    let from (m.comps.length / 2) as i64
+    var c: size_t 0
+    while c < components.length()
+    {
+        let whole member_text(components.item(c), "expression")
+        c := c + 1
+        ; cut at " | "
+        var at: size_t 0
+        while at <= whole.length
+        {
+            var end position_of(whole, " | ", at)
+            if end < 0
+                end := whole.length as i64
+            var expr trimmed_text(whole.subslice(at, end as size_t))
+            at := (end as size_t) + 3
+            while expr.length >= 2 and expr[0] = 40 and expr[expr.length - 1] = 41
+                expr := trimmed_text(expr.subslice(1, expr.length - 1))
+            var full Array[u8]()
+            var expr_lower Array[u8]()
+            put_lower(&expr_lower, expr)
+            if contains_text(expr, ".") and begins_with(expr_lower.as_slice(), context_lower.as_slice())
+                full.append(expr)
+            else
+            {
+                full.append(context.as_slice())
+                full.add(46 as u8)
+                full.append(expr)
+            }
+            var cast: i64 0 - 1
+            var base full.as_slice()
+            let of_type position_of(base, ".ofType(", 0)
+            if of_type >= 0
+            {
+                let closed position_of(base, ")", (of_type as size_t) + 8)
+                if closed >= 0
+                    cast := keep(m, base.subslice((of_type as size_t) + 8, closed as size_t))
+                base := base.slice_to(of_type as size_t)
+            }
+            var ref Array[u8]()
+            put_lower(&ref, base)
+            let r ref.as_slice()
+            if r.equals("ingredient.substance.strength.presentation.denominator") or r.equals("ingredient.substance.strength.presentation.numerator") or r.equals("ingredient.substance.strength.concentration.denominator") or r.equals("ingredient.substance.strength.concentration.numerator") or r.equals("composition.section.section.code") or r.equals("composition.section.section.text") or r.equals("encounter.location.location.reference") or r.equals("device.specification")
+                continue
+            let h keep(m, r)
+            m.comps.add(h)
+            m.comps.add(cast)
+        }
+    }
+    m.paths.put(path * 7 + 5, from)
+    m.paths.put(path * 7 + 6, (m.comps.length / 2) as i64)
+}
+
+procedure add_search(mutable m: ref[Model], resource: i64, code: Slice[u8], type: Slice[u8], paths_from: i64)
+{
+    var query Array[u8]()
+    put_pascal(&query, code)
+    var lower_type Array[u8]()
+    put_lower(&lower_type, type)
+    let h_name keep(m, code)
+    let h_query keep(m, query.as_slice())
+    let h_type keep(m, lower_type.as_slice())
+    m.srch.add(resource)
+    m.srch.add(h_name)
+    m.srch.add(h_query)
+    m.srch.add(h_type)
+    m.srch.add(paths_from)
+    m.srch.add((m.paths.length / 7) as i64)
+}
+
+procedure build_searches(mutable m: ref[Model], search_bundle: JsonValue)
+{
+    ; _lastUpdated on every resource
+    var r: size_t 0
+    while r * 4 < m.res.length
+    {
+        let paths_from (m.paths.length / 7) as i64
+        let parts_from m.parts.length / 9
+        var meta Array[u8]()
+        put_lower(&meta, text_of(m, m.res[r * 4 + 1]))
+        meta.append(".meta")
+        add_part(m, meta.as_slice())
+        add_part(m, "meta.lastupdated")
+        m.paths.add(parts_from as i64)
+        m.paths.add((m.parts.length / 9) as i64)
+        m.paths.add(0 - 1)
+        m.paths.add(m.tgts.length as i64)
+        m.paths.add(m.tgts.length as i64)
+        m.paths.add((m.comps.length / 2) as i64)
+        m.paths.add((m.comps.length / 2) as i64)
+        let h_name keep(m, "_lastUpdated")
+        let h_query keep(m, "LastUpdated")
+        let h_type keep(m, "date")
+        m.srch.add(r as i64)
+        m.srch.add(h_name)
+        m.srch.add(h_query)
+        m.srch.add(h_type)
+        m.srch.add(paths_from)
+        m.srch.add((m.paths.length / 7) as i64)
+        r := r + 1
+    }
+
+    let entries search_bundle.get("entry")
+    var e: size_t 0
+    while e < entries.length()
+    {
+        let parameter entries.item(e).get("resource")
+        e := e + 1
+        if member_text(parameter, "resourceType").equals("SearchParameter") = false
+            continue
+        let code member_text(parameter, "code")
+        if code.length > 0 and code[0] = 95
+            continue
+        if parameter.get("expression").is_text() = false
+            continue
+        let expression parameter.get("expression").text()
+        if contains_text(expression, ".extension(")
+            continue
+        if contains_text(expression, "resolve()") and contains_text(expression, ".where(resolve() is ") = false
+            continue
+        let type member_text(parameter, "type")
+        let bases parameter.get("base")
+        let deceased expression.equals("Patient.deceased.exists() and Patient.deceased != false") or expression.equals("Practitioner.deceased.exists() and Practitioner.deceased != false") or expression.equals("Person.deceased.exists() and Person.deceased != false")
+        var b: size_t 0
+        while b < bases.length()
+        {
+            let base bases.item(b).text()
+            b := b + 1
+            let resource resource_row(m, base)
+            if resource < 0
+                continue
+            let paths_from (m.paths.length / 7) as i64
+            if deceased
+            {
+                let parts_from m.parts.length / 9
+                var ref Array[u8]()
+                put_lower(&ref, base)
+                ref.append(".deceased")
+                let row add_part(m, ref.as_slice())
+                set_part(m, row, 5, "true")
+                set_part(m, row, 6, "boolean")
+                set_part(m, row, 7, "ne")
+                set_part(m, row, 8, "true")
+                m.paths.add(parts_from as i64)
+                m.paths.add((m.parts.length / 9) as i64)
+                m.paths.add(0 - 1)
+                m.paths.add(m.tgts.length as i64)
+                m.paths.add(m.tgts.length as i64)
+                m.paths.add((m.comps.length / 2) as i64)
+                m.paths.add((m.comps.length / 2) as i64)
+                add_search(m, resource, code, type, paths_from)
+                continue
+            }
+            ; every path of the expression that is the resource's
+            var base_lower Array[u8]()
+            put_lower(&base_lower, base)
+            var at: size_t 0
+            while at <= expression.length
+            {
+                var end position_of(expression, " | ", at)
+                if end < 0
+                    end := expression.length as i64
+                let one trimmed_text(expression.subslice(at, end as size_t))
+                at := (end as size_t) + 3
+                var one_lower Array[u8]()
+                put_lower(&one_lower, one)
+                if begins_with(one_lower.as_slice(), base_lower.as_slice())
+                    parse_path(m, one, base, parameter)
+            }
+            if type.equals("composite") and (m.paths.length / 7) as i64 = paths_from and expression.equals(base)
+            {
+                let parts_from m.parts.length / 9
+                add_part(m, base_lower.as_slice())
+                m.paths.add(parts_from as i64)
+                m.paths.add((m.parts.length / 9) as i64)
+                m.paths.add(0 - 1)
+                m.paths.add(m.tgts.length as i64)
+                m.paths.add(m.tgts.length as i64)
+                m.paths.add((m.comps.length / 2) as i64)
+                m.paths.add((m.comps.length / 2) as i64)
+            }
+            if type.equals("composite") and parameter.get("component").is_null() = false
+            {
+                var p paths_from as size_t
+                while p < m.paths.length / 7
+                {
+                    add_components(m, p, parameter.get("component"))
+                    p := p + 1
+                }
+            }
+            if (m.paths.length / 7) as i64 > paths_from
+                add_search(m, resource, code, type, paths_from)
+        }
+    }
+}
+
+; --- operations ---
+
+procedure build_operations(mutable m: ref[Model], resources_bundle: JsonValue)
+{
+    let entries resources_bundle.get("entry")
+    var e: size_t 0
+    while e < entries.length()
+    {
+        let definition entries.item(e).get("resource")
+        e := e + 1
+        if member_text(definition, "resourceType").equals("OperationDefinition") = false
+            continue
+        let for_resources definition.get("resource")
+        var r: size_t 0
+        while r < for_resources.length()
+        {
+            let resource resource_row(m, for_resources.item(r).text())
+            r := r + 1
+            if resource < 0
+                continue
+            ; (its description without line feeds and carriage returns)
+            let described member_text(definition, "description")
+            var plain Array[u8]()
+            var i: size_t 0
+            while i < described.length
+            {
+                if described[i] <> 10 and described[i] <> 13
+                    plain.add(described[i])
+                i := i + 1
+            }
+            let operation (m.ops.length / 3) as i64
+            let h_name keep(m, member_text(definition, "code"))
+            let h_description keep(m, plain.as_slice())
+            m.ops.add(resource)
+            m.ops.add(h_name)
+            m.ops.add(h_description)
+            let parameters definition.get("parameter")
+            var p: size_t 0
+            while p < parameters.length()
+            {
+                let parameter parameters.item(p)
+                p := p + 1
+                let type member_text(parameter, "type")
+                let primitive is_one_of(primitive_names(), type)
+                var said Array[u8]()
+                put_plain(&said, member_text(parameter, "documentation"))
+                var h_type: i64 0 - 1
+                var h_ref: i64 0 - 1
+                if primitive
+                {
+                    ; (its first letter in lower case; a string is the default)
+                    var written Array[u8]()
+                    written.add(lower_byte(type[0]))
+                    written.append(type.slice_from(1))
+                    if written.as_slice().equals("string") = false
+                        h_type := keep(m, written.as_slice())
+                }
+                else
+                {
+                    if type.equals("Any") = false and type.equals("Bundle") = false and type.equals("Resource") = false
+                    {
+                        var referred Array[u8]()
+                        put_lower(&referred, type)
+                        h_ref := keep(m, referred.as_slice())
+                        h_type := keep(m, "resource")
+                    }
+                }
+                var is_input: i64 0
+                if member_text(parameter, "use").equals("in")
+                    is_input := 1
+                var is_collection: i64 0
+                if member_text(parameter, "max").equals("*")
+                    is_collection := 1
+                var not_null: i64 0
+                if parameter.get("min").is_number() and parameter.get("min").as_i64() = 1
+                    not_null := 1
+                let h_parameter keep(m, member_text(parameter, "name"))
+                let h_said keep(m, said.as_slice())
+                m.params.add(operation)
+                m.params.add(is_input)
+                m.params.add(h_parameter)
+                m.params.add(h_said)
+                m.params.add(h_type)
+                m.params.add(h_ref)
+                m.params.add(is_collection)
+                m.params.add(not_null)
+            }
+        }
+    }
+}
+
+; --- the XML ---
+
+procedure put_indent(mutable out: ref[Array[u8]], level: int)
+{
+    var i 0
+    while i < level
+    {
+        out.append("  ")
+        i := i + 1
+    }
+}
+
+procedure put_escaped(mutable out: ref[Array[u8]], s: Slice[u8])
+{
+    var i: size_t 0
+    while i < s.length
+    {
+        let c s[i]
+        i := i + 1
+        if c = 38
+        {
+            out.append("&amp;")
+            continue
+        }
+        if c = 60
+        {
+            out.append("&lt;")
+            continue
+        }
+        if c = 62
+        {
+            out.append("&gt;")
+            continue
+        }
+        if c = 34
+        {
+            out.append("&quot;")
+            continue
+        }
+        if c = 39
+        {
+            out.append("&apos;")
+            continue
+        }
+        out.add(c)
+    }
+}
+
+procedure put_attribute(mutable out: ref[Array[u8]], name: Slice[u8], value: Slice[u8])
+{
+    out.add(32 as u8)
+    out.append(name)
+    out.append("=\"")
+    put_escaped(out, value)
+    out.append("\"")
+}
+
+; ... when the cell holds a text
+procedure put_attribute_if(mutable out: ref[Array[u8]], m: ref[Model], name: Slice[u8], h: i64)
+{
+    if h >= 0
+        put_attribute(out, name, text_of(m, h))
+}
+
+procedure put_true_if(mutable out: ref[Array[u8]], name: Slice[u8], flag: i64)
+{
+    if flag = 1
+        put_attribute(out, name, "true")
+}
+
+procedure put_line(mutable out: ref[Array[u8]], level: int, line: Slice[u8])
+{
+    put_indent(out, level)
+    out.append(line)
+    out.add(10 as u8)
+}
+
+; A description: without what is not ASCII, trimmed.
+procedure put_description(mutable out: ref[Array[u8]], m: ref[Model], h: i64, level: int)
+{
+    var ascii Array[u8]()
+    put_ascii(&ascii, text_of(m, h))
+    let said trimmed_text(ascii.as_slice())
+    put_indent(out, level)
+    if said.length = 0
+        out.append("<description/>")
+    else
+    {
+        out.append("<description>")
+        put_escaped(out, said)
+        out.append("</description>")
+    }
+    out.add(10 as u8)
+}
+
+procedure put_targets(mutable out: ref[Array[u8]], m: ref[Model], from: i64, to: i64, level: int)
+{
+    put_line(out, level, "<targets>")
+    var t from
+    while t < to
+    {
+        put_indent(out, level + 1)
+        out.append("<target")
+        put_attribute(out, "resource", text_of(m, m.tgts[t as size_t]))
+        out.append("/>")
+        out.add(10 as u8)
+        t := t + 1
+    }
+    put_line(out, level, "</targets>")
+}
+
+; The properties of a key.
+procedure put_properties(mutable out: ref[Array[u8]], m: ref[Model], key: Slice[u8], level: int)
+{
+    let k key_row(m, key)
+    var any false
+    var r: size_t 0
+    if k >= 0
+        r := m.keys[(k * 3 + 2) as size_t] as size_t
+    while k >= 0 and r * 10 < m.props.length
+    {
+        let row r * 10
+        r := r + 1
+        if is_text(m, m.props[row], key) = false
+            continue
+        if any = false
+            put_line(out, level, "<properties>")
+        any := true
+        let from m.props[row + 8]
+        let to m.props[row + 9]
+        var id text_of(m, m.props[row + 1])
+        if ends_with(id, "[x]")
+            id := id.slice_to(id.length - 3)
+        put_indent(out, level + 1)
+        out.append("<property")
+        put_attribute(out, "id", id)
+        put_attribute(out, "name", text_of(m, m.props[row + 2]))
+        if to - from = 1
+        {
+            put_attribute_if(out, m, "type", m.vars[(from * 4) as size_t])
+            put_attribute_if(out, m, "ref", m.vars[(from * 4 + 1) as size_t])
+        }
+        else
+            put_attribute(out, "type", "variant")
+        put_true_if(out, "iscollection", m.props[row + 4])
+        put_true_if(out, "notnull", m.props[row + 5])
+        put_true_if(out, "summary", m.props[row + 6])
+        put_true_if(out, "modifier", m.props[row + 7])
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.props[row + 3], level + 2)
+        if to - from > 1
+        {
+            put_line(out, level + 2, "<variants>")
+            var v from
+            while v < to
+            {
+                let targets_from m.vars[(v * 4 + 2) as size_t]
+                let targets_to m.vars[(v * 4 + 3) as size_t]
+                put_indent(out, level + 3)
+                out.append("<variant")
+                put_attribute_if(out, m, "type", m.vars[(v * 4) as size_t])
+                put_attribute_if(out, m, "ref", m.vars[(v * 4 + 1) as size_t])
+                if targets_to > targets_from
+                {
+                    out.append(">")
+                    out.add(10 as u8)
+                    put_targets(out, m, targets_from, targets_to, level + 4)
+                    put_line(out, level + 3, "</variant>")
+                }
+                else
+                {
+                    out.append("/>")
+                    out.add(10 as u8)
+                }
+                v := v + 1
+            }
+            put_line(out, level + 2, "</variants>")
+        }
+        else
+        {
+            let targets_from m.vars[(from * 4 + 2) as size_t]
+            let targets_to m.vars[(from * 4 + 3) as size_t]
+            if targets_to > targets_from
+                put_targets(out, m, targets_from, targets_to, level + 2)
+        }
+        put_line(out, level + 1, "</property>")
+    }
+    if any
+        put_line(out, level, "</properties>")
+    else
+        put_line(out, level, "<properties/>")
+}
+
+procedure put_codesets(mutable out: ref[Array[u8]], m: ref[Model], kind: i64, owner: i64, level: int)
+{
+    var any false
+    var r: size_t 0
+    while r * 7 < m.csets.length
+    {
+        let row r * 7
+        r := r + 1
+        if m.csets[row] <> kind or m.csets[row + 1] <> owner
+            continue
+        if any = false and kind <> 0
+            put_line(out, level, "<codesets>")
+        any := true
+        put_indent(out, level + 1)
+        out.append("<codeset")
+        put_attribute(out, "name", text_of(m, m.csets[row + 3]))
+        put_attribute(out, "id", text_of(m, m.csets[row + 2]))
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.csets[row + 4], level + 2)
+        put_line(out, level + 2, "<codes>")
+        var c m.csets[row + 5]
+        while c < m.csets[row + 6]
+        {
+            put_indent(out, level + 3)
+            out.append("<code")
+            put_attribute(out, "name", text_of(m, m.codes[(c * 3) as size_t]))
+            put_attribute(out, "value", text_of(m, m.codes[(c * 3 + 1) as size_t]))
+            out.append(">")
+            out.add(10 as u8)
+            put_description(out, m, m.codes[(c * 3 + 2) as size_t], level + 4)
+            put_line(out, level + 3, "</code>")
+            c := c + 1
+        }
+        put_line(out, level + 2, "</codes>")
+        put_line(out, level + 1, "</codeset>")
+    }
+    if kind = 0
+        return
+    if any
+        put_line(out, level, "</codesets>")
+    else
+        put_line(out, level, "<codesets/>")
+}
+
+; The elements below a key, each with what is below it.
+procedure put_elements(mutable out: ref[Array[u8]], m: ref[Model], key: Slice[u8], level: int)
+{
+    let k key_row(m, key)
+    var any false
+    var r: size_t 0
+    if k >= 0
+        r := m.keys[(k * 3 + 1) as size_t] as size_t
+    while k >= 0 and r * 5 < m.nel.length
+    {
+        let row r * 5
+        r := r + 1
+        if is_text(m, m.nel[row], key) = false
+            continue
+        if any = false
+            put_line(out, level, "<elements>")
+        any := true
+        var id Array[u8]()
+        id.append(text_of(m, m.nel[row + 1]))
+        put_indent(out, level + 1)
+        out.append("<element")
+        put_attribute(out, "id", id.as_slice())
+        put_attribute(out, "name", text_of(m, m.nel[row + 2]))
+        put_attribute_if(out, m, "explicit", m.nel[row + 3])
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.nel[row + 4], level + 2)
+        put_properties(out, m, id.as_slice(), level + 2)
+        put_elements(out, m, id.as_slice(), level + 2)
+        put_line(out, level + 2, "<codesets/>")
+        put_line(out, level + 1, "</element>")
+    }
+    if any
+        put_line(out, level, "</elements>")
+    else
+        put_line(out, level, "<elements/>")
+}
+
+procedure put_searches(mutable out: ref[Array[u8]], m: ref[Model], resource: i64, level: int)
+{
+    var any false
+    var r: size_t 0
+    while r * 6 < m.srch.length
+    {
+        let row r * 6
+        r := r + 1
+        if m.srch[row] <> resource
+            continue
+        if any = false
+            put_line(out, level, "<searches>")
+        any := true
+        put_indent(out, level + 1)
+        out.append("<search")
+        put_attribute(out, "name", text_of(m, m.srch[row + 1]))
+        put_attribute(out, "query", text_of(m, m.srch[row + 2]))
+        put_attribute(out, "type", text_of(m, m.srch[row + 3]))
+        out.append(">")
+        out.add(10 as u8)
+        put_line(out, level + 2, "<paths>")
+        var p m.srch[row + 4]
+        while p < m.srch[row + 5]
+        {
+            let path (p * 7) as size_t
+            p := p + 1
+            put_line(out, level + 3, "<path>")
+            put_line(out, level + 4, "<parts>")
+            var part m.paths[path]
+            while part < m.paths[path + 1]
+            {
+                let cells (part * 9) as size_t
+                part := part + 1
+                put_indent(out, level + 5)
+                out.append("<part")
+                put_attribute(out, "ref", text_of(m, m.parts[cells]))
+                put_attribute_if(out, m, "resolve", m.parts[cells + 1])
+                put_attribute_if(out, m, "property", m.parts[cells + 2])
+                put_attribute_if(out, m, "type", m.parts[cells + 3])
+                put_attribute_if(out, m, "first", m.parts[cells + 4])
+                put_attribute_if(out, m, "notnull", m.parts[cells + 5])
+                put_attribute_if(out, m, "variant", m.parts[cells + 6])
+                put_attribute_if(out, m, "op", m.parts[cells + 7])
+                put_attribute_if(out, m, "value", m.parts[cells + 8])
+                out.append("/>")
+                out.add(10 as u8)
+            }
+            put_line(out, level + 4, "</parts>")
+            if m.paths[path + 2] >= 0
+            {
+                put_line(out, level + 4, "<casts>")
+                put_indent(out, level + 5)
+                out.append("<cast")
+                put_attribute(out, "to", text_of(m, m.paths[path + 2]))
+                out.append("/>")
+                out.add(10 as u8)
+                put_line(out, level + 4, "</casts>")
+            }
+            if m.paths[path + 4] > m.paths[path + 3]
+                put_targets(out, m, m.paths[path + 3], m.paths[path + 4], level + 4)
+            if m.paths[path + 6] > m.paths[path + 5]
+            {
+                put_line(out, level + 4, "<components>")
+                var c m.paths[path + 5]
+                while c < m.paths[path + 6]
+                {
+                    put_indent(out, level + 5)
+                    out.append("<component")
+                    put_attribute(out, "ref", text_of(m, m.comps[(c * 2) as size_t]))
+                    if m.comps[(c * 2 + 1) as size_t] >= 0
+                    {
+                        out.append(">")
+                        out.add(10 as u8)
+                        put_line(out, level + 6, "<casts>")
+                        put_indent(out, level + 7)
+                        out.append("<cast")
+                        put_attribute(out, "to", text_of(m, m.comps[(c * 2 + 1) as size_t]))
+                        out.append("/>")
+                        out.add(10 as u8)
+                        put_line(out, level + 6, "</casts>")
+                        put_line(out, level + 5, "</component>")
+                    }
+                    else
+                    {
+                        out.append("/>")
+                        out.add(10 as u8)
+                    }
+                    c := c + 1
+                }
+                put_line(out, level + 4, "</components>")
+            }
+            put_line(out, level + 3, "</path>")
+        }
+        put_line(out, level + 2, "</paths>")
+        put_line(out, level + 1, "</search>")
+    }
+    if any
+        put_line(out, level, "</searches>")
+    else
+        put_line(out, level, "<searches/>")
+}
+
+procedure put_parameters(mutable out: ref[Array[u8]], m: ref[Model], operation: i64, is_input: i64, name: Slice[u8], level: int)
+{
+    var any false
+    var r: size_t 0
+    while r * 8 < m.params.length
+    {
+        let row r * 8
+        r := r + 1
+        if m.params[row] <> operation or m.params[row + 1] <> is_input
+            continue
+        if any = false
+        {
+            put_indent(out, level)
+            out.append("<")
+            out.append(name)
+            out.append(">")
+            out.add(10 as u8)
+        }
+        any := true
+        put_indent(out, level + 1)
+        out.append("<parameter")
+        put_attribute(out, "name", text_of(m, m.params[row + 2]))
+        put_attribute_if(out, m, "type", m.params[row + 4])
+        put_true_if(out, "iscollection", m.params[row + 6])
+        ; (a reference that is empty is none)
+        if m.params[row + 5] >= 0 and text_of(m, m.params[row + 5]).length > 0
+            put_attribute(out, "ref", text_of(m, m.params[row + 5]))
+        put_true_if(out, "notnull", m.params[row + 7])
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.params[row + 3], level + 2)
+        put_line(out, level + 1, "</parameter>")
+    }
+    put_indent(out, level)
+    if any
+        out.append("</")
+    else
+        out.append("<")
+    out.append(name)
+    if any
+        out.append(">")
+    else
+        out.append("/>")
+    out.add(10 as u8)
+}
+
+procedure put_operations(mutable out: ref[Array[u8]], m: ref[Model], resource: i64, level: int)
+{
+    var any false
+    var r: size_t 0
+    while r * 3 < m.ops.length
+    {
+        let row r * 3
+        r := r + 1
+        if m.ops[row] <> resource
+            continue
+        if any = false
+            put_line(out, level, "<operations>")
+        any := true
+        put_indent(out, level + 1)
+        out.append("<operation")
+        put_attribute(out, "name", text_of(m, m.ops[row + 1]))
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.ops[row + 2], level + 2)
+        put_parameters(out, m, (r - 1) as i64, 1, "input", level + 2)
+        put_parameters(out, m, (r - 1) as i64, 0, "output", level + 2)
+        put_line(out, level + 1, "</operation>")
+    }
+    if any
+        put_line(out, level, "</operations>")
+    else
+        put_line(out, level, "<operations/>")
+}
+
+procedure put_model(mutable out: ref[Array[u8]], m: ref[Model])
+{
+    put_line(out, 0, "<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+    put_line(out, 0, "<!DOCTYPE fhir SYSTEM \"fire.dtd\">")
+    put_line(out, 0, "<fhir name=\"Fire\" version=\"5.0.0\">")
+    put_line(out, 1, "<resources>")
+    var r: size_t 0
+    while r * 4 < m.res.length
+    {
+        let row r * 4
+        var id Array[u8]()
+        id.append(text_of(m, m.res[row]))
+        put_indent(out, 2)
+        out.append("<resource")
+        put_attribute(out, "name", text_of(m, m.res[row + 1]))
+        put_attribute_if(out, m, "active", m.res[row + 2])
+        put_attribute(out, "id", id.as_slice())
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.res[row + 3], 3)
+        put_properties(out, m, id.as_slice(), 3)
+        put_elements(out, m, id.as_slice(), 3)
+        put_codesets(out, m, 1, r as i64, 3)
+        put_searches(out, m, r as i64, 3)
+        put_operations(out, m, r as i64, 3)
+        put_line(out, 2, "</resource>")
+        r := r + 1
+    }
+    put_line(out, 1, "</resources>")
+    put_line(out, 1, "<elements>")
+    var e: size_t 0
+    while e * 4 < m.mel.length
+    {
+        let row e * 4
+        var id Array[u8]()
+        id.append(text_of(m, m.mel[row]))
+        put_indent(out, 2)
+        out.append("<element")
+        put_attribute(out, "id", id.as_slice())
+        put_attribute(out, "name", text_of(m, m.mel[row + 1]))
+        put_true_if(out, "backbone", m.mel[row + 2])
+        out.append(">")
+        out.add(10 as u8)
+        put_description(out, m, m.mel[row + 3], 3)
+        put_properties(out, m, id.as_slice(), 3)
+        put_elements(out, m, id.as_slice(), 3)
+        put_codesets(out, m, 2, e as i64, 3)
+        put_line(out, 2, "</element>")
+        e := e + 1
+    }
+    put_line(out, 1, "</elements>")
+    put_line(out, 1, "<codesets>")
+    put_codesets(out, m, 0, 0, 1)
+    put_line(out, 1, "</codesets>")
+    out.append("</fhir>")
+}
+
+; --- the program ---
+
+; The definitions of a file of HL7's, parsed; the text is kept by the caller.
+procedure load(directory: String, name: Slice[u8]) returns String
+{
+    let path "`directory`/`String(name.data as pointer[const_char], name.length)`"
+    File.read_to_string(path)
+}
+
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
+{
+    if argc < 3
+    {
+        Console.println("usage: fhir-to-xml DEFINITIONS OUTPUT -- HL7's FHIR R5 definitions (the directory of definitions.json.zip, unpacked) as the model in XML")
+        return 2
+    }
+    let directory String(*(argv + 1))
+    let output String(*(argv + 2))
+    let resources_text load(directory, "profiles-resources.json")
+    let types_text load(directory, "profiles-types.json")
+    let searches_text load(directory, "search-parameters.json")
+    let valuesets_text load(directory, "valuesets.json")
+    let resources_parsed JsonValue.parse(resources_text.as_slice())
+    let types_parsed JsonValue.parse(types_text.as_slice())
+    let searches_parsed JsonValue.parse(searches_text.as_slice())
+    let valuesets_parsed JsonValue.parse(valuesets_text.as_slice())
+    if resources_parsed.ok() = false or types_parsed.ok() = false or searches_parsed.ok() = false or valuesets_parsed.ok() = false
+    {
+        Console.println("fhir-to-xml: the definitions are not read from `directory`")
+        return 1
+    }
+    let valuesets valuesets_parsed.value
+    var m Model()
+
+    ; the resources
+    let resource_entries resources_parsed.value.get("entry")
+    var e: size_t 0
+    while e < resource_entries.length()
+    {
+        let definition resource_entries.item(e).get("resource")
+        e := e + 1
+        if member_text(definition, "resourceType").equals("StructureDefinition") = false
+            continue
+        let elements definition.get("snapshot").get("element")
+        let name member_text(elements.item(0), "id")
+        if is_one_of(resource_names(), name) = false
+            continue
+        var active: i64 0 - 1
+        if name.equals("Binary") or name.equals("Observation") or name.equals("Patient") or name.equals("Practitioner") or name.equals("Provenance")
+            active := keep(&m, "true")
+        else
+        {
+            if name.equals("Resource") or name.equals("Bundle") or name.equals("CapabilityStatement") or name.equals("CompartmentDefinition") or name.equals("ConceptMap") or name.equals("OperationDefinition") or name.equals("OperationOutcome") or name.equals("SearchParameter")
+                active := keep(&m, "model")
+        }
+        var id Array[u8]()
+        put_lower(&id, name)
+        var description Array[u8]()
+        put_plain(&description, member_text(elements.item(0), "definition"))
+        let h_id keep(&m, id.as_slice())
+        let h_name keep(&m, name)
+        let h_description keep(&m, description.as_slice())
+        m.res.add(h_id)
+        m.res.add(h_name)
+        m.res.add(active)
+        m.res.add(h_description)
+        set_key(&m, id.as_slice())
+        var i: size_t 0
+        while i < elements.length()
+        {
+            handle_element(&m, elements.item(i), valuesets)
+            i := i + 1
+        }
+    }
+
+    ; the data types
+    let type_entries types_parsed.value.get("entry")
+    e := 0
+    while e < type_entries.length()
+    {
+        let definition type_entries.item(e).get("resource")
+        e := e + 1
+        if member_text(definition, "resourceType").equals("StructureDefinition") = false
+            continue
+        let elements definition.get("snapshot").get("element")
+        let name member_text(elements.item(0), "id")
+        if is_one_of(data_type_names(), name) = false
+            continue
+        if element_row(&m, name) >= 0
+            continue
+        var backbone: i64 0
+        if member_text(definition, "baseDefinition").equals("http://hl7.org/fhir/StructureDefinition/BackboneElement")
+            backbone := 1
+        var id Array[u8]()
+        put_lower(&id, name)
+        var plain Array[u8]()
+        put_plain(&plain, member_text(elements.item(0), "definition"))
+        ; (an ellipsis as three points, before what is not ASCII goes)
+        var description Array[u8]()
+        var ellipsis Array[u8]()
+        ellipsis.add(226 as u8)
+        ellipsis.add(128 as u8)
+        ellipsis.add(166 as u8)
+        put_replaced(&description, plain.as_slice(), ellipsis.as_slice(), "...")
+        let h_id keep(&m, id.as_slice())
+        let h_name keep(&m, name)
+        let h_description keep(&m, description.as_slice())
+        m.mel.add(h_id)
+        m.mel.add(h_name)
+        m.mel.add(backbone)
+        m.mel.add(h_description)
+        set_key(&m, id.as_slice())
+        var i: size_t 0
+        while i < elements.length()
+        {
+            handle_element(&m, elements.item(i), valuesets)
+            i := i + 1
+        }
+    }
+
+    build_searches(&m, searches_parsed.value)
+    build_operations(&m, resources_parsed.value)
+    var out Array[u8]()
+    put_model(&out, &m)
+    if File.write_from_string(output, String(out.get_buffer() as pointer[const_char], out.length)) = false
+    {
+        Console.println("fhir-to-xml: `output` is not written")
+        return 1
+    }
+    0
+}
