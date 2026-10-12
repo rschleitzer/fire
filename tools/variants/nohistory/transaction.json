@@ -1,0 +1,6 @@
+{"resourceType":"Bundle","type":"transaction","entry":[
+{"request":{"method":"PUT","url":"Practitioner/nt1","ifMatch":"W/\"7\""},"resource":{"resourceType":"Practitioner","name":[{"family":"Bündel"}]}},
+{"request":{"method":"PUT","url":"Patient/vt1"},"resource":{"resourceType":"Patient","name":[{"family":"Bündel"}]}},
+{"request":{"method":"POST","url":"Practitioner"},"resource":{"resourceType":"Practitioner","name":[{"family":"Neu"}]}},
+{"request":{"method":"GET","url":"Practitioner/nt1"}},
+{"request":{"method":"DELETE","url":"Practitioner/np4"}}]}

@@ -26,6 +26,23 @@ define StoreResult (status: int, version_id: i64, seconds: i64)
 procedure resource_types() returns Slice[u8]
     model_types()
 
+; Does the type keep the versions a write replaces? One that does not
+; (history="false" in the model) has no history table: a write there asks
+; for no version, a delete leaves nothing, and there is nothing to list,
+; to roll back or to bring back.
+procedure type_versioned(type: Slice[u8]) returns bool
+{
+    let without model_unversioned()
+    var i: size_t 0
+    while entry(without, 32, i).length > 0
+    {
+        if entry(without, 32, i).equals(type)
+            return false
+        i := i + 1
+    }
+    true
+}
+
 ; The columns a type keeps beside its content, in the model's order, as
 ; column:member:kind separated by commas (the model's).
 procedure inline_columns(type: Slice[u8]) returns Slice[u8]

@@ -204,9 +204,13 @@ procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable 
     while entry(resource_types(), 32, t).length > 0
     {
         begins.add(keys.length as i64)
-        let result resource_history_keyed(0, entry(resource_types(), 32, t), "", 10000, 0, &found, &rows, &keys)
-        if result.status <> STORED
-            return send_unavailable(res)
+        ; a type without history has no rows here
+        if type_versioned(entry(resource_types(), 32, t))
+        {
+            let result resource_history_keyed(0, entry(resource_types(), 32, t), "", 10000, 0, &found, &rows, &keys)
+            if result.status <> STORED
+                return send_unavailable(res)
+        }
         t := t + 1
     }
     var order Array[i64]()

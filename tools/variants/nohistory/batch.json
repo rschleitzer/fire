@@ -1,0 +1,8 @@
+{"resourceType":"Bundle","type":"batch","entry":[
+{"request":{"method":"PUT","url":"Practitioner/nt1","ifMatch":"W/\"7\""},"resource":{"resourceType":"Practitioner","name":[{"family":"Stapel"}]}},
+{"request":{"method":"PUT","url":"Patient/vt1","ifMatch":"W/\"7\""},"resource":{"resourceType":"Patient","name":[{"family":"Stapel"}]}},
+{"request":{"method":"GET","url":"Practitioner/nt1/_history"}},
+{"request":{"method":"GET","url":"Practitioner/nt1/_history/2"}},
+{"request":{"method":"DELETE","url":"Practitioner/nt1"}},
+{"request":{"method":"GET","url":"Practitioner/nt1"}},
+{"request":{"method":"DELETE","url":"Practitioner/nt1"}}]}

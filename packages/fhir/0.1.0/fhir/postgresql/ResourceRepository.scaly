@@ -404,7 +404,7 @@ procedure postgresql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Sl
     var c got as ref[PgConn]
     var version_id: i64 1
     var ok begin(c, scope)
-    if ok and after_delete
+    if ok and after_delete and type_versioned(type)
     {
         var name Array[u8]()
         statement_name(&name, type, "versions")
@@ -489,7 +489,9 @@ procedure postgresql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Sl
             return StoreResult(NOT_FOUND, 0, 0)
         return StoreResult(CONFLICT, current, 0)
     }
-    var ok keep_history(c, type, id, "UPDATE")
+    var ok true
+    if type_versioned(type)
+        ok := keep_history(c, type, id, "UPDATE")
     let now instant_now()
     if ok
     {
@@ -549,7 +551,21 @@ procedure postgresql_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns 
             return FAILED
         return NOT_FOUND
     }
-    var ok keep_history(c, type, id, "DELETE")
+    var ok true
+    if type_versioned(type)
+        ok := keep_history(c, type, id, "DELETE")
+    else
+    {
+        ; no history to keep the bytes for: they go with the resource
+        if keeps_data_apart(type)
+        {
+            var bytes Array[u8]()
+            put_bytes(&bytes, "DELETE FROM ")
+            put_table(&bytes, type)
+            put_bytes(&bytes, ".resource_data WHERE resource_id = $1")
+            ok := run_for(c, type, "delete-data", bytes.as_slice(), id, 0)
+        }
+    }
     if ok
     {
         var name Array[u8]()
@@ -984,6 +1000,13 @@ procedure postgresql_purge(type: Slice[u8], before: Slice[u8], mutable shown: re
         put_bytes(shown, c.column(0))
         put_bytes(shown, "0Z")
     }
+    ; a type without history has nothing to purge
+    if type_versioned(type) = false
+    {
+        give_back(c, 0)
+        count.add(0)
+        return STORED
+    }
     var sql Array[u8]()
     put_bytes(&sql, "SELECT COUNT(*) FROM (")
     put_purge_selection(&sql, type, bounded)
@@ -1074,9 +1097,13 @@ procedure postgresql_truncate(type: Slice[u8]) returns bool mutable pg_pool
         put_table(&sql, type)
         put_bytes(&sql, ".resource_data; ")
     }
+    if type_versioned(type)
+    {
+        put_bytes(&sql, "DELETE FROM ")
+        put_table(&sql, type)
+        put_bytes(&sql, ".resource_history; ")
+    }
     put_bytes(&sql, "DELETE FROM ")
-    put_table(&sql, type)
-    put_bytes(&sql, ".resource_history; DELETE FROM ")
     put_table(&sql, type)
     postgresql_script(0, sql.as_slice())
 }
@@ -1176,7 +1203,7 @@ procedure postgresql_select(scope: u64, type: Slice[u8], id: Slice[u8], version_
     else
     {
         result := select_row(c, type, "version", false, id, version_id, content)
-        if result.status = NOT_FOUND
+        if result.status = NOT_FOUND and type_versioned(type)
             result := select_row(c, type, "history", true, id, version_id, content)
     }
     if result.status = STORED and keeps_data_apart(type) and restore_data(c, type, id, result.version_id, content) = false

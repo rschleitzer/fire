@@ -135,6 +135,9 @@ procedure model_search_parameters(name: Slice[u8]) returns Slice[u8]
 procedure model_types() returns Slice[u8]
     model_value(61, "types")
 
+procedure model_unversioned() returns Slice[u8]
+    model_value(61, "unversioned")
+
 procedure model_route() returns Slice[u8]
     model_value(61, "route")
 

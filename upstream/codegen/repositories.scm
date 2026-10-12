@@ -2527,7 +2527,10 @@ public class "rn"Repository : I"rn"Repository
         return resource;
     }
 
-    private static "rn"HistoryRow Read"rn"HistoryRowWithData(ReaderType reader)
+"
+    ; the reader of a history row only where there is a history
+    (if has-history ($
+"    private static "rn"HistoryRow Read"rn"HistoryRowWithData(ReaderType reader)
     {
         var content = reader.IsDBNull(3) ? null : reader.GetFieldValue<""byte[]>(3);
         if (content != null && !reader.IsDBNull(5))
@@ -2545,7 +2548,7 @@ public class "rn"Repository : I"rn"Repository
             reader.GetString(4));
     }
 
-") "")))
+") "")) "")))
 
 ; ===================================================================
 ; Section: InsertSearchIndexesAsync

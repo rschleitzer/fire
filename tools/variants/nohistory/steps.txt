@@ -1,0 +1,117 @@
+# What both servers of the model without history for Practitioner and
+# Binary answer, each on a database of its own (tools/variant-test.sh).
+#   METHOD <path below /fire> [<body file here>] [| <header>]
+#   BUNDLE <file here>
+
+# written, replaced, read
+PUT Practitioner/np1 practitioner.json
+GET Practitioner/np1
+PUT Practitioner/np1 practitioner2.json
+PUT Practitioner/np1 practitioner.json | If-Match: W/"1"
+PUT Practitioner/np1 practitioner2.json | If-Match: nonsense
+GET Practitioner/np1
+GET Practitioner/np1 | If-None-Match: W/"4"
+GET Practitioner/np1/_history/4
+GET Practitioner/np1/_history/1
+GET Practitioner/np1/_history/0
+GET Practitioner/np1/_history/x
+GET Practitioner/np1/_history
+GET Practitioner/_history
+GET Practitioner/nobody
+GET Practitioner/nobody/_history/1
+PUT Practitioner/np1 practitioner-calendar.json
+PUT Practitioner/np1 binary.json
+PUT Practitioner/np1 practitioner.json | Prefer: return=minimal
+PUT Practitioner/np1 practitioner.json | X-Provenance: {"resourceType":"Provenance","agent":[{"who":{"display":"variant"}}]}
+GET Provenance?target=Practitioner/np1
+POST Practitioner practitioner.json
+POST Practitioner practitioner-calendar.json
+
+# PATCH
+PATCH Practitioner/np1 patch.json
+PATCH Practitioner/np1 patch.json | If-Match: W/"1"
+PATCH Practitioner/np1 patch-fails.json
+PATCH Practitioner/nobody patch.json
+GET Practitioner/np1
+
+# what a type without history does not have
+POST Practitioner/np1/$undelete
+POST Practitioner/np1/_rollback/7
+POST Practitioner/np1/_rollback/1
+POST Practitioner/np1
+PUT Practitioner/_history/np9 practitioner.json
+GET Practitioner/np9
+PUT Practitioner/_history/np9 practitioner2.json
+GET Practitioner/np9
+
+# searched, and found from a type that has a history
+PUT Patient/vp1 patient.json
+GET Practitioner?family=ohne&_sort=_id
+GET Practitioner?_id=np1&_revinclude=Patient:general-practitioner
+GET Patient?general-practitioner.family=Ohne
+GET Practitioner?_has:Patient:general-practitioner:family=Mit
+GET Practitioner?_summary=count
+GET Practitioner/$autocomplete?family=o
+
+# the conditional update and delete
+PUT Practitioner?identifier=urn:variant|cu practitioner-cu.json
+PUT Practitioner?identifier=urn:variant|cu practitioner-cu.json | If-Match: W/"9"
+GET Practitioner?identifier=urn:variant|cu
+DELETE Practitioner?identifier=urn:variant|cu
+GET Practitioner?identifier=urn:variant|cu
+
+# deleted: gone, and made anew at version 1
+PUT Practitioner/np4 practitioner.json
+PUT Practitioner/np4 practitioner2.json
+DELETE Practitioner/np4
+GET Practitioner/np4
+GET Practitioner/np4/_history/2
+DELETE Practitioner/np4
+PUT Practitioner/np4 practitioner.json
+GET Practitioner/np4
+
+# a type with a history beside it
+PUT Patient/vp2 patient.json
+PUT Patient/vp2 patient.json | If-Match: W/"5"
+DELETE Patient/vp2
+GET Patient/vp2
+GET Patient/vp2/_history
+PUT Patient/vp2 patient.json
+
+# Binary: its bytes go with it
+PUT Binary/nb1 binary.json
+PUT Binary/nb1 binary2.json
+GET Binary/nb1
+GET Binary/nb1/_history/2
+GET Binary/nb1/_history/1
+PUT Binary/nb1 binary-broken.json
+POST Binary binary-broken.json
+GET Binary?_id=nb1
+DELETE Binary/nb1
+GET Binary/nb1
+PUT Binary/nb1 binary.json
+GET Binary/nb1
+PUT Binary/nb2 binary.json
+DELETE Binary/nb2
+
+# bundles
+BUNDLE transaction.json
+BUNDLE batch.json
+GET Practitioner/nt1
+
+# the server's history, the statement, the maintenance
+GET _history
+GET metadata
+GET SearchParameter?base=Practitioner
+GET ../purgeschema/Practitioner
+GET ../purgeschema/Practitioner?before=2020-01-01T00:00:00Z
+GET ../purgeschema/Practitioner?before=nonsense
+GET ../purgeschema/Binary
+GET ../admin/undelete/Practitioner
+GET ../admin/undelete/Patient
+GET ../admin/createsearch/Practitioner/family
+GET ../admin/dropsearch/Practitioner/family
+GET ../admin/createsearch/Practitioner/family
+GET Practitioner?family=ohne&_sort=_id
+GET ../admin/variant-secret/reseed/Practitioner
+GET Practitioner?_sort=_id

@@ -71,6 +71,16 @@ procedure put_location(mutable out: ref[Array[u8]], base: Slice[u8], type: Slice
     put_decimal(out, version_id)
 }
 
+; base/Type/id: what a PUT to a type without history answers
+procedure put_plain_location(mutable out: ref[Array[u8]], base: Slice[u8], type: Slice[u8], id: Slice[u8])
+{
+    put_bytes(out, base)
+    put_bytes(out, "/")
+    put_bytes(out, type)
+    put_bytes(out, "/")
+    put_bytes(out, id)
+}
+
 ; What a store operation that did not store answers with.
 procedure failed_entry(mutable e: ref[JsonWriter], status: int)
 {
@@ -95,7 +105,11 @@ procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, re
         return answer_entry(e, "400", "", outcome.as_slice())
     var content Array[u8]()
     var status: Slice[u8] "200"
-    var stored resource_update(scope, type, resource, id, if_match, &content)
+    let versioned type_versioned(type)
+    var expected if_match
+    if versioned = false
+        expected := 0
+    var stored resource_update(scope, type, resource, id, expected, &content)
     if stored.status = NOT_FOUND
     {
         stored := resource_create(scope, type, resource, id, true, &content)
@@ -104,7 +118,10 @@ procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, re
     if stored.status <> STORED
         return failed_entry(e, stored.status)
     var location Array[u8]()
-    put_location(&location, base, type, id, stored.version_id)
+    if versioned
+        put_location(&location, base, type, id, stored.version_id)
+    else
+        put_plain_location(&location, base, type, id)
     answer_entry(e, status, location.as_slice(), content.as_slice())
 }
 

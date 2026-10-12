@@ -428,7 +428,10 @@ procedure resource_patch(req: ref[Request], mutable res: ref[Response]) mutable 
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_array() = false
         return send_error(res, "invalid", "Invalid JSON Patch", 400)
-    let wanted patch_if_match(trim(req.header("if-match")))
+    ; a type without history asks for no version
+    var wanted: i64 0 - 1
+    if type_versioned(type)
+        wanted := patch_if_match(trim(req.header("if-match")))
 
     ; upstream reads, changes and writes in one transaction; here the write
     ; names the version that was read, and what came between is read again

@@ -22,7 +22,13 @@ BASE="http://localhost:$PORT"
 export SP_ENCODING=utf-8
 die() { echo "upgrade-test: $*" >&2; exit 1; }
 SERVER_PID=""
-stop_server() { [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null; SERVER_PID=""; }
+# dotnet run leaves the server it started behind: whatever listens goes too
+stop_server() {
+  [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null && wait "$SERVER_PID" 2>/dev/null
+  SERVER_PID=""
+  local left; left=$(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null)
+  [ -z "$left" ] || { kill $left 2>/dev/null; sleep 1; }
+}
 trap 'stop_server; docker rm -f -v "$PG_NAME" > /dev/null 2>&1' EXIT
 psql_() { docker exec -i "$PG_NAME" psql -U postgres -v ON_ERROR_STOP=1 "$@"; }
 

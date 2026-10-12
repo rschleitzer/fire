@@ -23,14 +23,17 @@ procedure add_resource_routes(mutable app: ref[Router], page: ref[Page])
         app.get(pattern(page, type, "/$autocomplete"), &resource_autocomplete_get)
         app.get(pattern(page, type, "/{id}"), &resource_read)
         app.get(pattern(page, type, "/{id}/_history/{vid}"), &resource_vread)
-        app.get(pattern(page, type, "/{id}/_history"), &resource_history_get)
-        app.get(pattern(page, type, "/_history"), &resource_history_get)
+        if type_versioned(type)
+        {
+            app.get(pattern(page, type, "/{id}/_history"), &resource_history_get)
+            app.get(pattern(page, type, "/_history"), &resource_history_get)
+            app.post(pattern(page, type, "/{id}/$undelete"), &resource_undelete)
+            app.post(pattern(page, type, "/{id}/_rollback/{vid}"), &resource_rollback_post)
+        }
         app.put(pattern(page, type, "/{id}"), &resource_put)
         app.delete(pattern(page, type, "/{id}"), &resource_remove)
         app.put(pattern(page, type, ""), &resource_put_conditional)
         app.patch(pattern(page, type, "/{id}"), &resource_patch)
-        app.post(pattern(page, type, "/{id}/$undelete"), &resource_undelete)
-        app.post(pattern(page, type, "/{id}/_rollback/{vid}"), &resource_rollback_post)
         app.put(pattern(page, type, "/_history/{id}"), &resource_import)
         app.delete(pattern(page, type, ""), &resource_remove_conditional)
         app.post(pattern(page, type, "/{id}"), &resource_post_instance)
@@ -368,9 +371,16 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     }
 
     var content Array[u8]()
-    var stored resource_update(0, type, root, id, version_of(trim(req.header("if-match"))), &content)
+    ; a type without history asks for no version
+    var if_match: i64 0
+    if type_versioned(type)
+        if_match := version_of(trim(req.header("if-match")))
+    var stored resource_update(0, type, root, id, if_match, &content)
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
+    ; upstream's handler for a type without history catches nothing
+    if stored.status = UNREADABLE and type_versioned(type) = false
+        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     if stored.status = UNREADABLE
         return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status = NOT_FOUND
@@ -432,7 +442,10 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
     {
         var existing Array[u8]()
         put_bytes(&existing, found.as_slice().subslice(rows[0] as size_t, (rows[0] + rows[1]) as size_t))
-        let stored resource_update(0, type, root, existing.as_slice(), version_of(trim(req.header("if-match"))), &content)
+        var if_match: i64 0
+        if type_versioned(type)
+            if_match := version_of(trim(req.header("if-match")))
+        let stored resource_update(0, type, root, existing.as_slice(), if_match, &content)
         if stored.status = CONFLICT
             return send_error(res, "conflict", "Version conflict", 409)
         if stored.status = FAILED

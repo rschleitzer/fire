@@ -57,6 +57,8 @@ procedure resource_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[
 ; The ids of a type's deleted resources, a line each.
 procedure resource_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool
 {
+    if type_versioned(type) = false
+        return STORED
     if database_in_use() = DATABASE_POSTGRESQL
         return postgresql_deleted_ids(type, ids)
     FAILED
@@ -118,6 +120,8 @@ procedure database_ready() returns bool mutable pg_pool
 
 procedure resource_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
 {
+    if type_versioned(type) = false
+        return false
     if database_in_use() = DATABASE_POSTGRESQL
         return postgresql_is_deleted(scope, type, id)
     false
