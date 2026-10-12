@@ -1,0 +1,25 @@
+{
+  "resourceType": "Patient",
+  "id": "x1",
+  "text": {
+    "status": "generated",
+    "div": "<div xmlns=\"http://www.w3.org/1999/xhtml\">Tom &amp; Ann --> <b>O'Hara</b></div>"
+  },
+  "contained": [
+    {
+      "resourceType": "Practitioner",
+      "id": "c1",
+      "active": true,
+      "name": [{"family": "In <side> & \"out\""}]
+    }
+  ],
+  "active": false,
+  "name": [
+    {"family": "O'Hara <&> \"Ümlaut\" -->", "given": ["Tom", null, "Ann"], "_given": [null, {"id": "g2"}, {"id": "g3", "extension": [{"url": "http://example.org/x", "valueDecimal": 1.50}]}]}
+  ],
+  "_birthDate": {"extension": [{"url": "http://example.org/absent", "valueCode": "unknown"}]},
+  "gender": "male",
+  "_gender": {"id": "gg"},
+  "multipleBirthInteger": 2,
+  "generalPractitioner": [{"reference": "#c1"}]
+}

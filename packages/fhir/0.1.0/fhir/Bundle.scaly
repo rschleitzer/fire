@@ -398,10 +398,10 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
 {
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "invalid", "Invalid JSON", 400)
+        return send_error(req, res, "invalid", "Invalid JSON", 400)
     let root parsed.value
     if root.get("resourceType").is_text() = false or root.get("resourceType").text().equals("Bundle") = false
-        return send_error(res, "invalid", "Expected Bundle resource", 400)
+        return send_error(req, res, "invalid", "Expected Bundle resource", 400)
     var kind: Slice[u8] ""
     if root.get("type").is_text()
         kind := root.get("type").text()
@@ -411,7 +411,7 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
         var message Array[u8]()
         put_bytes(&message, "Unsupported bundle type: ")
         put_bytes(&message, kind)
-        return send_error(res, "invalid", message.as_slice(), 400)
+        return send_error(req, res, "invalid", message.as_slice(), 400)
     }
     let entries root.get("entry")
     var base Array[u8]()
@@ -429,7 +429,7 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
             if entries.item(i).is_object() and transaction_entry_valid(entries.item(i), &outcome) = false
             {
                 res.set_status(400)
-                return send_resource(res, outcome.as_slice())
+                return send_resource(req, res, outcome.as_slice())
             }
             i := i + 1
         }
@@ -437,7 +437,7 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
         {
             scope := transaction_begin()
             if scope = 0
-                return send_unavailable(res)
+                return send_unavailable(req, res)
         }
     }
 
@@ -470,13 +470,13 @@ procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_
             var message Array[u8]()
             put_bytes(&message, "Transaction processing failed: ")
             put_bytes(&message, e.bytes())
-            return send_error(res, "invalid", message.as_slice(), 400)
+            return send_error(req, res, "invalid", message.as_slice(), 400)
         }
         w.raw(e.bytes())
     }
     w.end_array()
     w.end_object()
     if scope <> 0 and transaction_end(scope, true) = false
-        return send_unavailable(res)
-    send_resource(res, w.bytes())
+        return send_unavailable(req, res)
+    send_resource(req, res, w.bytes())
 }

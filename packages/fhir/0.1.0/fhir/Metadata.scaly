@@ -6,8 +6,7 @@ use http.Response.Response
 
 procedure metadata(req: ref[Request], mutable res: ref[Response])
 {
-    res.header("Vary", "Accept")
-    res.send("application/fhir+json", model_capability())
+    send_resource(req, res, model_capability())
 }
 
 ; GET /fire/SearchParameter?base=<type>: the type's search parameters.
@@ -27,8 +26,7 @@ procedure search_parameters(req: ref[Request], mutable res: ref[Response])
         }
         i := i + 1
     }
-    res.header("Vary", "Accept")
-    res.send("application/fhir+json", model_search_parameters(base))
+    send_resource(req, res, model_search_parameters(base))
 }
 
 ; GET /healthz: the process is up. It does not ask the database.

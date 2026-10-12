@@ -2,6 +2,8 @@
 # answers must be the same, status and body. {A} and {B} are the ids of the
 # two Patients of the first turns.
 #   GET <path>            POST <path> <form>            BUNDLE <file of bundles/>
+#   AS <Accept field> <path>   (a GET that asks for another form than JSON)
+#   FILE <path from the root>  (a GET outside the server's own routes)
 #   PUT <path> <file of tools/turns/>  (one that both refuse: the second server
 #                                        is asked on what the first left)
 GET Patient
@@ -352,3 +354,87 @@ GET Provenance?recorded=2020-01-01T00:00:00%2B0
 GET Patient?Family=brown
 GET Patient?address_city=x
 GET Patient?_family=brown
+
+# The answer as XML and as a page: _format decides alone when it is there
+# (its name in any case), else the Accept field.
+GET Patient/p1?_format=xml
+GET Patient/p1?_format=text/xml
+GET Patient/p1?_format=application/xml
+GET Patient/p1?_format=application/fhir%2Bxml
+GET Patient/p1?_format=application/fhir+xml
+GET Patient/p1?_format=XML
+GET Patient/p1?_FORMAT=xml
+GET Patient/p1?_format=xml&_format=xml
+GET Patient/p1?_format=
+GET Patient/p1?_format=html
+GET Patient/p1?_format=text/html
+GET Patient/p1?_format=json
+GET Patient/p1?_format=nonsense
+GET Patient/nope?_format=xml
+GET Patient/nope?_format=html
+GET Patient?_format=xml&_count=3
+GET Patient?_format=html&_count=3
+GET Patient?_format=xml&nonsense=1
+GET Observation?_format=xml&_count=5
+GET Observation?_format=xml&_include=Observation:subject&_count=3
+GET Practitioner?_format=xml
+GET Provenance?_format=xml
+GET Binary?_format=xml
+GET Binary?_format=html
+GET Patient/p1/_history?_format=xml
+GET Patient/_history?_format=xml&_count=3
+GET _history?_format=xml&_count=3
+GET metadata?_format=xml
+GET metadata?_format=html
+GET SearchParameter?base=Patient&_format=xml
+AS application/fhir+xml Patient/p1
+AS application/xml Patient/p1
+AS text/xml Patient/p1
+AS text/html Patient/p1
+AS text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8 Patient/p1
+AS text/html,application/json Patient/p1
+AS application/fhir+xml,text/html Patient/p1
+AS APPLICATION/FHIR+XML Patient/p1
+AS */* Patient/p1
+AS text/html Patient/p1?_format=xml
+AS text/html Patient/p1?_format=json
+AS application/fhir+xml Patient/p1?_format=nonsense
+AS application/fhir+xml Patient?_count=2
+AS text/html Patient?_count=2
+AS text/html Patient/nope
+AS application/fhir+xml Patient?nonsense=1
+AS text/html metadata
+AS application/fhir+xml Observation/o1
+GET Patient/x1
+GET Patient/x1?_format=xml
+GET Patient/x1?_format=html
+GET Patient/px?_format=xml
+GET Patient/px?_format=html
+GET Binary/b9?_format=xml
+GET Binary/b9?_format=html
+AS text/html Binary/b9
+AS application/fhir+xml Binary/b9
+AS application/fhir+xml Patient/x1/_history
+AS application/fhir+xml Observation?_include=Observation:subject&_count=3
+AS application/fhir+xml Patient?_summary=count
+AS text/html Observation?_count=2
+AS application/fhir+xml _history?_count=3
+AS application/fhir+xml,application/json Patient/x1
+
+# The files of the web root, which the HTML form refers to.
+FILE /
+FILE /index.html
+FILE /js/Patient.js
+FILE /js/Bundle.js
+FILE /js/Elements.js
+FILE /js/Nope.js
+FILE /js
+FILE /js/
+FILE /css/fhir.css
+FILE /icon_element.gif
+FILE /tbl_spacer.png
+FILE /nope.html
+FILE /nope
+FILE /css/../index.html
+FILE /fire/index.html
+FILE /healthz

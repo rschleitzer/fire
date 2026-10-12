@@ -6,12 +6,12 @@
 use http.Request.Request
 use http.Response.Response
 
-procedure send_information(mutable res: ref[Response], diagnostics: Slice[u8])
+procedure send_information(req: ref[Request], mutable res: ref[Response], diagnostics: Slice[u8])
 {
     var out Array[u8]()
     write_outcome(&out, "information", "informational", diagnostics)
     res.set_status(200)
-    send_resource(res, out.as_slice())
+    send_resource(req, res, out.as_slice())
 }
 
 ; A route of a type the server does not store has no answer: upstream has
@@ -68,9 +68,9 @@ procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, 
     var count Array[i64]()
     let status resource_purge(type, before.as_slice(), &shown, &count)
     if status = REFUSED
-        return send_error(res, "invalid", "Query parameter 'before' must be an ISO 8601 instant", 400)
+        return send_error(req, res, "invalid", "Query parameter 'before' must be an ISO 8601 instant", 400)
     if status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     var message Array[u8]()
     put_bytes(&message, "Purge completed for ")
     put_bytes(&message, type)
@@ -83,7 +83,7 @@ procedure purge(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, 
         put_bytes(&message, shown.as_slice())
     }
     put_bytes(&message, " removed")
-    send_information(res, message.as_slice())
+    send_information(req, res, message.as_slice())
 }
 
 ; GET /admin/undelete/{type}: every deleted resource of the type back. A
@@ -96,7 +96,7 @@ procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg
     {
         var ids Array[u8]()
         if resource_deleted_ids(type, &ids) <> STORED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         var at: size_t 0
         while at < ids.length
         {
@@ -105,7 +105,7 @@ procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg
             var content Array[u8]()
             let back undelete(type, id, &content)
             if back.status = FAILED
-                return send_unavailable(res)
+                return send_unavailable(req, res)
             if back.status = STORED
                 restored := restored + 1
         }
@@ -115,22 +115,22 @@ procedure undelete_all(req: ref[Request], mutable res: ref[Response]) mutable pg
     put_bytes(&message, " ")
     put_bytes(&message, type)
     put_bytes(&message, " resource(s) restored")
-    send_information(res, message.as_slice())
+    send_information(req, res, message.as_slice())
 }
 
 ; GET /admin/indexes/create and /admin/indexes/drop
 procedure indexes_create(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     if database_indexes(true) = false
-        return send_unavailable(res)
-    send_information(res, "Indexes created")
+        return send_unavailable(req, res)
+    send_information(req, res, "Indexes created")
 }
 
 procedure indexes_drop(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
 {
     if database_indexes(false) = false
-        return send_unavailable(res)
-    send_information(res, "Indexes dropped")
+        return send_unavailable(req, res)
+    send_information(req, res, "Indexes dropped")
 }
 
 ; GET /admin/createsearch/{type}/{parameter} and /admin/dropsearch/...: the
@@ -146,9 +146,9 @@ procedure search_table_route(req: ref[Request], mutable res: ref[Response], crea
     ; a parameter the type has none of: upstream throws and answers nothing
     ; of its own
     if status = REFUSED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     if status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     var message Array[u8]()
     put_bytes(&message, "Search table '")
     put_bytes(&message, parameter)
@@ -157,7 +157,7 @@ procedure search_table_route(req: ref[Request], mutable res: ref[Response], crea
     else
         put_bytes(&message, "' dropped for ")
     put_bytes(&message, type)
-    send_information(res, message.as_slice())
+    send_information(req, res, message.as_slice())
 }
 
 procedure create_search(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread, tds_pool
@@ -171,7 +171,7 @@ procedure seed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, s
 {
     var totals Array[i64]()
     seed_load(0, "", &totals)
-    send_information(res, "Seed data loaded")
+    send_information(req, res, "Seed data loaded")
 }
 
 ; GET /admin/{secret}/reseed/{type}: everything of a type gone and put in
@@ -188,10 +188,10 @@ procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool,
         var refusal Array[u8]()
         put_bytes(&refusal, "Unknown resource type ")
         put_bytes(&refusal, type)
-        return send_error(res, "not-supported", refusal.as_slice(), 400)
+        return send_error(req, res, "not-supported", refusal.as_slice(), 400)
     }
     if resource_truncate(type) = false
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     var totals Array[i64]()
     seed_load(0, type, &totals)
     var message Array[u8]()
@@ -209,5 +209,5 @@ procedure reseed(req: ref[Request], mutable res: ref[Response]) mutable pg_pool,
     else
         write_outcome(&out, "information", "informational", message.as_slice())
     res.set_status(200)
-    send_resource(res, out.as_slice())
+    send_resource(req, res, out.as_slice())
 }

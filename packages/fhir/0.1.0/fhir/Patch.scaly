@@ -427,7 +427,7 @@ procedure resource_patch(req: ref[Request], mutable res: ref[Response]) mutable 
     let id req.param("id")
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_array() = false
-        return send_error(res, "invalid", "Invalid JSON Patch", 400)
+        return send_error(req, res, "invalid", "Invalid JSON Patch", 400)
     ; a type without history asks for no version
     var wanted: i64 0 - 1
     if type_versioned(type)
@@ -442,34 +442,34 @@ procedure resource_patch(req: ref[Request], mutable res: ref[Response]) mutable 
         var document Array[u8]()
         let read resource_select(0, type, id, 0, &document)
         if read.status = FAILED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         if read.status <> STORED
-            return not_found(res, type, id, "")
+            return not_found(req, res, type, id, "")
         if wanted >= 0 and wanted <> read.version_id
         {
             var message Array[u8]()
             put_bytes(&message, "Version conflict: current version is ")
             put_decimal(&message, read.version_id)
-            return send_error(res, "conflict", message.as_slice(), 409)
+            return send_error(req, res, "conflict", message.as_slice(), 409)
         }
         var problem Array[u8]()
         if apply_patch(&document, parsed.value, &problem) = false
-            return send_error(res, "invalid", problem.as_slice(), 400)
+            return send_error(req, res, "invalid", problem.as_slice(), 400)
         let changed JsonValue.parse(document.as_slice())
         if changed.ok() = false or changed.value.is_object() = false
-            return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+            return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
         var content Array[u8]()
         let stored resource_update(0, type, changed.value, id, read.version_id, &content)
         if stored.status = CONFLICT
             continue
         if stored.status = UNREADABLE
-            return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
+            return send_error(req, res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
         if stored.status = NOT_FOUND
-            return not_found(res, type, id, "")
+            return not_found(req, res, type, id, "")
         if stored.status <> STORED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         version_fields(res, "", type, id, stored.version_id, stored.seconds)
         return send_stored(req, res, content.as_slice())
     }
-    send_error(res, "conflict", "Version conflict", 409)
+    send_error(req, res, "conflict", "Version conflict", 409)
 }

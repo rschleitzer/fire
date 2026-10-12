@@ -209,7 +209,7 @@ procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable 
         {
             let result resource_history_keyed(0, entry(resource_types(), 32, t), "", 10000, 0, &found, &rows, &keys)
             if result.status <> STORED
-                return send_unavailable(res)
+                return send_unavailable(req, res)
         }
         t := t + 1
     }
@@ -304,5 +304,5 @@ procedure system_history(req: ref[Request], mutable res: ref[Response]) mutable 
         w.end_array()
     }
     w.end_object()
-    send_resource(res, w.bytes())
+    send_resource(req, res, w.bytes())
 }

@@ -31,6 +31,9 @@ procedure serve_model(model: Slice[u8]) returns int mutable pg_pool, sqlite_thre
     }
 
     var app Router.create(page)
+    var files web_root()
+    if Directory.exists(files)
+        app.before("/", &web_file)
     app.get(pattern(page, "metadata", ""), &metadata)
     app.get(pattern(page, "SearchParameter", ""), &search_parameters)
     app.get(pattern(page, "_history", ""), &system_history)

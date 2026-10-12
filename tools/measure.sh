@@ -150,6 +150,7 @@ start_server() {
   # the seed data both servers load into a database they create, and the
   # secret of the reseed route
   export SeedDataPath="$ROOT/tools/turns/seed"
+  export ASPNETCORE_WEBROOT="$ROOT/upstream/server/wwwroot"
   export ReseedSecret=turns-secret
   export externalUrl="$BASE/fire"
   if [ "$1" = scaly ]; then
@@ -410,12 +411,14 @@ asks() {
     n=$((n+1)); out="$WORK/turns.$1.ask.$n"
     path=${path//\{A\}/$2}; path=${path//\{B\}/$3}
     case "$method" in
-      GET) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" "$BASE/fire/$path" > "$out.status" ;;
-      POST) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
+      GET) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" "$BASE/fire/$path" > "$out.status" ;;
+      FILE) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' "$BASE$path" > "$out.status" ;;
+      AS) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $path" "$BASE/fire/$rest" > "$out.status" ;;
+      POST) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" -X POST \
               -H 'Content-Type: application/x-www-form-urlencoded' --data "$rest" "$BASE/fire/$path" > "$out.status" ;;
-      PUT) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X PUT \
+      PUT) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" -X PUT \
               -H 'Content-Type: application/fhir+json' --data-binary @"$ROOT/tools/turns/$rest" "$BASE/fire/$path" > "$out.status" ;;
-      BUNDLE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" -X POST \
+      BUNDLE) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" -X POST \
               -H 'Content-Type: application/fhir+json' --data-binary @"$ROOT/tools/turns/bundles/$path" "$BASE/fire" > "$out.status" ;;
     esac
     echo "$method $path $rest" > "$out.request"
@@ -445,8 +448,8 @@ steps() {
     body="$WORK/turns.$1.$label.body.json"
     if [ -n "$rest" ]; then sed "s/zz{S}/zz$1/g" "$ROOT/tools/turns/$rest" > "$body"; else : > "$body"; fi
     case "$method" in
-      GET|DELETE) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" "$BASE/fire/$path" > "$out.status" ;;
-      *) curl -s -o "$out.body" -w '%{http_code}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" \
+      GET|DELETE) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" "$BASE/fire/$path" > "$out.status" ;;
+      *) curl -s -o "$out.body" -w '%{http_code} %{content_type}\n' -H "Accept: $ACCEPT" ${field:+-H "$field"} -X "$method" \
            -H 'Content-Type: application/fhir+json' --data-binary @"$body" "$BASE/fire/$path" > "$out.status" ;;
     esac
     echo "$method $path $rest" > "$out.request"

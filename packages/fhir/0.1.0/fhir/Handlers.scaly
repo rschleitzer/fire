@@ -162,9 +162,9 @@ procedure send_stored(req: ref[Request], mutable res: ref[Response], content: Sl
     {
         var outcome Array[u8]()
         write_outcome(&outcome, "information", "informational", "Operation successful")
-        return send_resource(res, outcome.as_slice())
+        return send_resource(req, res, outcome.as_slice())
     }
-    send_resource(res, content)
+    send_resource(req, res, content)
 }
 
 ; The version a conditional field names (W/"3", "3", 3); 0 when none.
@@ -178,7 +178,7 @@ function version_of(field: Slice[u8]) returns i64
     digits_of(field.slice_from(at))
 }
 
-procedure not_found(mutable res: ref[Response], type: Slice[u8], id: Slice[u8], version: Slice[u8])
+procedure not_found(req: ref[Request], mutable res: ref[Response], type: Slice[u8], id: Slice[u8], version: Slice[u8])
 {
     var message Array[u8]()
     message.add(type)
@@ -190,17 +190,17 @@ procedure not_found(mutable res: ref[Response], type: Slice[u8], id: Slice[u8], 
         message.add(version)
     }
     put_bytes(&message, " not found")
-    send_error(res, "not-found", message.as_slice(), 404)
+    send_error(req, res, "not-found", message.as_slice(), 404)
 }
 
-procedure type_mismatch(mutable res: ref[Response], type: Slice[u8], got: Slice[u8])
+procedure type_mismatch(req: ref[Request], mutable res: ref[Response], type: Slice[u8], got: Slice[u8])
 {
     var message Array[u8]()
     put_bytes(&message, "Resource type mismatch: expected ")
     message.add(type)
     put_bytes(&message, ", got ")
     message.add(got)
-    send_error(res, "invalid", message.as_slice(), 400)
+    send_error(req, res, "invalid", message.as_slice(), 400)
 }
 
 ; POST /fire/<type>
@@ -209,19 +209,19 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
     let type type_of(req)
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "invalid", "Invalid JSON", 400)
+        return send_error(req, res, "invalid", "Invalid JSON", 400)
     let root parsed.value
     let resource_type root.get("resourceType")
     if resource_type.is_text() = false
-        return send_error(res, "invalid", "Missing required field: resourceType", 400)
+        return send_error(req, res, "invalid", "Missing required field: resourceType", 400)
     if resource_type.text().equals(type) = false
-        return type_mismatch(res, type, resource_type.text())
+        return type_mismatch(req, res, type, resource_type.text())
 
     var outcome Array[u8]()
     if acceptable(type, root, &outcome) = false
     {
         res.set_status(400)
-        return send_resource(res, outcome.as_slice())
+        return send_resource(req, res, outcome.as_slice())
     }
 
     ; conditional create: If-None-Exist names a search; one match is the
@@ -240,25 +240,25 @@ procedure resource_post(req: ref[Request], mutable res: ref[Response]) mutable p
         var problem Array[u8]()
         let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
         if matches.status = FAILED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         if matches.status <> STORED
-            return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+            return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
         if matches.version_id = 1
-            return send_resource(res, found.as_slice().subslice(rows[2] as size_t, (rows[2] + rows[3]) as size_t))
+            return send_resource(req, res, found.as_slice().subslice(rows[2] as size_t, (rows[2] + rows[3]) as size_t))
         if matches.version_id > 1
-            return send_error(res, "duplicate", "Multiple matches found for conditional create", 412)
+            return send_error(req, res, "duplicate", "Multiple matches found for conditional create", 412)
     }
 
     var id_bytes u8[36]
     var id Slice[u8](36, &id_bytes[0])
     if new_uuid(id) = false
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var content Array[u8]()
     let stored resource_create(0, type, root, id, false, &content)
     if stored.status = UNREADABLE
-        return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
+        return send_error(req, res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     res.set_status(201)
     version_fields(res, trim(req.header("host")), type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
@@ -272,12 +272,12 @@ procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable p
     var content Array[u8]()
     let row resource_select(0, type, id, 0, &content)
     if row.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if row.status = NOT_FOUND
     {
         if resource_is_deleted(0, type, id)
-            return send_error(res, "deleted", "Resource has been deleted", 410)
-        return not_found(res, type, id, "")
+            return send_error(req, res, "deleted", "Resource has been deleted", 410)
+        return not_found(req, res, type, id, "")
     }
     let if_none_match trim(req.header("if-none-match"))
     if if_none_match.length > 0 and version_of(if_none_match) = row.version_id
@@ -288,7 +288,7 @@ procedure resource_read(req: ref[Request], mutable res: ref[Response]) mutable p
     version_fields(res, "", type, id, row.version_id, row.seconds)
     if send_raw(type, req, res, content.as_slice())
         return
-    send_resource(res, content.as_slice())
+    send_resource(req, res, content.as_slice())
 }
 
 ; GET /fire/<type>/{id}/_history/{vid}
@@ -306,19 +306,19 @@ procedure resource_vread(req: ref[Request], mutable res: ref[Response]) mutable 
         i := i + 1
     }
     if all_digits = false
-        return send_error(res, "invalid", "Invalid version id", 400)
+        return send_error(req, res, "invalid", "Invalid version id", 400)
     var content Array[u8]()
     var row StoreResult(NOT_FOUND, 0, 0)
     if digits_of(vid) > 0
         row := resource_select(0, type, id, digits_of(vid), &content)
     if row.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if row.status = NOT_FOUND
-        return not_found(res, type, id, vid)
+        return not_found(req, res, type, id, vid)
     version_fields(res, "", type, id, row.version_id, row.seconds)
     if send_raw(type, req, res, content.as_slice())
         return
-    send_resource(res, content.as_slice())
+    send_resource(req, res, content.as_slice())
 }
 
 ; Letters, digits, '-' and '.', at most 64 of them.
@@ -344,13 +344,13 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     let type type_of(req)
     let id req.param("id")
     if valid_id(id) = false
-        return send_error(res, "invalid", "Invalid resource ID format", 400)
+        return send_error(req, res, "invalid", "Invalid resource ID format", 400)
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "invalid", "Invalid JSON", 400)
+        return send_error(req, res, "invalid", "Invalid JSON", 400)
     let root parsed.value
     if root.get("resourceType").text().equals(type) = false
-        return type_mismatch(res, type, root.get("resourceType").text())
+        return type_mismatch(req, res, type, root.get("resourceType").text())
     let body_id root.get("id")
     if body_id.is_text() and body_id.text().equals(id) = false
     {
@@ -360,14 +360,14 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
         put_bytes(&message, ") does not match URL ID (")
         message.add(id)
         put_bytes(&message, ")")
-        return send_error(res, "invalid", message.as_slice(), 400)
+        return send_error(req, res, "invalid", message.as_slice(), 400)
     }
 
     var outcome Array[u8]()
     if acceptable(type, root, &outcome) = false
     {
         res.set_status(400)
-        return send_resource(res, outcome.as_slice())
+        return send_resource(req, res, outcome.as_slice())
     }
 
     var content Array[u8]()
@@ -377,9 +377,9 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
         if_match := version_of(trim(req.header("if-match")))
     var stored resource_update(0, type, root, id, if_match, &content)
     if stored.status = CONFLICT
-        return send_error(res, "conflict", "Version conflict", 409)
+        return send_error(req, res, "conflict", "Version conflict", 409)
     if stored.status = UNREADABLE
-        return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
+        return send_error(req, res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status = NOT_FOUND
     {
         ; update as create: a PUT to an id that is not there creates it
@@ -392,7 +392,7 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
         }
     }
     if stored.status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     version_fields(res, "", type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
 }
@@ -406,18 +406,18 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
 {
     let type type_of(req)
     if req.query.length = 0
-        return send_error(res, "invalid", "Conditional update requires search parameters", 400)
+        return send_error(req, res, "invalid", "Conditional update requires search parameters", 400)
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "invalid", "Invalid JSON", 400)
+        return send_error(req, res, "invalid", "Invalid JSON", 400)
     let root parsed.value
     if root.get("resourceType").text().equals(type) = false
-        return type_mismatch(res, type, root.get("resourceType").text())
+        return type_mismatch(req, res, type, root.get("resourceType").text())
     var outcome Array[u8]()
     if acceptable(type, root, &outcome) = false
     {
         res.set_status(400)
-        return send_resource(res, outcome.as_slice())
+        return send_resource(req, res, outcome.as_slice())
     }
 
     var text Array[u8]()
@@ -428,11 +428,11 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
     var problem Array[u8]()
     let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2, 0, &found, &rows, &problem)
     if matches.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if matches.status <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     if matches.version_id > 1
-        return send_error(res, "multiple-matches", "Multiple matches found for conditional update", 412)
+        return send_error(req, res, "multiple-matches", "Multiple matches found for conditional update", 412)
 
     var content Array[u8]()
     if matches.version_id = 1
@@ -444,11 +444,11 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
             if_match := version_of(trim(req.header("if-match")))
         let stored resource_update(0, type, root, existing.as_slice(), if_match, &content)
         if stored.status = CONFLICT
-            return send_error(res, "conflict", "Version conflict", 409)
+            return send_error(req, res, "conflict", "Version conflict", 409)
         if stored.status = FAILED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         if stored.status <> STORED
-            return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+            return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
         version_fields(res, "", type, existing.as_slice(), stored.version_id, stored.seconds)
         return send_stored(req, res, content.as_slice())
     }
@@ -463,12 +463,12 @@ procedure resource_put_conditional(req: ref[Request], mutable res: ref[Response]
         named := true
     }
     else if new_uuid(id) = false
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     let stored resource_create(0, type, root, id, named, &content)
     if stored.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if stored.status <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     res.set_status(201)
     version_fields(res, trim(req.header("host")), type, id, stored.version_id, stored.seconds)
     send_stored(req, res, content.as_slice())
@@ -480,7 +480,7 @@ procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Respon
 {
     let type type_of(req)
     if req.query.length = 0
-        return send_error(res, "invalid", "Conditional delete requires search parameters", 400)
+        return send_error(req, res, "invalid", "Conditional delete requires search parameters", 400)
     var text Array[u8]()
     var cells Array[i64]()
     parse_pairs(req.query, &text, &cells)
@@ -489,15 +489,15 @@ procedure resource_remove_conditional(req: ref[Request], mutable res: ref[Respon
     var problem Array[u8]()
     let matches resource_search(0, type, text.as_slice(), cells.as_slice(), 2147483647, 0, &found, &rows, &problem)
     if matches.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if matches.status <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var i: size_t 0
     while i * 4 < rows.length
     {
         let id found.as_slice().subslice(rows[i * 4] as size_t, (rows[i * 4] + rows[i * 4 + 1]) as size_t)
         if resource_delete(0, type, id) = FAILED
-            return send_unavailable(res)
+            return send_unavailable(req, res)
         i := i + 1
     }
     res.set_status(204)
@@ -629,7 +629,7 @@ procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response
         i := i + 1
     }
     if chosen = false
-        return send_error(res, "required", "A search parameter is required", 400)
+        return send_error(req, res, "required", "A search parameter is required", 400)
     if named = false
         property := param
     var found Array[u8]()
@@ -637,7 +637,7 @@ procedure resource_autocomplete_get(req: ref[Request], mutable res: ref[Response
     let status resource_autocomplete(type, param, value, property, count, offset, &found, &rows)
     ; a statement the database refuses is upstream's DbException: unavailable
     if status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     var out Array[u8]()
     put_bytes(&out, "[")
     var r: size_t 0
@@ -663,7 +663,7 @@ procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutab
     var content Array[u8]()
     let stored undelete(type, id, &content)
     if stored.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if stored.status <> STORED
     {
         var message Array[u8]()
@@ -671,10 +671,10 @@ procedure resource_undelete(req: ref[Request], mutable res: ref[Response]) mutab
         put_bytes(&message, "/")
         message.add(id)
         put_bytes(&message, " not found or not deleted")
-        return send_error(res, "not-found", message.as_slice(), 404)
+        return send_error(req, res, "not-found", message.as_slice(), 404)
     }
     version_fields(res, "", type, id, stored.version_id, stored.seconds)
-    send_resource(res, content.as_slice())
+    send_resource(req, res, content.as_slice())
 }
 
 ; A deleted resource back: the state of its last history row as a new
@@ -708,11 +708,11 @@ procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) 
     let id req.param("id")
     let vid req.param("vid")
     if whole_number(vid) = false
-        return send_error(res, "invalid", "Invalid version id", 400)
+        return send_error(req, res, "invalid", "Invalid version id", 400)
     var content Array[u8]()
     let result resource_rollback(0, type, id, whole_value(vid), &content)
     if result.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if result.status <> STORED
     {
         var message Array[u8]()
@@ -720,10 +720,10 @@ procedure resource_rollback_post(req: ref[Request], mutable res: ref[Response]) 
         put_bytes(&message, "/")
         message.add(id)
         put_bytes(&message, " rollback failed")
-        return send_error(res, "not-found", message.as_slice(), 404)
+        return send_error(req, res, "not-found", message.as_slice(), 404)
     }
     version_fields(res, "", type, id, result.version_id, result.seconds)
-    send_resource(res, content.as_slice())
+    send_resource(req, res, content.as_slice())
 }
 
 ; PUT /fire/<type>/_history/{id}: a version taken in as it comes, as
@@ -735,11 +735,11 @@ procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable
     let id req.param("id")
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false
-        return send_error(res, "invalid", "Invalid JSON", 400)
+        return send_error(req, res, "invalid", "Invalid JSON", 400)
     var current Array[u8]()
     let there resource_select(0, type, id, 0, &current)
     if there.status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     var content Array[u8]()
     var stored StoreResult(FAILED, 0, 0)
     if there.status = STORED
@@ -747,9 +747,9 @@ procedure resource_import(req: ref[Request], mutable res: ref[Response]) mutable
     else
         stored := resource_create(0, type, parsed.value, id, true, &content)
     if stored.status = UNREADABLE
-        return send_error(res, "exception", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 500)
+        return send_error(req, res, "exception", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 500)
     if stored.status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     res.set_status(200)
     res.send("", "")
 }
@@ -761,16 +761,16 @@ procedure resource_remove(req: ref[Request], mutable res: ref[Response]) mutable
     let id req.param("id")
     let status resource_delete(0, type, id)
     if status = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if status = NOT_FOUND
-        return not_found(res, type, id, "")
+        return not_found(req, res, type, id, "")
     res.set_status(204)
     res.send("", "")
 }
 
 ; POST /fire/<type>/{id}
 procedure resource_post_instance(req: ref[Request], mutable res: ref[Response])
-    send_error(res, "invalid", "POST to instance endpoint is not allowed", 405)
+    send_error(req, res, "invalid", "POST to instance endpoint is not allowed", 405)
 
 ; One link of a bundle: relation and url.
 procedure bundle_link(mutable w: ref[JsonWriter], relation: Slice[u8], url: Slice[u8])
@@ -839,14 +839,14 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
     if whole_number(first_value(text.as_slice(), cells.as_slice(), "_offset"))
         offset := whole_value(first_value(text.as_slice(), cells.as_slice(), "_offset"))
     if count < 0 or offset < 0
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var found Array[u8]()
     var rows Array[i64]()
     let result resource_history(0, type, id, count, offset, &found, &rows)
     if result.status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if id.length > 0 and rows.length = 0
-        return not_found(res, type, id, "")
+        return not_found(req, res, type, id, "")
 
     var base Array[u8]()
     put_bytes(&base, "http://")
@@ -924,7 +924,7 @@ procedure resource_history_get(req: ref[Request], mutable res: ref[Response]) mu
         w.end_array()
     }
     w.end_object()
-    send_resource(res, w.bytes())
+    send_resource(req, res, w.bytes())
 }
 
 ; The search of a type by the pairs in text and cells, answered as a
@@ -953,16 +953,16 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     var chained_cells Array[i64]()
     let chains resolve_chains(type, text, cells, &chained_text, &chained_cells)
     if chains = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if chains <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var plain_text Array[u8]()
     var plain_cells Array[i64]()
     let reverse resolve_reverse_chains(text, cells, chained_text.as_slice(), chained_cells.as_slice(), &plain_text, &plain_cells)
     if reverse = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if reverse <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
 
     var found Array[u8]()
     var rows Array[i64]()
@@ -1000,19 +1000,19 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     else
         result := resource_search(0, type, plain_text.as_slice(), plain_cells.as_slice(), count, offset, &found, &rows, &problem)
     if result.status = REFUSED
-        return send_error(res, "invalid", problem.as_slice(), 400)
+        return send_error(req, res, "invalid", problem.as_slice(), 400)
     if result.status = BROKEN
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     if result.status <> STORED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     let total result.version_id
     var included Array[u8]()
     var included_cells Array[i64]()
     let includes resolve_includes(type, text, cells, found.as_slice(), rows.as_slice(), &included, &included_cells)
     if includes = FAILED
-        return send_unavailable(res)
+        return send_unavailable(req, res)
     if includes <> STORED
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
+        return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
 
     ; http://host/fire/Type, and the page asked for
     var root Array[u8]()
@@ -1105,7 +1105,7 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     }
     w.end_array()
     w.end_object()
-    send_resource(res, w.bytes())
+    send_resource(req, res, w.bytes())
 }
 
 ; GET /fire/<type>?...

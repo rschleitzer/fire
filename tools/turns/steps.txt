@@ -248,3 +248,14 @@ GET Binary/zz{S}-bi
 PUT Binary/_history/zz{S}-bi binary-update.json
 GET Binary/zz{S}-bi
 GET Binary/zz{S}-bi/_history
+
+# The answer to a write in another form than JSON.
+PUT Patient/zz{S}-form?_format=xml steps/patient-cu.json
+PUT Patient/zz{S}-form?_format=html steps/patient-cu2.json
+PUT Patient/zz{S}-form?_format=xml steps/broken.json
+PUT Patient/zz{S}-form?_format=xml refused/Patient.calendar.json
+PUT Patient/zz{S}-form?_format=html steps/patient-cu.json | Prefer: return=OperationOutcome
+POST Patient?_format=xml refused/Patient.calendar.json
+DELETE Patient/zz{S}-form?_format=xml
+GET Patient/zz{S}-form?_format=xml
+GET Patient/zz{S}-form?_format=html

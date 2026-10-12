@@ -24,6 +24,7 @@ define fhir
     module Json
     module Instant
     module Uuid
+    module Xml
     module FhirResult
     module Resource
     module Tables
@@ -41,6 +42,7 @@ define fhir
     module Chains
     module Composite
     module Subset
+    module Files
     module Metadata
     module Handlers
     module SystemHistory

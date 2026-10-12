@@ -1,0 +1,224 @@
+; A resource as XML, the way upstream's FhirXmlSerializer writes it: the
+; members in the document's order, a primitive as an element with a value
+; attribute, its `_name` twin as that element's children, an object as an
+; element of the member's name -- a resource inside another one too, so
+; only a contained resource and the document itself show their type.
+
+use json.Value.JsonValue
+
+procedure put_indent(mutable out: ref[Array[u8]], depth: int)
+{
+    var k 0
+    while k < depth * 2
+    {
+        out.add(32 as u8)
+        k := k + 1
+    }
+}
+
+; text as the value of an attribute (.NET's SecurityElement.Escape).
+procedure put_xml_escaped(mutable out: ref[Array[u8]], text: Slice[u8])
+{
+    var i: size_t 0
+    while i < text.length
+    {
+        let b text[i]
+        i := i + 1
+        if b = 60
+        {
+            put_bytes(out, "&lt;")
+            continue
+        }
+        if b = 62
+        {
+            put_bytes(out, "&gt;")
+            continue
+        }
+        if b = 34
+        {
+            put_bytes(out, "&quot;")
+            continue
+        }
+        if b = 39
+        {
+            put_bytes(out, "&apos;")
+            continue
+        }
+        if b = 38
+        {
+            put_bytes(out, "&amp;")
+            continue
+        }
+        out.add(b)
+    }
+}
+
+; <name> or </name> and the end of the line.
+procedure put_xml_tag(mutable out: ref[Array[u8]], name: Slice[u8], closing: bool)
+{
+    out.add(60 as u8)
+    if closing
+        out.add(47 as u8)
+    put_bytes(out, name)
+    out.add(62 as u8)
+    out.add(10 as u8)
+}
+
+; An element of the members of obj, when it has any.
+procedure put_xml_element(mutable out: ref[Array[u8]], name: Slice[u8], obj: JsonValue, depth: int)
+{
+    if obj.is_object() = false or obj.length() = 0
+        return
+    put_indent(out, depth)
+    put_xml_tag(out, name, false)
+    put_xml_properties(out, obj, depth + 1)
+    put_indent(out, depth)
+    put_xml_tag(out, name, true)
+}
+
+; What `_name` holds where `name` has no value of its own.
+procedure put_xml_shadow(mutable out: ref[Array[u8]], name: Slice[u8], shadow: JsonValue, depth: int)
+{
+    if shadow.is_array()
+    {
+        var i: size_t 0
+        while i < shadow.length()
+        {
+            put_xml_element(out, name, shadow.item(i), depth)
+            i := i + 1
+        }
+        return
+    }
+    put_xml_element(out, name, shadow, depth)
+}
+
+procedure put_xml_value(mutable out: ref[Array[u8]], name: Slice[u8], value: JsonValue, shadow: JsonValue, depth: int)
+{
+    if value.is_null()
+        return put_xml_shadow(out, name, shadow, depth)
+    if name.equals("div")
+    {
+        put_indent(out, depth)
+        put_bytes(out, value.text())
+        out.add(10 as u8)
+        return
+    }
+    if value.is_object()
+    {
+        put_indent(out, depth)
+        if name.equals("contained")
+        {
+            put_bytes(out, "<contained>")
+            let contained value.get("resourceType")
+            if contained.is_text()
+            {
+                out.add(10 as u8)
+                put_indent(out, depth + 1)
+                put_xml_tag(out, contained.text(), false)
+                put_xml_properties(out, value, depth + 2)
+                put_indent(out, depth + 1)
+                put_xml_tag(out, contained.text(), true)
+            }
+            put_indent(out, depth)
+            return put_xml_tag(out, "contained", true)
+        }
+        put_xml_tag(out, name, false)
+        put_xml_properties(out, value, depth + 1)
+        put_indent(out, depth)
+        return put_xml_tag(out, name, true)
+    }
+    ; (a list inside a list: upstream's serializer throws)
+    if value.is_array()
+        return
+    put_indent(out, depth)
+    out.add(60 as u8)
+    put_bytes(out, name)
+    put_bytes(out, " value=\"")
+    if value.is_bool()
+    {
+        if value.as_bool()
+            put_bytes(out, "true")
+        else
+            put_bytes(out, "false")
+    }
+    if value.is_number()
+        put_bytes(out, value.number_text())
+    if value.is_text()
+        put_xml_escaped(out, value.text())
+    out.add(34 as u8)
+    if shadow.is_object() and shadow.length() > 0
+    {
+        out.add(62 as u8)
+        out.add(10 as u8)
+        put_xml_properties(out, shadow, depth + 1)
+        put_indent(out, depth)
+        return put_xml_tag(out, name, true)
+    }
+    put_bytes(out, "/>")
+    out.add(10 as u8)
+}
+
+; The members of obj as elements: each with its `_name` twin, then the
+; twins that stand alone.
+procedure put_xml_properties(mutable out: ref[Array[u8]], obj: JsonValue, depth: int)
+{
+    var i: size_t 0
+    while i < obj.length()
+    {
+        let name obj.key_at(i)
+        let value obj.value_at(i)
+        i := i + 1
+        if name.equals("resourceType") or name.starts_with("_")
+            continue
+        var twin Array[u8]()
+        twin.add(95 as u8)
+        put_bytes(&twin, name)
+        let shadow obj.get(twin.as_slice())
+        if value.is_array()
+        {
+            var k: size_t 0
+            while k < value.length()
+            {
+                var item_shadow JsonValue.Null
+                if shadow.is_array() and k < shadow.length()
+                    item_shadow := shadow.item(k)
+                put_xml_value(out, name, value.item(k), item_shadow, depth)
+                k := k + 1
+            }
+            continue
+        }
+        if value.is_null() = false
+            put_xml_value(out, name, value, shadow, depth)
+    }
+    i := 0
+    while i < obj.length()
+    {
+        let name obj.key_at(i)
+        let value obj.value_at(i)
+        i := i + 1
+        if name.starts_with("_") = false or name.length = 1
+            continue
+        if obj.has(name.slice_from(1))
+            continue
+        put_xml_shadow(out, name.slice_from(1), value, depth)
+    }
+}
+
+; content, a resource in JSON, as an XML document.
+procedure put_xml(mutable out: ref[Array[u8]], content: Slice[u8])
+{
+    put_bytes(out, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+    out.add(10 as u8)
+    let parsed JsonValue.parse(content)
+    if parsed.ok() = false
+        return
+    let type parsed.value.get("resourceType")
+    if type.is_text() = false
+        return
+    out.add(60 as u8)
+    put_bytes(out, type.text())
+    put_bytes(out, " xmlns=\"http://hl7.org/fhir\">")
+    out.add(10 as u8)
+    put_xml_properties(out, parsed.value, 1)
+    put_xml_tag(out, type.text(), true)
+}

@@ -1,13 +1,136 @@
 ; What a handler answers with: a resource's bytes, or an OperationOutcome.
 
+use http.Request.Request
 use http.Response.Response
+use json.Value.JsonValue
 use json.Writer.JsonWriter
 
-; content as the body, with the fields every FHIR answer of upstream has.
-procedure send_resource(mutable res: ref[Response], content: Slice[u8])
+define FORMAT_JSON: int 0
+define FORMAT_XML: int 1
+define FORMAT_HTML: int 2
+
+; The form the request asks its answer in, as upstream decides it: a
+; _format of the query alone when there is one (its name in any case, more
+; than one joined by commas), else what the Accept field holds.
+procedure answer_format(req: ref[Request]) returns int
 {
+    var text Array[u8]()
+    var cells Array[i64]()
+    if req.query.length > 0
+        parse_pairs(req.query, &text, &cells)
+    var asked Array[u8]()
+    var named false
+    var i: size_t 0
+    while i < pair_count(cells.as_slice())
+    {
+        var name Array[u8]()
+        put_lower_case(&name, pair_key(text.as_slice(), cells.as_slice(), i))
+        if name.as_slice().equals("_format")
+        {
+            if named
+                asked.add(44 as u8)
+            named := true
+            put_lower_case(&asked, pair_value(text.as_slice(), cells.as_slice(), i))
+        }
+        i := i + 1
+    }
+    if named
+    {
+        let format asked.as_slice()
+        if format.equals("xml") or format.equals("text/xml") or format.equals("application/xml") or format.equals("application/fhir+xml")
+            return FORMAT_XML
+        if format.equals("html") or format.equals("text/html")
+            return FORMAT_HTML
+        return FORMAT_JSON
+    }
+    let accept req.header("accept")
+    if contains(accept, "application/fhir+json") or contains(accept, "application/json")
+        return FORMAT_JSON
+    if contains(accept, "application/fhir+xml")
+        return FORMAT_XML
+    if contains(accept, "html")
+        return FORMAT_HTML
+    FORMAT_JSON
+}
+
+; A line of the page and its end.
+procedure put_line(mutable out: ref[Array[u8]], line: Slice[u8])
+{
+    put_bytes(out, line)
+    out.add(10 as u8)
+}
+
+; content inside upstream's page: the JSON in a comment, which the scripts
+; of the type (or of a Bundle) turn into what is shown.
+procedure put_html(mutable out: ref[Array[u8]], content: Slice[u8])
+{
+    var type: Slice[u8] "Resource"
+    let parsed JsonValue.parse(content)
+    if parsed.ok() and parsed.value.get("resourceType").is_text()
+        type := parsed.value.get("resourceType").text()
+    let bundle type.equals("Bundle")
+    put_line(out, "<!DOCTYPE html>")
+    put_line(out, "<html>")
+    put_line(out, "  <head>")
+    put_bytes(out, "    <title>")
+    put_bytes(out, type)
+    put_line(out, "</title>")
+    put_line(out, "    <meta http-equiv='Content-Type' content='text/html; charset=UTF-8'/>")
+    put_line(out, "    <script src='/js/Elements.js'></script>")
+    put_bytes(out, "    <script src='/js/")
+    put_bytes(out, type)
+    put_line(out, ".js'></script>")
+    put_line(out, "    <meta name='viewport' content='width=device-width, initial-scale=1.0'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/fhir.css'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/fhir-pub.css'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/bootstrap.css'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/bootstrap-fhir.css'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/project.css'/>")
+    put_line(out, "    <link rel='stylesheet' href='/css/jquery-ui.css'/>")
+    put_line(out, "  </head>")
+    if bundle
+        put_line(out, "  <body>")
+    else
+        put_line(out, "  <body id='body'>")
+    put_bytes(out, "    <div id='json'><!--")
+    ; (the comment may not end inside the JSON)
+    var i: size_t 0
+    while i < content.length
+    {
+        if content.slice_from(i).starts_with("-->")
+        {
+            put_bytes(out, "-/->")
+            i := i + 3
+            continue
+        }
+        out.add(content[i])
+        i := i + 1
+    }
+    put_line(out, "--></div>")
+    if bundle
+        put_line(out, "    <script>buildBundle();</script>")
+    else
+        put_line(out, "    <script>buildResource();</script>")
+    put_line(out, "  </body>")
+    put_bytes(out, "</html>")
+}
+
+; content as the body in the form the request asks for, with the fields
+; every FHIR answer of upstream has.
+procedure send_resource(req: ref[Request], mutable res: ref[Response], content: Slice[u8])
+{
+    let format answer_format(req)
     res.header("Vary", "Accept")
-    res.send("application/fhir+json", content)
+    if format = FORMAT_JSON
+        return res.send("application/fhir+json", content)
+    var out Array[u8]()
+    if format = FORMAT_XML
+    {
+        put_xml(&out, content)
+        return res.send("application/fhir+xml", out.as_slice())
+    }
+    put_html(&out, content)
+    res.send("text/html", out.as_slice())
 }
 
 ; An OperationOutcome with one issue, appended to out.
@@ -33,14 +156,14 @@ procedure write_outcome(mutable out: ref[Array[u8]], severity: Slice[u8], code: 
 }
 
 ; The answer to a request that failed; nothing of the response may be out.
-procedure send_error(mutable res: ref[Response], code: Slice[u8], diagnostics: Slice[u8], status: int)
+procedure send_error(req: ref[Request], mutable res: ref[Response], code: Slice[u8], diagnostics: Slice[u8], status: int)
 {
     var out Array[u8]()
     write_outcome(&out, "error", code, diagnostics)
     res.set_status(status)
-    send_resource(res, out.as_slice())
+    send_resource(req, res, out.as_slice())
 }
 
 ; The data store did not answer (upstream's 503).
-procedure send_unavailable(mutable res: ref[Response])
-    send_error(res, "transient", "The data store is currently unavailable. Please retry later.", 503)
+procedure send_unavailable(req: ref[Request], mutable res: ref[Response])
+    send_error(req, res, "transient", "The data store is currently unavailable. Please retry later.", 503)
