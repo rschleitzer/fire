@@ -10,7 +10,8 @@
 ; System.Threading.Tasks: with it active, the plain Task of a signature is named in full, and
 ; so is the model's class in its own handler. Without it nothing changes.
 (define (handler-plain-task)
-    (if (member "Task" (map name-of (node-list->list (node-list-filter active? (children (parent (current-node)))))))
+    (if (member "Task" (map name-of (node-list->list (node-list-filter active?
+            (children (if (string=? (gi (current-node)) "resources") (current-node) (parent (current-node))))))))
         "System.Threading.Tasks.Task" "Task"))
 (define (handler-model-class rn)
     (if (string=? rn "*") "TModel" (if (string=? rn "Task") ($ (project-name) ".Model.Task") rn)))
