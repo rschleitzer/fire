@@ -412,21 +412,32 @@ public static class "rn"Handlers
 
 "
         (handler-model-validation rn)
-"        var resource = await repo.UpdateAsync(id, content);
-        if (resource == null)
+"        try
         {
-            // Update-as-create: PUT to non-existent ID creates the resource
-            resource = await repo.CreateAsync(content, id);
-            var baseUrl = GetBaseUrl(ctx);
-            ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{resource.id}/_history/{resource.versionId}\";
+            var resource = await repo.UpdateAsync(id, content);
+            if (resource == null)
+            {
+                // Update-as-create: PUT to non-existent ID creates the resource
+                resource = await repo.CreateAsync(content, id);
+                var baseUrl = GetBaseUrl(ctx);
+                ctx.Response.Headers[\"Location\"] = $\"{baseUrl}/"rn"/{resource.id}/_history/{resource.versionId}\";
+                ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
+                ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
+                return await HandlePrefer(ctx, resource.content, 201);
+            }
+
             ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
             ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
-            return await HandlePrefer(ctx, resource.content, 201);
+            return await HandlePrefer(ctx, resource.content, 200);
         }
-
-        ctx.Response.Headers[\"ETag\"] = $\"W/\\\"{resource.versionId}\\\"\";
-        ctx.Response.Headers[\"Last-Modified\"] = resource.lastUpdated.ToUniversalTime().ToString(\"R\");
-        return await HandlePrefer(ctx, resource.content, 200);
+        // what the repository refuses of the content is the client's, as on a create
+        catch (System.Data.Common.DbException) { throw; }
+        catch (System.Net.Sockets.SocketException) { throw; }
+        catch (TimeoutException) { throw; }
+        catch (Exception ex)
+        {
+            return FhirResult.Error(ctx, \"error\", \"invalid\", ex.Message, 400);
+        }
     }
 
 "))

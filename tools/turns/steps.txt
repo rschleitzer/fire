@@ -209,3 +209,18 @@ GET ../admin/seed
 GET Patient?_id=seed-p1&_summary=count
 GET Practitioner?family=Seeded&_summary=count
 GET Patient/seed-never
+
+# PATCH on a Binary: its data is kept, can be patched, and is checked
+PUT Binary/zz{S}-bp binary.json
+PATCH Binary/zz{S}-bp steps/patch/binary-type.json
+GET Binary/zz{S}-bp
+PATCH Binary/zz{S}-bp steps/patch/binary-data.json
+GET Binary/zz{S}-bp
+GET Binary/zz{S}-bp/_history
+PATCH Binary/zz{S}-bp steps/patch/binary-broken.json
+PATCH Binary/zz{S}-bp steps/patch/binary-remove.json
+GET Binary/zz{S}-bp
+PATCH Binary/zz{S}-bp steps/patch/binary-type.json
+GET Binary/zz{S}-bp/_history
+POST Binary/zz{S}-bp/_rollback/5
+GET Binary/zz{S}-bp

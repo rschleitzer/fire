@@ -1009,6 +1009,56 @@ public class "rn"Repository : I"rn"Repository
         (repo-patch-versioned rn schema inline-list db)
         (repo-patch-non-versioned rn schema inline-list db)))
 
+; A PATCH on a type whose data lies in a table of its own (Binary): the
+; patch is applied to the content WITH its data, and the new version gets
+; its row there, as a create and an update give it one. Without these the
+; patched version had no data at all.
+(define (repo-patch-binary-read rn schema db)
+    (if (binary-data-table? rn db) ($
+"        // Binary: the stored content has no data; the patch sees it
+        await using (var readCmd = "(new-cmd db)"
+                \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
+        {
+"(add-param-line-for "readCmd" 1 "id" db)"
+"(add-param-line-for "readCmd" 2 "current.versionId" db)"
+            if (await readCmd.ExecuteScalarAsync() is byte[] storedData)
+                content[\"data\"] = Convert.ToBase64String(storedData);
+        }
+") ""))
+
+(define (repo-patch-binary-take rn db)
+    (if (binary-data-table? rn db) ($
+"        // Binary: extract data before storing
+        byte[]? binaryData = null;
+        JsonNode? binaryDataNode = null;
+        var dataElement = content[\"data\"];
+        if (dataElement != null)
+        {
+            binaryDataNode = dataElement.DeepClone();
+            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
+            content[\"data\"] = null;
+        }
+") ""))
+
+(define (repo-patch-binary-store rn schema db)
+    (if (binary-data-table? rn db) ($
+"        // Binary: store raw bytes separately
+        if (binaryData != null)
+        {
+            await using (var dataCmd = new NpgsqlCommand(
+                \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
+            {
+                dataCmd.Parameters.AddWithValue(id);
+                dataCmd.Parameters.AddWithValue(newVersionId);
+                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
+                await dataCmd.ExecuteNonQueryAsync();
+            }
+            content[\"data\"] = binaryDataNode;
+            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
+        }
+
+") ""))
+
 (define (repo-patch-versioned rn schema inline-list db)
     ($
 "    public async Task<"rn"Resource?> PatchAsync(string id, JsonArray patchOps, int? ifMatchVersion = null)
@@ -1056,10 +1106,10 @@ public class "rn"Repository : I"rn"Repository
         var newVersionId = current.versionId + 1;
         var lastUpdated = DateTime.UtcNow;
         var content = JsonNode.Parse(current.content)!;
-        JsonPatcher.Apply(content, patchOps);
+"(repo-patch-binary-read rn schema db)"        JsonPatcher.Apply(content, patchOps);
         "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
 "(if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
-"))"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
+"))(repo-patch-binary-take rn db)"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
         await using (var cmd = "(new-cmd db)"
@@ -1075,7 +1125,7 @@ public class "rn"Repository : I"rn"Repository
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // Rebuild search indexes
+"(repo-patch-binary-store rn schema db)"        // Rebuild search indexes
         await DeleteSearchIndexesAsync(conn, tx, id);
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
@@ -1112,10 +1162,10 @@ public class "rn"Repository : I"rn"Repository
         var newVersionId = current.versionId + 1;
         var lastUpdated = DateTime.UtcNow;
         var content = JsonNode.Parse(current.content)!;
-        JsonPatcher.Apply(content, patchOps);
+"(repo-patch-binary-read rn schema db)"        JsonPatcher.Apply(content, patchOps);
         "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
 "(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
-"))"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
+"))(repo-patch-binary-take rn db)"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
         await using (var cmd = "(new-cmd db)"
@@ -1131,7 +1181,7 @@ public class "rn"Repository : I"rn"Repository
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // Rebuild search indexes
+"(repo-patch-binary-store rn schema db)"        // Rebuild search indexes
         await DeleteSearchIndexesAsync(conn, tx, id);
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();

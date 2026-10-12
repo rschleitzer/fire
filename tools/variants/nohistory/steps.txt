@@ -82,6 +82,8 @@ PUT Patient/vp2 patient.json
 PUT Binary/nb1 binary.json
 PUT Binary/nb1 binary2.json
 GET Binary/nb1
+PATCH Binary/nb1 patch-binary.json
+GET Binary/nb1
 GET Binary/nb1/_history/2
 GET Binary/nb1/_history/1
 PUT Binary/nb1 binary-broken.json

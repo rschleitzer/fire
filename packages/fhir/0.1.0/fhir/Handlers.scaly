@@ -378,9 +378,6 @@ procedure resource_put(req: ref[Request], mutable res: ref[Response]) mutable pg
     var stored resource_update(0, type, root, id, if_match, &content)
     if stored.status = CONFLICT
         return send_error(res, "conflict", "Version conflict", 409)
-    ; upstream's handler for a type without history catches nothing
-    if stored.status = UNREADABLE and type_versioned(type) = false
-        return send_error(res, "exception", "An unexpected internal error occurred.", 500)
     if stored.status = UNREADABLE
         return send_error(res, "invalid", "The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.", 400)
     if stored.status = NOT_FOUND
