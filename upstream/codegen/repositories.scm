@@ -1424,7 +1424,22 @@ public class "rn"Repository : I"rn"Repository
 
         if (previousIsDelete)
         {
-            if (txScope == null) await tx.CommitAsync();
+"(if (binary-data-table? rn db) ($
+"            // Binary: what is answered has its data, as every other answer
+            await using (var readCmd = "(new-cmd db)"
+                \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
+            {
+    "(add-param-line-for "readCmd" 1 "id" db)"
+    "(add-param-line-for "readCmd" 2 "previous.versionId" db)"
+                if (await readCmd.ExecuteScalarAsync() is byte[] storedData)
+                {
+                    var shown = JsonNode.Parse(previous.content)!;
+                    shown[\"data\"] = Convert.ToBase64String(storedData);
+                    previous = new "rn"Resource(previous.id, previous.versionId, previous.lastUpdated,
+                        JsonSerializer.SerializeToUtf8Bytes(shown));
+                }
+            }
+") "")"            if (txScope == null) await tx.CommitAsync();
             return previous;
         }
 
@@ -1536,7 +1551,31 @@ public class "rn"Repository : I"rn"Repository
             await cmd.ExecuteNonQueryAsync();
         }
 
-        // No history row for the restored version: it is the current one now and the
+"(if (binary-data-table? rn db) ($
+"        // Binary: the restored version gets the bytes of the version it restores -
+        // without them it came back with no data at all.
+        byte[]? binaryData = null;
+        await using (var readCmd = "(new-cmd db)"
+            \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
+        {
+"(add-param-line-for "readCmd" 1 "id" db)"
+"(add-param-line-for "readCmd" 2 "previous.versionId" db)"
+            binaryData = await readCmd.ExecuteScalarAsync() as byte[];
+        }
+        if (binaryData != null)
+        {
+            await using (var dataCmd = new NpgsqlCommand(
+                \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
+            {
+                dataCmd.Parameters.AddWithValue(id);
+                dataCmd.Parameters.AddWithValue(newVersionId);
+                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
+                await dataCmd.ExecuteNonQueryAsync();
+            }
+            content[\"data\"] = Convert.ToBase64String(binaryData);
+            contentBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(content);
+        }
+") "")"        // No history row for the restored version: it is the current one now and the
         // history queries read the current version from the public table.
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();

@@ -224,3 +224,27 @@ PATCH Binary/zz{S}-bp steps/patch/binary-type.json
 GET Binary/zz{S}-bp/_history
 POST Binary/zz{S}-bp/_rollback/5
 GET Binary/zz{S}-bp
+
+# a Binary deleted and brought back, rolled back, taken in as a version:
+# its data comes with it
+PUT Binary/zz{S}-bu binary.json
+PUT Binary/zz{S}-bu binary-update.json
+DELETE Binary/zz{S}-bu
+POST Binary/zz{S}-bu/$undelete
+GET Binary/zz{S}-bu
+GET Binary/zz{S}-bu/_history
+POST Binary/zz{S}-bu/_rollback/3
+GET Binary/zz{S}-bu
+POST Binary/zz{S}-bu/$undelete
+GET Binary/zz{S}-bu
+POST Binary/zz{S}-bu/_rollback/4
+GET Binary/zz{S}-bu
+PUT Binary/zz{S}-bv binary.json
+DELETE Binary/zz{S}-bv
+!GET ../admin/undelete/Binary
+GET Binary/zz{S}-bv
+PUT Binary/_history/zz{S}-bi binary.json
+GET Binary/zz{S}-bi
+PUT Binary/_history/zz{S}-bi binary-update.json
+GET Binary/zz{S}-bi
+GET Binary/zz{S}-bi/_history
