@@ -504,8 +504,9 @@
                 <para><literal>/healthz</literal> says that the process is up, <literal>/readyz</literal> that
                 the database answers.</para>
 
-                <para>The server does not handle signals: it ends at once when it is stopped, without waiting
-                for the requests in flight.</para>
+                <para>SIGINT and SIGTERM end the server in order: it takes no new connections, answers the
+                requests in flight, ends the connections that only wait for their client, and exits with
+                status 0. A second signal ends it at once.</para>
 
             </sect1>
 

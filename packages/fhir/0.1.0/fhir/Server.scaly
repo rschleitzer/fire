@@ -1,6 +1,7 @@
 ; The server itself: the model installed, the database reached, the routes
-; set, and then it listens until it is ended. `model` is the text the
-; generated program wrote (fhir/Tables.scaly) and must outlive the call.
+; set, and then it listens until a signal asks it to end. `model` is the
+; text the generated program wrote (fhir/Tables.scaly) and must outlive the
+; call.
 ; 0 when it ended in order; 2 an unsupported database, 3 a database that
 ; cannot be reached or prepared, 4 a port that cannot be listened on.
 
@@ -8,6 +9,8 @@ use http.Router.Router
 
 procedure serve_model(model: Slice[u8]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
+    ; (before any thread is started: they inherit it)
+    Io.block_termination()
     let page Page.allocate_page()
     model_install(page, model)
     let database_type setting_or("DatabaseType", "PostgreSql")
@@ -59,6 +62,11 @@ procedure serve_model(model: Slice[u8]) returns int mutable pg_pool, sqlite_thre
     }
     Console.println("Now listening on: http://localhost:`port`")
     let server start(app, l)
+    ; SIGINT or SIGTERM: no new connections, the requests in flight are
+    ; answered, the connections that only wait are ended
+    Io.wait_termination()
+    Console.println("Application is shutting down...")
+    server.stop()
     server.wait()
     l.close()
     0

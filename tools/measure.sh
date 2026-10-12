@@ -14,7 +14,7 @@
 #            same request but for the id and the time.
 #   client   the client packages (packages/fhirclient and the generated
 #            search parameters): tools/client-test against each server on
-#            a database of its own
+#            a database of its own; and each server's orderly end on SIGTERM
 #
 # The database is a container of this script's own on a port of its own;
 # nothing else is touched. The Python environment for pyrtest is made on the
@@ -663,6 +663,29 @@ turns() {
   exit 0
 }
 
+# The running server asked to end (SIGTERM) while a client holds a
+# connection open and says nothing more: it must end in order, with status
+# 0, and not wait for that client.
+#   stops <server>
+stops() {
+  local holder n=0 status
+  (printf 'GET /healthz HTTP/1.1\r\nHost: localhost\r\n\r\n'; sleep 30) | nc 127.0.0.1 "$HTTP_PORT" > /dev/null 2>&1 &
+  holder=$!
+  sleep 0.5
+  kill -TERM "$SERVER_PID"
+  while kill -0 "$SERVER_PID" 2> /dev/null && [ $n -lt 100 ]; do sleep 0.1; n=$((n+1)); done
+  if kill -0 "$SERVER_PID" 2> /dev/null; then
+    echo "client: FAILED -- $1 has not ended 10 s after SIGTERM"
+    kill "$holder" 2> /dev/null
+    return 1
+  fi
+  wait "$SERVER_PID"; status=$?
+  SERVER_PID=
+  kill "$holder" 2> /dev/null
+  [ "$status" = 0 ] || { echo "client: FAILED -- $1 ended with status $status after SIGTERM"; return 1; }
+  echo "client: $1 ended in order on SIGTERM"
+}
+
 # The client's test program against each server, on a database of its own.
 client() {
   local t failed=
@@ -678,6 +701,7 @@ client() {
     start_server "$t"
     echo "client: $t"
     "$ROOT/server/build/client-test" "$HTTP_PORT" "$t" || failed=1
+    stops "$t" || failed=1
     stop_server
     stop_database
   done
