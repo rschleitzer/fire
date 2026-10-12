@@ -19,6 +19,8 @@
 ; what a resource brings -- its repository, its records, its model class and, through a type
 ; of its own, its name and its validator. A resource's file is that type and the name its
 ; handlers always had, as an alias of the class made for it: {Resource}Handlers.
+; (The type is {Resource}HandlerType: "Type" alone met a model class -- a Document's type
+; beside a resource DocumentType.)
 (define generic-rn "*")
 (define (h-generic? rn) (string=? rn generic-rn))
 (define (h-repo rn) (if (h-generic? rn) "TRepo" ($ "I" rn "Repository")))
@@ -90,11 +92,11 @@ public interface IResourceType<""TModel>
            (p (project-name)))
         (file ($ rn "Handlers.cs")
             ($
-"global using " rn "Handlers = " p ".Handlers." (if has-history "ResourceHandlers" "UnversionedResourceHandlers") "<""" p ".Handlers." rn "Type, " p ".Repositories.I" rn "Repository, " p ".Search." rn "Resource, " (if has-history ($ p ".Search." rn "HistoryRow, ") "") model-class ">;
+"global using " rn "Handlers = " p ".Handlers." (if has-history "ResourceHandlers" "UnversionedResourceHandlers") "<""" p ".Handlers." rn "HandlerType, " p ".Repositories.I" rn "Repository, " p ".Search." rn "Resource, " (if has-history ($ p ".Search." rn "HistoryRow, ") "") model-class ">;
 
 namespace " p ".Handlers;
 
-public sealed class " rn "Type : IResourceType<""" model-class ">
+public sealed class " rn "HandlerType : IResourceType<""" model-class ">
 {
     public static string Name => \"" rn "\";
     public static List<""string> Validate(" model-class " model) => " p ".Model.Validator.ModelValidator.Validate" rn "(model);
