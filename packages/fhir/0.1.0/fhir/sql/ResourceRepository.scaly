@@ -60,6 +60,26 @@ procedure version_params(mutable c: ref[DbConn], type: Slice[u8], root: JsonValu
     }
 }
 
+; Can every instant a type keeps in a column of its own be read? PostgreSQL
+; refuses a statement with one it cannot read, and the write fails; SQLite
+; would store any text, so it is asked here.
+procedure instants_readable(type: Slice[u8], root: JsonValue) returns bool
+{
+    let columns inline_columns(type)
+    var i: size_t 0
+    while entry(columns, 44, i).length > 0
+    {
+        let column entry(columns, 44, i)
+        i := i + 1
+        if column[column.length - 1] <> 100
+            continue
+        let value root.get(column_member(column))
+        if value.is_text() and readable_date(value.text()) = false
+            return false
+    }
+    true
+}
+
 ; The value a resource has for one of its type's own search columns
 ; (`name:kind`), as the next parameter.
 procedure column_param(mutable c: ref[DbConn], column: Slice[u8], root: JsonValue)
@@ -428,6 +448,8 @@ procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
     var c &held
     var version_id: i64 1
     var ok begin(c, scope)
+    if ok and c.kind = DATABASE_SQLITE
+        ok := instants_readable(type, root)
     if ok and after_delete and type_versioned(type)
     {
         var name Array[u8]()
@@ -514,7 +536,9 @@ procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
         return StoreResult(CONFLICT, current, 0)
     }
     var ok true
-    if type_versioned(type)
+    if c.kind = DATABASE_SQLITE
+        ok := instants_readable(type, root)
+    if ok and type_versioned(type)
         ok := keep_history(c, type, id, "UPDATE")
     let now instant_now()
     if ok
@@ -814,7 +838,12 @@ procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: S
     put_table(sql, type)
     put_bytes(sql, ".")
     put_bytes(sql, table)
-    put_bytes(sql, " (id INT NOT NULL, resource_id VARCHAR(64) NOT NULL REFERENCES ")
+    ; (the types are those of upstream's schema for the database)
+    let lite database_in_use() = DATABASE_SQLITE
+    if lite
+        put_bytes(sql, " (id INT NOT NULL, resource_id TEXT NOT NULL REFERENCES ")
+    else
+        put_bytes(sql, " (id INT NOT NULL, resource_id VARCHAR(64) NOT NULL REFERENCES ")
     put_table(sql, type)
     put_bytes(sql, "(id) ON DELETE CASCADE, ")
     var indexed: Slice[u8] "value"
@@ -822,7 +851,10 @@ procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: S
         case 116: put_bytes(sql, "system TEXT, value TEXT, display TEXT")
         case 100
         {
-            put_bytes(sql, "value_low TIMESTAMPTZ, value_high TIMESTAMPTZ")
+            if lite
+                put_bytes(sql, "value_low TEXT, value_high TEXT")
+            else
+                put_bytes(sql, "value_low TIMESTAMPTZ, value_high TIMESTAMPTZ")
             indexed := "value_low"
         }
         case 114
@@ -830,8 +862,20 @@ procedure put_search_table(mutable sql: ref[Array[u8]], type: Slice[u8], line: S
             put_bytes(sql, "target_type TEXT, target_id TEXT, target_version TEXT")
             indexed := "reference"
         }
-        case 110: put_bytes(sql, "value DECIMAL")
-        case 113: put_bytes(sql, "value DECIMAL, system TEXT, code TEXT, unit TEXT")
+        case 110
+        {
+            if lite
+                put_bytes(sql, "value REAL")
+            else
+                put_bytes(sql, "value DECIMAL")
+        }
+        case 113
+        {
+            if lite
+                put_bytes(sql, "value REAL, system TEXT, code TEXT, unit TEXT")
+            else
+                put_bytes(sql, "value DECIMAL, system TEXT, code TEXT, unit TEXT")
+        }
         else: put_bytes(sql, "value TEXT")
     put_bytes(sql, ", PRIMARY KEY (id, resource_id))")
     put_search_index(sql, type, table, indexed)
@@ -1007,7 +1051,40 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
         return FAILED
     var c &held
     let bounded before.length > 0
-    if bounded
+    ; the bound as the statements take it: as it was given (PostgreSQL reads
+    ; it), or as SQLite holds a time
+    var limit: Slice[u8] before
+    var lite_time Array[u8]()
+    if bounded and c.kind = DATABASE_SQLITE
+    {
+        if readable_date(before) = false
+        {
+            give_back(c, 0)
+            return REFUSED
+        }
+        var written Array[u8]()
+        written.append(before)
+        if before.length = 10
+            put_bytes(&written, " 00:00:00")
+        put_sqlite_time(&lite_time, written.as_slice())
+        limit := lite_time.as_slice()
+        ; shown as .NET's round-trip format: seven digits of the second
+        shown.append(limit.slice_to(10))
+        put_bytes(shown, "T")
+        shown.append(limit.subslice(11, 19))
+        put_bytes(shown, ".")
+        var digit: size_t 20
+        while digit < 27
+        {
+            if digit < limit.length
+                shown.add(limit[digit])
+            else
+                shown.add(48 as u8)
+            digit := digit + 1
+        }
+        put_bytes(shown, "Z")
+    }
+    if bounded and c.kind <> DATABASE_SQLITE
     {
         var understood c.prepare_unnamed("SELECT to_char($1::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US')")
         if understood
@@ -1035,7 +1112,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
     put_bytes(&sql, "SELECT COUNT(*) FROM (")
     put_purge_selection(&sql, type, bounded)
     put_bytes(&sql, ") t")
-    var ok run_purge(c, sql.as_slice(), before) and c.next_row()
+    var ok run_purge(c, sql.as_slice(), limit) and c.next_row()
     var found: i64 0
     if ok
         found := c.column_int(0)
@@ -1047,7 +1124,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
         put_bytes(&sql, ".resource_data WHERE resource_id IN (")
         put_purge_selection(&sql, type, bounded)
         put_bytes(&sql, ")")
-        ok := run_purge(c, sql.as_slice(), before)
+        ok := run_purge(c, sql.as_slice(), limit)
     }
     if ok and found > 0
     {
@@ -1057,7 +1134,7 @@ procedure sql_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array
         put_bytes(&sql, ".resource_history WHERE id IN (")
         put_purge_selection(&sql, type, bounded)
         put_bytes(&sql, ")")
-        ok := run_purge(c, sql.as_slice(), before)
+        ok := run_purge(c, sql.as_slice(), limit)
     }
     give_back(c, 0)
     if ok = false
@@ -1141,6 +1218,11 @@ procedure sql_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool, s
         return false
     var c &held
     let done c.execute(sql)
+    if done = false
+    {
+        let m c.error_message()
+        Console.println("The database refused a script: `String(m.data as pointer[const_char], m.length)`")
+    }
     give_back(c, scope)
     done
 }

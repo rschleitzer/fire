@@ -276,7 +276,8 @@ binary() {
   curl -s -o /dev/null -D "$WORK/turns.$1.Binary.spaced.raw.head" -H 'Accept: */*' "$BASE/fire/Binary/$(id_of "$1.Binary.spaced")"
   # (on SQLite the data stays in the content: what is compared is that)
   if [ "$DATABASE" = sqlite ]; then
-    lite "select version_id, hex(content) from Binary where id = '$(id_of "$1.Binary.spaced")'" | sed -E 's/226C617374557064617465642[0-9A-F]*//' > "$WORK/turns.$1.Binary.data"
+    lite "select version_id, content from Binary where id = '$(id_of "$1.Binary.spaced")'" \
+      | sed 's/"id":"[^"]*"/"id":""/; s/"lastUpdated":"[^"]*"/"lastUpdated":""/' > "$WORK/turns.$1.Binary.data"
     return
   fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "select version_id, encode(data, 'hex') from \"Binary\".resource_data where resource_id = '$(id_of "$1.Binary.spaced")'" > "$WORK/turns.$1.Binary.data"
@@ -353,6 +354,8 @@ asks() {
   local n=0 method path rest out
   while read -r method path rest; do
     case "$method" in ''|'#'*) continue ;; esac
+    # (see refusals: on SQLite this request is taken, and would write)
+    [ "$DATABASE" = sqlite ] && [ "$rest" = refused/Binary.base64.json ] && continue
     n=$((n+1)); out="$WORK/turns.$1.ask.$n"
     path=${path//\{A\}/$2}; path=${path//\{B\}/$3}
     case "$method" in
@@ -423,6 +426,8 @@ refusals() {
   local f name
   for f in "$ROOT"/tools/turns/refused/*.json; do
     name=$(basename "$f" .json)
+    # (where the data stays in the content it is not decoded, and not refused)
+    [ "$DATABASE" = sqlite ] && [ "$name" = Binary.base64 ] && continue
     call "$1.refused.$name" 400 POST "${name%%.*}" "refused/$name.json"
   done
 }
@@ -525,6 +530,7 @@ turns() {
   # what one refuses the other refuses, in the same words
   local f
   for f in "$ROOT"/tools/turns/refused/*.json; do
+    [ "$DATABASE" = sqlite ] && [ "$(basename "$f" .json)" = Binary.base64 ] && continue
     same "s.refused.$(basename "$f" .json)" "c.refused.$(basename "$f" .json)"
   done
   # the search tables hold the same rows for the same resource
@@ -580,8 +586,11 @@ turns() {
   local size size_update
   size=$(wc -c < "$WORK/turns.s.create.body" | tr -d ' ')
   size_update=$(wc -c < "$WORK/turns.s.update.body" | tr -d ' ')
-  printf '%s\n' "1|t|male|$size|UPDATE" "2|f|female|$size_update|UPDATE" "3|t|male|$size|DELETE" "4|t|male|$size|CURRENT" > "$WORK/turns.rows.a.expected"
-  printf '%s\n' "1|t|male|$size|UPDATE" "2|f|female|$size_update|DELETE" "3|t|male|$size|CURRENT" > "$WORK/turns.rows.b.expected"
+  # (a boolean as the database shows it: t and f, or SQLite's 1 and 0)
+  local yes=t no=f
+  [ "$DATABASE" = sqlite ] && yes=1 no=0
+  printf '%s\n' "1|$yes|male|$size|UPDATE" "2|$no|female|$size_update|UPDATE" "3|$yes|male|$size|DELETE" "4|$yes|male|$size|CURRENT" > "$WORK/turns.rows.a.expected"
+  printf '%s\n' "1|$yes|male|$size|UPDATE" "2|$no|female|$size_update|DELETE" "3|$yes|male|$size|CURRENT" > "$WORK/turns.rows.b.expected"
   for r in a b; do
     cmp -s "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected" && continue
     echo "turns: FAIL -- the rows of ${r} are not the expected ones:"; diff "$WORK/turns.rows.$r" "$WORK/turns.rows.$r.expected"; TURNS_FAILED=1

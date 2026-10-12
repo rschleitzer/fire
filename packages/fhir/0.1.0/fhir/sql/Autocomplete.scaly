@@ -7,7 +7,7 @@ use fhir.Db.DbConn
 
 ; The column autocomplete reads of a parameter's table; empty when the
 ; parameter has none it knows.
-function autocomplete_column(line: Slice[u8]) returns Slice[u8]
+procedure autocomplete_column(line: Slice[u8]) returns Slice[u8]
 {
     if line.length = 0
         return ""
@@ -15,7 +15,11 @@ function autocomplete_column(line: Slice[u8]) returns Slice[u8]
     if kind = 115 or kind = 116
         return "value"
     if kind = 100
+    {
+        if database_in_use() = DATABASE_SQLITE
+            return "STRFTIME('%Y-%m-%d', value_low)"
         return "TO_CHAR(value_low, 'YYYY-MM-DD')"
+    }
     ""
 }
 
@@ -58,8 +62,18 @@ procedure autocomplete_condition(mutable sql: ref[Array[u8]], mutable values: re
     put_bytes(sql, column)
     put_bytes(sql, " IS NOT NULL AND LOWER(")
     put_bytes(sql, column)
-    put_bytes(sql, ") LIKE LOWER($1::text) || '%'")
-    put_bytes(values, value)
+    if database_in_use() = DATABASE_SQLITE
+    {
+        ; (lowered here, as for a search: put_like_pattern)
+        put_bytes(sql, ") LIKE $1")
+        put_lower_case(values, value)
+        values.add(37 as u8)
+    }
+    else
+    {
+        put_bytes(sql, ") LIKE LOWER($1::text) || '%'")
+        put_bytes(values, value)
+    }
     values.add(10 as u8)
 }
 

@@ -208,6 +208,41 @@ function readable_number(s: Slice[u8]) returns bool
     at = s.length
 }
 
+; The pattern a column in lower case is compared with: what begins with
+; the value, or (anywhere) what has it within. PostgreSQL lowers the value
+; itself. For SQLite it is lowered here and handed in whole, as upstream
+; does with .NET's ToLower: SQLite's own LOWER knows the ASCII letters
+; alone, so there a stored upper-case letter beyond them is never matched.
+procedure put_like_pattern(mutable q: ref[SearchQuery], joined: bool, value: Slice[u8], anywhere: bool)
+{
+    var pattern Array[u8]()
+    if database_in_use() = DATABASE_SQLITE
+    {
+        var whole Array[u8]()
+        if anywhere
+            whole.add(37 as u8)
+        put_lower_case(&whole, value)
+        whole.add(37 as u8)
+        cell(&q.text, &q.cells, whole.as_slice())
+        pattern.add(36 as u8)
+        put_decimal(&pattern, (q.cells.length / 2) as i64)
+    }
+    else
+    {
+        if anywhere
+            put_bytes(&pattern, "'%' || ")
+        put_bytes(&pattern, "LOWER(")
+        cell(&q.text, &q.cells, value)
+        pattern.add(36 as u8)
+        put_decimal(&pattern, (q.cells.length / 2) as i64)
+        put_bytes(&pattern, "::text) || '%'")
+    }
+    if joined
+        q.joins.append(pattern.as_slice())
+    else
+        q.wheres.append(pattern.as_slice())
+}
+
 ; The word true or false of a query as the value of a boolean column:
 ; PostgreSQL reads the word, SQLite has 1 and 0.
 procedure put_boolean_param(mutable q: ref[SearchQuery], word: Slice[u8])
@@ -432,11 +467,7 @@ procedure table_condition(mutable q: ref[SearchQuery], type: Slice[u8], kind: u8
                     put_bytes(&q.wheres, "LOWER(")
                     put_column(&q.wheres, alias, "value")
                     put_bytes(&q.wheres, ") LIKE ")
-                    if modifier.equals("contains")
-                        put_bytes(&q.wheres, "'%' || ")
-                    put_bytes(&q.wheres, "LOWER(")
-                    put_param(q, &q.wheres, v)
-                    put_bytes(&q.wheres, "::text) || '%'")
+                    put_like_pattern(q, false, v, modifier.equals("contains"))
                 }
             }
             case 116
@@ -472,9 +503,9 @@ procedure table_condition(mutable q: ref[SearchQuery], type: Slice[u8], kind: u8
                     put_column(&q.wheres, alias, "value")
                     put_bytes(&q.wheres, " = ")
                     put_param(q, &q.wheres, v)
-                    put_bytes(&q.wheres, " OR LEFT(")
+                    put_bytes(&q.wheres, " OR substr(")
                     put_column(&q.wheres, alias, "value")
-                    put_bytes(&q.wheres, ", ")
+                    put_bytes(&q.wheres, ", 1, ")
                     put_decimal(&q.wheres, letters)
                     put_bytes(&q.wheres, ") = ")
                     put_param(q, &q.wheres, under.as_slice())
@@ -619,9 +650,8 @@ procedure token_part(mutable q: ref[SearchQuery], alias: int, value: Slice[u8], 
         {
             put_bytes(&q.wheres, "LOWER(")
             put_column(&q.wheres, alias, "value")
-            put_bytes(&q.wheres, ") LIKE '%' || LOWER(")
-            put_param(q, &q.wheres, code)
-            put_bytes(&q.wheres, "::text) || '%'")
+            put_bytes(&q.wheres, ") LIKE ")
+            put_like_pattern(q, false, code, true)
         }
         else
         {
@@ -788,9 +818,8 @@ procedure inline_condition(mutable q: ref[SearchQuery], alias: int, column: Slic
                 {
                     put_bytes(&q.wheres, "LOWER(")
                     put_operand(&q.wheres, alias, column)
-                    put_bytes(&q.wheres, ") LIKE '%' || LOWER(")
-                    put_param(q, &q.wheres, v)
-                    put_bytes(&q.wheres, "::text) || '%'")
+                    put_bytes(&q.wheres, ") LIKE ")
+                    put_like_pattern(q, false, v, true)
                 }
                 else
                 {
@@ -938,9 +967,8 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
         {
             put_bytes(&q.joins, " AND LOWER(")
             put_column(&q.joins, alias, "value")
-            put_bytes(&q.joins, ") LIKE LOWER(")
-            put_param(q, &q.joins, value)
-            put_bytes(&q.joins, "::text) || '%'")
+            put_bytes(&q.joins, ") LIKE ")
+            put_like_pattern(q, true, value, false)
         }
         else
         {

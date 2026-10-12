@@ -68,7 +68,7 @@ procedure resource_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) ret
 ; CreateIndexesSql and DropIndexesSql).
 procedure database_indexes(create: bool) returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() <> DATABASE_POSTGRESQL
+    if database_in_use() = 0
         return false
     if create
         return sql_script(0, database_script_named("indexes.create"))
@@ -79,7 +79,7 @@ procedure database_indexes(create: bool) returns bool mutable pg_pool, sqlite_th
 ; PostgreSQL side).
 procedure search_table(scope: u64, type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool, sqlite_thread
 {
-    if database_in_use() <> DATABASE_POSTGRESQL
+    if database_in_use() = 0
         return FAILED
     if create
         return sql_create_search(scope, type, parameter)

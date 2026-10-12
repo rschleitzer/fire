@@ -36,7 +36,8 @@ function contains(haystack: Slice[u8], needle: Slice[u8]) returns bool
 ; has both. False when it is to be answered as a resource.
 procedure send_raw(type: Slice[u8], req: ref[Request], mutable res: ref[Response], content: Slice[u8]) returns bool
 {
-    if keeps_data_apart(type) = false
+    ; (a Binary, wherever its data is stored)
+    if type.equals("Binary") = false
         return false
     let format req.query_param("_format")
     if contains(format, "json") or contains(format, "xml") or contains(req.header("accept"), "fhir")

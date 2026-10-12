@@ -19,3 +19,54 @@ procedure put_decimal(mutable out: ref[Array[u8]], v: i64)
         put_decimal(out, v / 10)
     out.add(((v % 10) + 48) as u8)
 }
+
+; Text in lower case, as .NET's ToLowerInvariant lowers it -- for the
+; letters of ASCII, Latin-1, Latin Extended-A, Greek and Cyrillic; what
+; lies beyond is left as it is.
+procedure put_lower_case(mutable out: ref[Array[u8]], text: Slice[u8])
+{
+    var i: size_t 0
+    while i < text.length
+    {
+        let b text[i]
+        if b < 128
+        {
+            if b >= 65 and b <= 90
+                out.add(b + 32)
+            else
+                out.add(b)
+            i := i + 1
+            continue
+        }
+        ; a character of two bytes: its code point, lowered, written again
+        if b >= 194 and b <= 223 and i + 1 < text.length
+        {
+            var point (((b as int) - 192) * 64 + ((text[i + 1] as int) - 128)) as i64
+            if (point >= 192 and point <= 222 and point <> 215) or (point >= 913 and point <= 939 and point <> 930) or (point >= 1040 and point <= 1071)
+                point := point + 32
+            else
+            {
+                if point >= 1024 and point <= 1039
+                    point := point + 80
+                else
+                {
+                    if point = 376
+                        point := 255
+                    else
+                    {
+                        let pairs_even (point >= 256 and point <= 311) or (point >= 330 and point <= 375)
+                        let pairs_odd (point >= 313 and point <= 328) or (point >= 377 and point <= 382)
+                        if (pairs_even and point % 2 = 0) or (pairs_odd and point % 2 = 1)
+                            point := point + 1
+                    }
+                }
+            }
+            out.add((192 + point / 64) as u8)
+            out.add((128 + point % 64) as u8)
+            i := i + 2
+            continue
+        }
+        out.add(b)
+        i := i + 1
+    }
+}
