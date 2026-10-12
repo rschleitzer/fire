@@ -15,11 +15,29 @@
 ; Resolve element reference to a C# class name
 ; Backbone elements (nested under a resource) get Resource.Nested form
 ; Global elements get their plain name
+; (A global type named like a class the property stands in -- MedicationKnowledge's nested
+; Dosage has a list of the data type Dosage -- is named from the root: C# would take the
+; enclosing class.)
 (define (fhir-model-class-ref variant)
     (let ((target (ref variant)))
         (if target
-            (fhir-model-type-name target)
+            (let ((name (fhir-model-type-name target)))
+                (if (fhir-model-shadowed? name (% "id" target) (parent variant))
+                    ($ "global::" (project-name) ".Model." name)
+                    name))
             "object")))
+
+; Does an element or resource around node have the class name `name` -- another one than the
+; type itself (a type may hold its own kind)?
+(define (fhir-model-shadowed? name target-id node)
+    (let loop ((n node))
+        (if (node-list-empty? n)
+            #f
+            (if (and (gi n) (or (string=? "element" (gi n)) (string=? "resource" (gi n)))
+                     (string=? name (if (string=? "resource" (gi n)) (name-of n) (fhir-model-explicit-name n)))
+                     (not (equal? (% "id" n) target-id)))
+                #t
+                (loop (parent n))))))
 
 ; Build the dot-qualified name for nested classes
 ; e.g., Patient.Contact for a backbone element under Patient

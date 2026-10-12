@@ -13,8 +13,10 @@
     (if (member "Task" (map name-of (node-list->list (node-list-filter active?
             (children (if (string=? (gi (current-node)) "resources") (current-node) (parent (current-node))))))))
         "System.Threading.Tasks.Task" "Task"))
+; (Task and Endpoint are also names of what ASP.NET brings into a handler's file.)
 (define (handler-model-class rn)
-    (if (string=? rn "*") "TModel" (if (string=? rn "Task") ($ (project-name) ".Model.Task") rn)))
+    (if (string=? rn "*") "TModel"
+        (case rn (("Task" "Endpoint") ($ (project-name) ".Model." rn)) (else rn))))
 
 ; The handlers of every resource are ONE class (two: with and without versions), generic over
 ; what a resource brings -- its repository, its records, its model class and, through a type

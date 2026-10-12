@@ -55,13 +55,19 @@ public static partial class ModelValidator
     (for-children-of (select-children "elements" el)
         (lambda (child) (fhir-validate-element-recursive child)))))
 
+; The name of a validator's parameter: the type's, in lower case -- but not "errors", which
+; is the list every validator collects into (CoverageEligibilityResponse has an Errors).
+(define (fhir-validator-var-name type-name)
+    (let ((v (escape-csharp-keyword (first-letter-downcase type-name))))
+        (if (string=? v "errors") "errorsElement" v)))
+
 ; --- Generate a Validate{Name}() method ---
 
 (define (fhir-validate-element el)
-    (let ((var-name (escape-csharp-keyword (first-letter-downcase
+    (let ((var-name (fhir-validator-var-name
                         (if (string=? "resource" (gi el))
                             (name-of el)
-                            (fhir-model-explicit-name el)))))
+                            (fhir-model-explicit-name el))))
           (method-name (if (string=? "resource" (gi el))
                            (name-of el)
                            (fhir-validator-name el)))
@@ -88,10 +94,10 @@ public static partial class ModelValidator
 ; only choice types have a variants child element.
 
 (define (fhir-validate-item property el)
-    (let ((var-name (escape-csharp-keyword (first-letter-downcase
+    (let ((var-name (fhir-validator-var-name
                         (if (string=? "resource" (gi el))
                             (name-of el)
-                            (fhir-model-explicit-name el))))))
+                            (fhir-model-explicit-name el)))))
         (if (is-variant? property)
             ; Choice type — has variants child with multiple variant children
             (fhir-validate-variant-group property el var-name)

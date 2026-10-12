@@ -1749,7 +1749,7 @@ public static class BundleHandler
             Resource? model = resourceType switch
             {
 "   (for-active-resources (lambda (r) (let ((rn (name-of r))) ($
-"                \"" rn "\" => resource.Deserialize<""" rn ">(),
+"                \"" rn "\" => resource.Deserialize<""" (handler-model-class rn) ">(),
 "))))
 "                _ => null,
             };

@@ -507,8 +507,10 @@ namespace " (project-name) ".Search;
                         (model-identifier-extract rn sn method-name fhir-field)))
                     identifiers))
                 ; ContactPoint — once
-                (if (null? contactpoints) ""
-                    (let* ((s (car contactpoints))
+                ; (a resource with a ContactPoint parameter and none named telecom gets it too:
+                ; the repository asks ExtractTelecom for every ContactPoint parameter)
+                (if (null? (if (null? contactpoints) (filter search-is-contactpoint? searches) contactpoints)) ""
+                    (let* ((s (car (if (null? contactpoints) (filter search-is-contactpoint? searches) contactpoints)))
                            (fhir-field (search-fhir-field-name s)))
                         (model-contactpoint-extract rn "telecom"
                             ($ "Extract" (kebab-to-pascal "telecom")) fhir-field)))
