@@ -65,3 +65,145 @@ procedure put_timestamp(mutable out: ref[Array[u8]], t: Instant)
     put_digits(out, t.micros, 6)
     put_bytes(out, "+00")
 }
+
+; --- a time as upstream's SQLite side holds it ---
+;
+; Microsoft.Data.Sqlite writes a DateTime as text, in UTC and without a
+; zone: 2026-10-10 16:39:09.4208071 -- up to seven digits of the second,
+; the zeros at their end left out, and no point when none is left. An
+; open end of a period is .NET's DateTime.MaxValue, an open start its
+; MinValue.
+
+; The days from 1970-01-01 to a date of the proleptic Gregorian calendar.
+function days_of_civil(year: i64, month: i64, day: i64) returns i64
+{
+    var y year
+    if month <= 2
+        y := y - 1
+    var era y / 400
+    if y < 0
+        era := (y - 399) / 400
+    let yoe y - era * 400
+    var shifted month - 3
+    if month <= 2
+        shifted := month + 9
+    let doy (153 * shifted + 2) / 5 + day - 1
+    let doe yoe * 365 + yoe / 4 - yoe / 100 + doy
+    era * 146097 + doe - 719468
+}
+
+; The number the digits of s from `from` on say, `width` of them (fewer at
+; the end of s).
+function number_at(s: Slice[u8], from: size_t, width: size_t) returns i64
+{
+    var n: i64 0
+    var i from
+    while i < s.length and i < from + width and s[i] >= 48 and s[i] <= 57
+    {
+        n := n * 10 + (((s[i] as int) - 48) as i64)
+        i := i + 1
+    }
+    n
+}
+
+; A time written for PostgreSQL -- a date and a time with T or a blank
+; between, a fraction or none, Z, an offset (+01:00, +01, +1) or no zone
+; (UTC), or `infinity` / `-infinity` -- as SQLite holds it.
+procedure put_sqlite_time(mutable out: ref[Array[u8]], time: Slice[u8])
+{
+    if time.equals("infinity")
+        return put_bytes(out, "9999-12-31 23:59:59.9999999")
+    if time.equals("-infinity")
+        return put_bytes(out, "0001-01-01 00:00:00")
+    if time.length < 16
+        return put_bytes(out, time)
+    var seconds days_of_civil(number_at(time, 0, 4), number_at(time, 5, 2), number_at(time, 8, 2)) * 86400
+    seconds := seconds + number_at(time, 11, 2) * 3600 + number_at(time, 14, 2) * 60
+    var at: size_t 16
+    if at < time.length and time[at] = 58
+    {
+        seconds := seconds + number_at(time, at + 1, 2)
+        at := at + 3
+    }
+    ; the fraction: seven digits are kept
+    var fraction: i64 0
+    var kept 0
+    if at < time.length and time[at] = 46
+    {
+        at := at + 1
+        while at < time.length and time[at] >= 48 and time[at] <= 57
+        {
+            if kept < 7
+            {
+                fraction := fraction * 10 + (((time[at] as int) - 48) as i64)
+                kept := kept + 1
+            }
+            at := at + 1
+        }
+    }
+    while kept < 7
+    {
+        fraction := fraction * 10
+        kept := kept + 1
+    }
+    ; the zone: what it is ahead of UTC is taken off
+    if at < time.length and (time[at] = 43 or time[at] = 45)
+    {
+        let sign time[at]
+        var hours: i64 0
+        var minutes: i64 0
+        var z at + 1
+        var hour_digits 0
+        while z < time.length and time[z] >= 48 and time[z] <= 57 and hour_digits < 2
+        {
+            hours := hours * 10 + (((time[z] as int) - 48) as i64)
+            z := z + 1
+            hour_digits := hour_digits + 1
+        }
+        if z < time.length and time[z] = 58
+            z := z + 1
+        minutes := number_at(time, z, 2)
+        let ahead hours * 3600 + minutes * 60
+        if sign = 43
+            seconds := seconds - ahead
+        else
+            seconds := seconds + ahead
+    }
+    var days seconds / 86400
+    if seconds < 0 and days * 86400 <> seconds
+        days := days - 1
+    let sod seconds - days * 86400
+    let ymd civil_from_days(days)
+    put_digits(out, ymd / 10000, 4)
+    out.add(45 as u8)
+    put_digits(out, (ymd / 100) % 100, 2)
+    out.add(45 as u8)
+    put_digits(out, ymd % 100, 2)
+    out.add(32 as u8)
+    put_digits(out, sod / 3600, 2)
+    out.add(58 as u8)
+    put_digits(out, (sod / 60) % 60, 2)
+    out.add(58 as u8)
+    put_digits(out, sod % 60, 2)
+    if fraction > 0
+    {
+        out.add(46 as u8)
+        var shown fraction
+        var width 7
+        while shown % 10 = 0
+        {
+            shown := shown / 10
+            width := width - 1
+        }
+        put_digits(out, shown, width)
+    }
+}
+
+; A time for the database in use: as it was written (for PostgreSQL), or
+; as SQLite holds it.
+procedure put_database_time(mutable out: ref[Array[u8]], time: Slice[u8])
+{
+    if database_in_use() = DATABASE_SQLITE
+        return put_sqlite_time(out, time)
+    put_bytes(out, time)
+}

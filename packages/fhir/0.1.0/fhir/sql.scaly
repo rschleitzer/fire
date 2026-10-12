@@ -1,0 +1,9 @@
+; The database layer's operations, written once for every database: the
+; SQL they send differs by the dialect of the connection (fhir/Db.scaly).
+
+define sql
+{
+    module SearchQueryBuilder
+    module ResourceRepository
+    module Autocomplete
+}

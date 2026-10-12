@@ -13,16 +13,16 @@ function version_behind(a: Slice[u8], b: Slice[u8]) returns bool
     version_newer(b, a)
 
 ; One step.
-procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool
+procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
 {
     Console.println("Upgrading database to `String(version.data as pointer[const_char], version.length)`...")
     let scope transaction_begin()
     if scope = 0
         return false
     var key Array[u8]()
-    put_bytes(&key, "postgresql.upgrade.")
+    put_bytes(&key, "upgrade.")
     put_bytes(&key, version)
-    let sql model_value(61, key.as_slice())
+    let sql database_script_named(key.as_slice())
     var ok true
     if blank(sql) = false
         ok := database_script(scope, sql)
@@ -66,7 +66,7 @@ procedure upgrade_step(version: Slice[u8]) returns bool mutable pg_pool
 }
 
 ; Every step the database is behind. False when one fails.
-procedure upgrade_database() returns bool mutable pg_pool
+procedure upgrade_database() returns bool mutable pg_pool, sqlite_thread
 {
     var current Array[u8]()
     if database_version(&current) = false

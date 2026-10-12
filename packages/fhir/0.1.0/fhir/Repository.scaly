@@ -6,144 +6,144 @@
 use json.Value.JsonValue
 use fhir.Resource.StoreResult
 
-procedure resource_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], after_delete: bool, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_create(scope, type, root, id, after_delete, content)
+    if database_in_use() <> 0
+        return sql_create(scope, type, root, id, after_delete, content)
     StoreResult(FAILED, 0, 0)
 }
 
-procedure resource_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8], if_match: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_update(scope, type, root, id, if_match, content)
+    if database_in_use() <> 0
+        return sql_update(scope, type, root, id, if_match, content)
     StoreResult(FAILED, 0, 0)
 }
 
-procedure resource_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool
+procedure resource_delete(scope: u64, type: Slice[u8], id: Slice[u8]) returns int mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_delete(scope, type, id)
+    if database_in_use() <> 0
+        return sql_delete(scope, type, id)
     FAILED
 }
 
 ; $autocomplete: the values of `property` among what `param` finds; count
 ; and offset -1 where the request names none.
-procedure resource_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool
+procedure resource_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_autocomplete(type, param, value, property, count, offset, text, cells)
+    if database_in_use() <> 0
+        return sql_autocomplete(type, param, value, property, count, offset, text, cells)
     FAILED
 }
 
 ; Undo the current version `version_id` of `id`; what the resource is
 ; afterwards, or was last, into content. NOT_FOUND when that is not the
 ; current version.
-procedure resource_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_rollback(scope, type, id, version_id, content)
+    if database_in_use() <> 0
+        return sql_rollback(scope, type, id, version_id, content)
     StoreResult(FAILED, 0, 0)
 }
 
-; The purge of a type's deleted resources (see postgresql_purge).
-procedure resource_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool
+; The purge of a type's deleted resources (see sql_purge).
+procedure resource_purge(type: Slice[u8], before: Slice[u8], mutable shown: ref[Array[u8]], mutable count: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_purge(type, before, shown, count)
+    if database_in_use() <> 0
+        return sql_purge(type, before, shown, count)
     FAILED
 }
 
 ; The ids of a type's deleted resources, a line each.
-procedure resource_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool
+procedure resource_deleted_ids(type: Slice[u8], mutable ids: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread
 {
     if type_versioned(type) = false
         return STORED
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_deleted_ids(type, ids)
+    if database_in_use() <> 0
+        return sql_deleted_ids(type, ids)
     FAILED
 }
 
 ; The search indexes of every table made, or dropped (upstream's
 ; CreateIndexesSql and DropIndexesSql).
-procedure database_indexes(create: bool) returns bool mutable pg_pool
+procedure database_indexes(create: bool) returns bool mutable pg_pool, sqlite_thread
 {
     if database_in_use() <> DATABASE_POSTGRESQL
         return false
     if create
-        return postgresql_script(0, model_value(61, "postgresql.indexes.create"))
-    postgresql_script(0, model_value(61, "postgresql.indexes.drop"))
+        return sql_script(0, database_script_named("indexes.create"))
+    sql_script(0, database_script_named("indexes.drop"))
 }
 
 ; A search parameter's table made and filled, or dropped (see the
 ; PostgreSQL side).
-procedure search_table(scope: u64, type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool
+procedure search_table(scope: u64, type: Slice[u8], parameter: Slice[u8], create: bool) returns int mutable pg_pool, sqlite_thread
 {
     if database_in_use() <> DATABASE_POSTGRESQL
         return FAILED
     if create
-        return postgresql_create_search(scope, type, parameter)
-    postgresql_drop_search(type, parameter)
+        return sql_create_search(scope, type, parameter)
+    sql_drop_search(type, parameter)
 }
 
 ; Everything of a type gone.
-procedure resource_truncate(type: Slice[u8]) returns bool mutable pg_pool
+procedure resource_truncate(type: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_truncate(type)
+    if database_in_use() <> 0
+        return sql_truncate(type)
     false
 }
 
 ; A script on the transaction `scope` (0: by itself), and the version the
 ; database is at.
-procedure database_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool
+procedure database_script(scope: u64, sql: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_script(scope, sql)
+    if database_in_use() <> 0
+        return sql_script(scope, sql)
     false
 }
 
-procedure database_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool
+procedure database_version(mutable version: ref[Array[u8]]) returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_version(version)
+    if database_in_use() <> 0
+        return sql_version(version)
     false
 }
 
 ; Does the database answer?
-procedure database_ready() returns bool mutable pg_pool
+procedure database_ready() returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_ready()
+    if database_in_use() <> 0
+        return sql_ready()
     false
 }
 
-procedure resource_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool
+procedure resource_is_deleted(scope: u64, type: Slice[u8], id: Slice[u8]) returns bool mutable pg_pool, sqlite_thread
 {
     if type_versioned(type) = false
         return false
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_is_deleted(scope, type, id)
+    if database_in_use() <> 0
+        return sql_is_deleted(scope, type, id)
     false
 }
 
-procedure resource_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool
+procedure resource_select(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i64, mutable content: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_select(scope, type, id, version_id, content)
+    if database_in_use() <> 0
+        return sql_select(scope, type, id, version_id, content)
     StoreResult(FAILED, 0, 0)
 }
 
-; Search (see postgresql_search).
-procedure resource_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool
+; Search (see sql_search).
+procedure resource_search(scope: u64, type: Slice[u8], text: Slice[u8], cells: Slice[i64], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_search(scope, type, text, cells, count, offset, found, rows, problem)
+    if database_in_use() <> 0
+        return sql_search(scope, type, text, cells, count, offset, found, rows, problem)
     StoreResult(FAILED, 0, 0)
 }
 
-; The versions of a resource or of a type (see postgresql_history).
-procedure resource_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool
+; The versions of a resource or of a type (see sql_history).
+procedure resource_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
     var keys Array[i64]()
     resource_history_keyed(scope, type, id, count, offset, found, rows, &keys)
@@ -151,26 +151,26 @@ procedure resource_history(scope: u64, type: Slice[u8], id: Slice[u8], count: i6
 
 ; ... and with every row's time in microseconds in keys, for a caller that
 ; orders the rows of several types among each other.
-procedure resource_history_keyed(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool
+procedure resource_history_keyed(scope: u64, type: Slice[u8], id: Slice[u8], count: i64, offset: i64, mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable keys: ref[Array[i64]]) returns StoreResult mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_history(scope, type, id, count, offset, found, rows, keys)
+    if database_in_use() <> 0
+        return sql_history(scope, type, id, count, offset, found, rows, keys)
     StoreResult(FAILED, 0, 0)
 }
 
 ; Begin a transaction over several operations: its scope, 0 when the
 ; database does not answer.
-procedure transaction_begin() returns u64 mutable pg_pool
+procedure transaction_begin() returns u64 mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_begin()
+    if database_in_use() <> 0
+        return sql_begin()
     0
 }
 
 ; End it: commit, or roll back.
-procedure transaction_end(scope: u64, commit: bool) returns bool mutable pg_pool
+procedure transaction_end(scope: u64, commit: bool) returns bool mutable pg_pool, sqlite_thread
 {
-    if database_in_use() = DATABASE_POSTGRESQL
-        return postgresql_end(scope, commit)
+    if database_in_use() <> 0
+        return sql_end(scope, commit)
     false
 }

@@ -421,7 +421,7 @@ function patch_if_match(field: Slice[u8]) returns i64
     -1
 }
 
-procedure resource_patch(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+procedure resource_patch(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
 {
     let type type_of(req)
     let id req.param("id")

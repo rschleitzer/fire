@@ -7,13 +7,15 @@
 ;
 ; The settings come from the environment under the names upstream's
 ; configuration has (fhir/Config.scaly). The database layer is cut as
-; upstream cuts it: one provider per database (fhir/postgresql), behind
-; fhir/Database.scaly.
+; upstream cuts it, a provider per database behind fhir/Database.scaly --
+; but its operations are written once (fhir/sql) and speak the dialect of
+; the connection they are given (fhir/Db.scaly).
 
 package scaly 0.1.0
 package http 0.1.0
 package json 0.1.1
 package pg 0.2.0
+package sqlite 0.1.0
 
 define fhir
 {
@@ -28,8 +30,11 @@ define fhir
     module Binary
     module Search
     module Query
+    module Db
     module postgresql
+    module sqlite
     module Database
+    module sql
     module Repository
     module Chains
     module Composite

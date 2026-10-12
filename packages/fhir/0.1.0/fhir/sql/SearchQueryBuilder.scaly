@@ -208,6 +208,21 @@ function readable_number(s: Slice[u8]) returns bool
     at = s.length
 }
 
+; The word true or false of a query as the value of a boolean column:
+; PostgreSQL reads the word, SQLite has 1 and 0.
+procedure put_boolean_param(mutable q: ref[SearchQuery], word: Slice[u8])
+{
+    if database_in_use() = DATABASE_SQLITE
+    {
+        put_bytes(&q.wheres, "(LOWER(")
+        put_param(q, &q.wheres, word)
+        put_bytes(&q.wheres, ") = 'true')")
+        return
+    }
+    put_param(q, &q.wheres, word)
+    put_bytes(&q.wheres, "::boolean")
+}
+
 ; The operator of a comparison prefix; empty for one there is none for.
 function comparison(prefix: Slice[u8]) returns Slice[u8]
 {
@@ -764,8 +779,7 @@ procedure inline_condition(mutable q: ref[SearchQuery], alias: int, column: Slic
                 next_part(q, &parts)
                 put_operand(&q.wheres, alias, column)
                 put_bytes(&q.wheres, " = ")
-                put_param(q, &q.wheres, v)
-                put_bytes(&q.wheres, "::boolean")
+                put_boolean_param(q, v)
             }
             case 116
             {
@@ -909,9 +923,10 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
             put_bytes(&q.wheres, " IS NULL OR ")
             put_operand(&q.wheres, inline_alias, inline_column)
             put_bytes(&q.wheres, " != ")
-            put_param(q, &q.wheres, value)
             if kind = 98
-                put_bytes(&q.wheres, "::boolean")
+                put_boolean_param(q, value)
+            else
+                put_param(q, &q.wheres, value)
             put_bytes(&q.wheres, ")")
             return true
         }

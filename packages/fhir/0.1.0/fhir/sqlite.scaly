@@ -1,0 +1,6 @@
+; The SQLite side of the database layer.
+
+define sqlite
+{
+    module DatabaseProvider
+}

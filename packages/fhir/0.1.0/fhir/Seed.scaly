@@ -37,7 +37,7 @@ function name_before(a: Slice[u8], b: Slice[u8]) returns bool
 ; Every seed file's resources -- of the type `only` when one is named --
 ; put under their ids, in the transaction `scope` or (0) each by itself;
 ; totals counts them: created, updated, failed.
-procedure seed_load(scope: u64, only: Slice[u8], mutable totals: ref[Array[i64]]) mutable pg_pool
+procedure seed_load(scope: u64, only: Slice[u8], mutable totals: ref[Array[i64]]) mutable pg_pool, sqlite_thread
 {
     totals.add(0)
     totals.add(0)

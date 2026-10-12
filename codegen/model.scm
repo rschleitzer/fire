@@ -126,7 +126,7 @@ define " name "
     module Schema
 }
 
-procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool
+procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int mutable pg_pool, sqlite_thread
 {
     var text Array[u8]()
     model_write(&" "text)
@@ -245,16 +245,19 @@ procedure model_write(mutable out: ref[Array[u8]])
 ; here to be made a Scaly string; tools/schema.sh makes records of them).
 (define (scaly-script-files)
     (make directory path: "sql"
-        (sosofo-append
-            (file "postgresql.schema.sql" (schema-sql 'PostgreSql))
-            (file "postgresql.indexes.create.sql" (create-indexes-sql 'PostgreSql))
-            (file "postgresql.indexes.drop.sql" (drop-indexes-sql 'PostgreSql))
-            ; the SQL of every upgrade step (empty for one that only moves data)
-            (if (has-upgrades?)
-                (for-nodes (upgrade-list) (lambda (upgrade)
-                    (file ($ "postgresql.upgrade." (% "to" upgrade) ".sql")
-                          (upgrade-step-sql upgrade 'PostgreSql))))
-                (empty-sosofo)))))
+        (apply sosofo-append (map (lambda (db)
+            (let ((name (case db ((PostgreSql) "postgresql") ((Sqlite) "sqlite") (else "sqlserver"))))
+                (sosofo-append
+                    (file ($ name ".schema.sql") (schema-sql db))
+                    (file ($ name ".indexes.create.sql") (create-indexes-sql db))
+                    (file ($ name ".indexes.drop.sql") (drop-indexes-sql db))
+                    ; the SQL of every upgrade step (empty for one that only moves data)
+                    (if (has-upgrades?)
+                        (for-nodes (upgrade-list) (lambda (upgrade)
+                            (file ($ name ".upgrade." (% "to" upgrade) ".sql")
+                                  (upgrade-step-sql upgrade db))))
+                        (empty-sosofo)))))
+            '(PostgreSql Sqlite)))))
 
 ; --- /metadata ---
 

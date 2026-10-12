@@ -1,0 +1,371 @@
+; A connection to the database in use, whichever it is: the operations of
+; fhir/sql/ are written once and speak to this. Each call goes to the
+; connection of the kind that was opened (pg's or sqlite's -- their
+; operations have the same names and meanings on purpose).
+;
+; `kind` is also the DIALECT: where the two databases want different SQL,
+; the code asks `c.kind`.
+
+use pg.Conn.PgConn
+use sqlite.Conn.SqliteConn
+
+; The SQL of fhir/sql/ is written as PostgreSQL reads it. For SQLite it is
+; rendered here, on its way to the connection, by what differs in the
+; LETTER of the two (what differs in meaning is asked at its place):
+;   "Type".table  ->  Type_table     upstream's SQLite schema has no
+;   "name"        ->  name           schemas and quotes nothing
+;   x::type       ->  x              SQLite has no casts of that form ...
+;   FOR UPDATE    ->  (nothing)      ... and no row locks: a transaction
+;                                    that writes holds the database
+; A string literal ('...') is left as it is.
+procedure put_for_sqlite(mutable out: ref[Array[u8]], sql: Slice[u8])
+{
+    var i: size_t 0
+    var literal false
+    while i < sql.length
+    {
+        let c sql[i]
+        if c = 39
+        {
+            literal := literal = false
+            out.add(c)
+            i := i + 1
+            continue
+        }
+        if literal
+        {
+            out.add(c)
+            i := i + 1
+            continue
+        }
+        if c = 34
+        {
+            ; a quoted name: without its quotes, and a dot behind it (the
+            ; schema's) is the underscore of upstream's table names
+            var end i + 1
+            while end < sql.length and sql[end] <> 34
+            {
+                out.add(sql[end])
+                end := end + 1
+            }
+            i := end + 1
+            if i < sql.length and sql[i] = 46
+            {
+                out.add(95 as u8)
+                i := i + 1
+            }
+            continue
+        }
+        if c = 58 and i + 1 < sql.length and sql[i + 1] = 58
+        {
+            i := i + 2
+            while i < sql.length and ((sql[i] >= 97 and sql[i] <= 122) or (sql[i] >= 65 and sql[i] <= 90))
+                i := i + 1
+            continue
+        }
+        if c = 32 and i + 11 <= sql.length and sql.subslice(i, i + 11).equals(" FOR UPDATE")
+        {
+            i := i + 11
+            continue
+        }
+        out.add(c)
+        i := i + 1
+    }
+}
+
+define DbConn
+(
+    kind: u64
+    pg: ref[PgConn]?
+    lite: ref[SqliteConn]?
+)
+{
+    ; No connection: the database did not answer.
+    function missing(this) returns bool
+        pg = null and lite = null
+
+    procedure prepare(mutable this, name: Slice[u8], sql: Slice[u8]) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            var rendered Array[u8]()
+            put_for_sqlite(&rendered, sql)
+            return c.prepare(name, rendered.as_slice())
+        }
+        var c pg as ref[PgConn]
+        c.prepare(name, sql)
+    }
+
+    procedure prepare_unnamed(mutable this, sql: Slice[u8]) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            var rendered Array[u8]()
+            put_for_sqlite(&rendered, sql)
+            return c.prepare_unnamed(rendered.as_slice())
+        }
+        var c pg as ref[PgConn]
+        c.prepare_unnamed(sql)
+    }
+
+    procedure start(mutable this, name: Slice[u8])
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.start(name)
+        }
+        var c pg as ref[PgConn]
+        c.start(name)
+    }
+
+    procedure param_text(mutable this, v: Slice[u8])
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.param_text(v)
+        }
+        var c pg as ref[PgConn]
+        c.param_text(v)
+    }
+
+    procedure param_bytes(mutable this, v: Slice[u8])
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.param_bytes(v)
+        }
+        var c pg as ref[PgConn]
+        c.param_bytes(v)
+    }
+
+    procedure param_int(mutable this, v: i64)
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.param_int(v)
+        }
+        var c pg as ref[PgConn]
+        c.param_int(v)
+    }
+
+    procedure param_null(mutable this)
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.param_null()
+        }
+        var c pg as ref[PgConn]
+        c.param_null()
+    }
+
+    procedure run(mutable this) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.run()
+        }
+        var c pg as ref[PgConn]
+        c.run()
+    }
+
+    procedure execute(mutable this, sql: Slice[u8]) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            var rendered Array[u8]()
+            put_for_sqlite(&rendered, sql)
+            return c.execute(rendered.as_slice())
+        }
+        var c pg as ref[PgConn]
+        c.execute(sql)
+    }
+
+    procedure next_row(mutable this) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.next_row()
+        }
+        var c pg as ref[PgConn]
+        c.next_row()
+    }
+
+    procedure column(mutable this, i: int) returns Slice[u8]
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.column(i)
+        }
+        var c pg as ref[PgConn]
+        c.column(i)
+    }
+
+    procedure column_int(mutable this, i: int) returns i64
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.column_int(i)
+        }
+        var c pg as ref[PgConn]
+        c.column_int(i)
+    }
+
+    procedure column_is_null(mutable this, i: int) returns bool
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.column_is_null(i)
+        }
+        var c pg as ref[PgConn]
+        c.column_is_null(i)
+    }
+
+    procedure error_message(mutable this) returns Slice[u8]
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            return c.error_message()
+        }
+        var c pg as ref[PgConn]
+        c.error_message()
+    }
+
+    ; The rows of the statement that ran are done with (SQLite: its read
+    ; lock is let go; see sqlite's finish).
+    procedure finish(mutable this)
+    {
+        if kind = DATABASE_SQLITE
+        {
+            var c lite as ref[SqliteConn]
+            c.finish()
+        }
+    }
+
+    ; A result column that is to come as its bytes (pg asks for it in the
+    ; statement; SQLite gives a column what it holds).
+    procedure binary_column(mutable this, i: int)
+    {
+        if kind = DATABASE_SQLITE
+            return
+        var c pg as ref[PgConn]
+        c.binary_column(i)
+    }
+}
+
+; The connection an operation runs on: the one of the transaction `scope`
+; (transaction_begin's answer), or with no scope one of its own -- of pg's
+; pool, or this thread's SQLite connection.
+procedure connection(scope: u64) returns DbConn mutable pg_pool, sqlite_thread
+{
+    if database_in_use() = DATABASE_SQLITE
+        return DbConn(DATABASE_SQLITE, null, thread_connection())
+    if scope <> 0
+        return DbConn(DATABASE_POSTGRESQL, (scope as size_t) as ref[PgConn], null)
+    DbConn(DATABASE_POSTGRESQL, acquire(), null)
+}
+
+; Give a connection of the pool back; this thread's SQLite connection
+; stays where it is.
+procedure release_connection(mutable c: ref[DbConn]) mutable pg_pool
+{
+    if c.kind = DATABASE_SQLITE
+        return c.finish()
+    var p c.pg as ref[PgConn]
+    release(p)
+}
+
+; What a transaction over several operations is known by: the pooled
+; connection it holds, or (SQLite) the mark that this thread's is in one.
+function scope_of(c: ref[DbConn]) returns u64
+{
+    if c.kind = DATABASE_SQLITE
+        return 1
+    (c.pg as ref[PgConn]) as u64
+}
+
+; The schema at software_version on connection c, created when the database
+; has none (upstream's Database.GetDatabaseVersion without the migration of
+; a legacy database).
+procedure prepare_schema(mutable c: ref[DbConn], software_version: Slice[u8]) returns bool
+{
+    var known c.prepare_unnamed("SELECT value FROM \"fire_meta\".dbinfo WHERE name = 'version'")
+    if known
+    {
+        c.start("")
+        known := c.run() and c.next_row()
+    }
+    if known
+    {
+        let version c.column(0)
+        if version_newer(version, software_version)
+        {
+            Console.println("Database version `String(version.data as pointer[const_char], version.length)` is newer than software version `String(software_version.data as pointer[const_char], software_version.length)`")
+            return false
+        }
+        return true
+    }
+    var has_schema: Slice[u8] "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'fire_meta'"
+    if c.kind = DATABASE_SQLITE
+        has_schema := "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE 'fire_meta_%'"
+    if c.prepare_unnamed(has_schema) = false
+        return false
+    c.start("")
+    if c.run() = false or c.next_row() = false
+        return false
+    let has_meta c.column_int(0) > 0
+    var version: Slice[u8] "0.0.0"
+    if has_meta = false
+    {
+        Console.println("Creating database schema...")
+        if c.execute(database_script_named("schema")) = false
+            return false
+        version := software_version
+        database_created()
+    }
+    if c.kind <> DATABASE_SQLITE and c.execute("CREATE SCHEMA IF NOT EXISTS \"fire_meta\"") = false
+        return false
+    if c.execute("CREATE TABLE IF NOT EXISTS \"fire_meta\".dbinfo (name VARCHAR(127) NOT NULL PRIMARY KEY, value VARCHAR(127))") = false
+        return false
+    if c.prepare("fire_insert_version", "INSERT INTO \"fire_meta\".dbinfo (name, value) VALUES ('version', $1)") = false
+        return false
+    c.start("fire_insert_version")
+    c.param_text(version)
+    if c.run() = false
+        return false
+    Console.println("Database initialized at version `String(version.data as pointer[const_char], version.length)`.")
+    true
+}
+
+; Is version a.b.c newer than other?
+function version_newer(version: Slice[u8], other: Slice[u8]) returns bool
+{
+    var a version
+    var b other
+    var part 0
+    while part < 3
+    {
+        let x digits_of(a)
+        let y digits_of(b)
+        if x <> y
+            return x > y
+        a := after_dot(a)
+        b := after_dot(b)
+        part := part + 1
+    }
+    false
+}
+

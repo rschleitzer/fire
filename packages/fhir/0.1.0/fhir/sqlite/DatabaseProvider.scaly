@@ -1,0 +1,64 @@
+; The SQLite provider: where the database file is, and how a connection to
+; it is opened.
+
+use sqlite.Conn.SqliteConn
+use fhir.Db.DbConn
+
+define SqliteProvider
+(
+    path: String
+)
+{
+    ; From a connection string of the form upstream takes
+    ; (Microsoft.Data.Sqlite's): Data Source=fire.db. The keywords are read
+    ; without regard to case, DataSource and Filename say the same; what
+    ; else it names is passed over.
+    procedure parse(page: ref[Page], text: Slice[u8]) returns SqliteProvider
+    {
+        var path text.slice_to(0)
+        var at: size_t 0
+        while at < text.length
+        {
+            var end at
+            while end < text.length and text[end] <> 59
+                end := end + 1
+            let part text.subslice(at, end)
+            var eq: size_t 0
+            while eq < part.length and part[eq] <> 61
+                eq := eq + 1
+            if eq < part.length
+            {
+                let key trimmed(part.slice_to(eq))
+                if keyword_is(key, "data source") or keyword_is(key, "datasource") or keyword_is(key, "filename")
+                    path := trimmed(part.slice_from(eq + 1))
+            }
+            at := end + 1
+        }
+        SqliteProvider(String^page(path.data as pointer[const_char], path.length))
+    }
+
+    ; The work at the server's start: the file opens (it is made when it is
+    ; not there) and has the schema at a version this software knows. Every
+    ; thread's connection is told where the file is, and to keep the
+    ; foreign keys -- the library upstream ships has them on, the system's
+    ; own has not, and the search rows of a deleted resource go by them.
+    procedure initialize(this, software_version: Slice[u8]) returns bool mutable sqlite_thread
+    {
+        configure(path.as_slice(), "PRAGMA foreign_keys = ON")
+        let got thread_connection()
+        if got = null
+        {
+            Console.println("Cannot open the SQLite database `path`")
+            return false
+        }
+        var held DbConn(DATABASE_SQLITE, null, got)
+        let ok prepare_schema(&held, software_version)
+        held.finish()
+        if ok = false
+        {
+            let m held.error_message()
+            Console.println("SQLite refused: `String(m.data as pointer[const_char], m.length)`")
+        }
+        ok
+    }
+}

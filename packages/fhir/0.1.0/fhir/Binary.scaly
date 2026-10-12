@@ -10,8 +10,12 @@ use http.Response.Response
 use json.Value.JsonValue
 
 ; Does the type keep its data apart?
-function keeps_data_apart(type: Slice[u8]) returns bool
+procedure keeps_data_apart(type: Slice[u8]) returns bool
+{
+    if database_in_use() = DATABASE_SQLITE
+        return false
     type.equals("Binary")
+}
 
 ; Does haystack contain needle?
 function contains(haystack: Slice[u8], needle: Slice[u8]) returns bool

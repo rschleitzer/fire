@@ -223,6 +223,14 @@ function zone_sign(date: Slice[u8]) returns size_t
     0
 }
 
+; A cell that holds a time, as the database in use holds one.
+procedure time_cell(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]], time: Slice[u8])
+{
+    open_cell(text, cells)
+    put_database_time(text, time)
+    close_cell(text, cells)
+}
+
 ; The span a FHIR date covers, as upstream's ParseFhirDateRange gives it:
 ; one instant for a value with a time (UTC where it names no zone), else
 ; the whole year, month or day up to its last millisecond.
@@ -248,11 +256,11 @@ procedure range_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64
             times := times + 1
         while times > 0
         {
-            open_cell(text, cells)
-            put_instant_text(text, date)
+            var written Array[u8]()
+            put_instant_text(&written, date)
             if zoned = false
-                put_bytes(text, "+00")
-            close_cell(text, cells)
+                put_bytes(&written, "+00")
+            time_cell(text, cells, written.as_slice())
             times := times - 1
         }
         return
@@ -274,27 +282,27 @@ procedure range_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i64
     }
     if low
     {
-        open_cell(text, cells)
-        text.add(year)
-        put_bytes(text, "-")
-        text.add(month)
-        put_bytes(text, "-")
-        text.add(day)
-        put_bytes(text, " 00:00:00+00")
-        close_cell(text, cells)
+        var written Array[u8]()
+        written.append(year)
+        put_bytes(&written, "-")
+        written.append(month)
+        put_bytes(&written, "-")
+        written.append(day)
+        put_bytes(&written, " 00:00:00+00")
+        time_cell(text, cells, written.as_slice())
     }
     if high
     {
-        open_cell(text, cells)
-        text.add(year)
-        put_bytes(text, "-")
-        text.add(last_month)
-        put_bytes(text, "-")
+        var written Array[u8]()
+        written.append(year)
+        put_bytes(&written, "-")
+        written.append(last_month)
+        put_bytes(&written, "-")
         if last_day < 10
-            put_bytes(text, "0")
-        put_decimal(text, last_day)
-        put_bytes(text, " 23:59:59.999+00")
-        close_cell(text, cells)
+            put_bytes(&written, "0")
+        put_decimal(&written, last_day)
+        put_bytes(&written, " 23:59:59.999+00")
+        time_cell(text, cells, written.as_slice())
     }
 }
 
@@ -316,9 +324,9 @@ procedure period_cells(mutable text: ref[Array[u8]], mutable cells: ref[Array[i6
     if start.is_text() = false and end.is_text() = false
         return false
     if date_cells(text, cells, start, true, false) = false
-        cell(text, cells, "-infinity")
+        time_cell(text, cells, "-infinity")
     if date_cells(text, cells, end, false, true) = false
-        cell(text, cells, "infinity")
+        time_cell(text, cells, "infinity")
     true
 }
 

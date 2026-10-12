@@ -6,7 +6,7 @@
 
 use http.Router.Router
 
-procedure serve_model(model: Slice[u8]) returns int mutable pg_pool
+procedure serve_model(model: Slice[u8]) returns int mutable pg_pool, sqlite_thread
 {
     let page Page.allocate_page()
     model_install(page, model)

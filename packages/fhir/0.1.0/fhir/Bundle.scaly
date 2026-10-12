@@ -92,7 +92,7 @@ procedure failed_entry(mutable e: ref[JsonWriter], status: int)
 }
 
 ; Put `resource` under `id` (update, or create when it is not there).
-procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, resource: JsonValue, if_match: i64, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, resource: JsonValue, if_match: i64, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool, sqlite_thread
 {
     if resource.is_null()
         return error_entry(e, "400", "Missing resource")
@@ -126,7 +126,7 @@ procedure put_entry(scope: u64, type: Slice[u8], id: Slice[u8], has_id: bool, re
 }
 
 ; One entry of a batch or a transaction.
-procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+procedure process_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool, sqlite_thread
 {
     if entry.is_object() = false
         return error_entry(e, "400", "Invalid entry")
@@ -385,7 +385,7 @@ procedure transaction_entry_valid(entry: JsonValue, mutable outcome: ref[Array[u
 }
 
 ; One entry of a searchset: its resource put under its id.
-procedure searchset_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool
+procedure searchset_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable e: ref[JsonWriter]) mutable pg_pool, sqlite_thread
 {
     let resource entry.get("resource")
     if resource.get("resourceType").is_text() = false or resource.get("id").is_text() = false
@@ -394,7 +394,7 @@ procedure searchset_entry(scope: u64, entry: JsonValue, base: Slice[u8], mutable
 }
 
 ; POST /fire
-procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+procedure bundle_post(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
 {
     let parsed JsonValue.parse(req.body)
     if parsed.ok() = false or parsed.value.is_object() = false

@@ -18,6 +18,7 @@
 # first run, outside the repository.
 #
 #   PYRTEST         the pyrtest checkout          (~/repos/pyrtest)
+#   FIRE_DATABASE   postgresql (the default) or sqlite
 #   FIRE_PG_PORT    the throwaway PostgreSQL      (55432)
 #   FIRE_HTTP_PORT  the server under measurement  (5580)
 #   FIRE_MEASURE    environment and results       (~/.cache/fire-measure)
@@ -34,6 +35,10 @@ PG_IMAGE=postgres:18
 PG_NAME="fire-measure-pg-$$"
 PG_PASSWORD=throwaway
 BASE="http://localhost:$HTTP_PORT"
+# the database under both servers: postgresql (a throwaway container), or
+# sqlite (a file below $WORK)
+DATABASE="${FIRE_DATABASE:-postgresql}"
+SQLITE_FILE="$WORK/sqlite/fire.db"
 
 case "$WHAT" in
   scaly) TARGETS="scaly" ;;
@@ -46,7 +51,7 @@ die() { echo "measure: $*" >&2; exit 1; }
 
 [ "$PG_PORT" != 5432 ] || die "5432 is not a throwaway port"
 [ -f "$PYRTEST/requirements.txt" ] || die "no pyrtest at $PYRTEST"
-command -v docker > /dev/null || die "docker is not on the PATH"
+[ "${FIRE_DATABASE:-postgresql}" = sqlite ] || command -v docker > /dev/null || die "docker is not on the PATH"
 
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN > /dev/null 2>&1; }
 
@@ -58,7 +63,7 @@ stop_server() {
     SERVER_PID=
   fi
 }
-stop_database() { docker rm -f -v "$PG_NAME" > /dev/null 2>&1; }
+stop_database() { [ "$DATABASE" = sqlite ] || docker rm -f -v "$PG_NAME" > /dev/null 2>&1; }
 trap 'stop_server; stop_database' EXIT
 trap 'exit 130' INT TERM
 
@@ -97,6 +102,11 @@ build_csharp() {
 }
 
 start_database() {
+  if [ "$DATABASE" = sqlite ]; then
+    # a file of this script's own, made anew
+    rm -rf "$WORK/sqlite"; mkdir -p "$WORK/sqlite"
+    return
+  fi
   listening "$PG_PORT" && die "port $PG_PORT is taken (FIRE_PG_PORT names another)"
   docker run -d --rm --name "$PG_NAME" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=Fire \
     -p "127.0.0.1:$PG_PORT:5432" "$PG_IMAGE" > /dev/null || die "the PostgreSQL container does not start"
@@ -113,6 +123,10 @@ start_server() {
   listening "$HTTP_PORT" && die "port $HTTP_PORT is taken (FIRE_HTTP_PORT names another)"
   export DatabaseType=PostgreSql
   export ConnectionString="Host=localhost;Port=$PG_PORT;Database=Fire;Username=postgres;Password=$PG_PASSWORD"
+  if [ "$DATABASE" = sqlite ]; then
+    export DatabaseType=Sqlite
+    export ConnectionString="Data Source=$SQLITE_FILE"
+  fi
   export Kestrel__Endpoints__MyHttpEndpoint__Url="$BASE"
   # the seed data both servers load into a database they create, and the
   # secret of the reseed route
@@ -206,8 +220,21 @@ alike() {
   echo "turns: FAIL -- $1 and $2 differ beyond id and time (diff $WORK/turns.$1.body $WORK/turns.$2.body)"; TURNS_FAILED=1
 }
 
+# On SQLite: a query on the file, and the columns of a table but the named
+# ones, each quoted and with | between -- what a row is compared by.
+lite() { sqlite3 "$SQLITE_FILE" "$@"; }
+lite_columns() {
+  local table=$1 not; shift; not=$(printf "'%s'," "$@")
+  lite "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$table') where name not in (${not%,})"
+}
+
 # What the tables hold of a resource, in the order it was written.
 rows_of() {
+  if [ "$DATABASE" = sqlite ]; then
+    lite "select version_id, active, gender, length(content), history_operation from Patient_resource_history where id = '$1'
+          union all select version_id, active, gender, length(content), 'CURRENT' from Patient where id = '$1' order by 1"
+    return
+  fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "
     select version_id, \"active\", \"gender\", length(content), history_operation
       from \"Patient\".resource_history where id = '$1'
@@ -247,6 +274,11 @@ binary() {
   ACCEPT='*/*' call "$1.Binary.spaced.raw" 200 GET "Binary/$(id_of "$1.Binary.spaced")"
   ACCEPT='*/*' call "$1.Binary.spaced.format" 200 GET "Binary/$(id_of "$1.Binary.spaced")?_format=json"
   curl -s -o /dev/null -D "$WORK/turns.$1.Binary.spaced.raw.head" -H 'Accept: */*' "$BASE/fire/Binary/$(id_of "$1.Binary.spaced")"
+  # (on SQLite the data stays in the content: what is compared is that)
+  if [ "$DATABASE" = sqlite ]; then
+    lite "select version_id, hex(content) from Binary where id = '$(id_of "$1.Binary.spaced")'" | sed -E 's/226C617374557064617465642[0-9A-F]*//' > "$WORK/turns.$1.Binary.data"
+    return
+  fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "select version_id, encode(data, 'hex') from \"Binary\".resource_data where resource_id = '$(id_of "$1.Binary.spaced")'" > "$WORK/turns.$1.Binary.data"
 }
 
@@ -254,6 +286,12 @@ binary() {
 # resource's id.
 search_dump() {
   local tables sql= t
+  if [ "$DATABASE" = sqlite ]; then
+    for t in $(lite "select name from sqlite_master where type = 'table' and name like '$1\_search\_%' escape '\\' order by 1"); do
+      lite "select '${t#$1_}', id, $(lite_columns "$t" resource_id id) from $t where resource_id = '$2' order by id"
+    done
+    return
+  fi
   tables=$(docker exec "$PG_NAME" psql -U postgres -d Fire -Atc \
     "select table_name from information_schema.tables where table_schema = '$1' and table_name like 'search\\_%' order by 1")
   for t in $tables; do
@@ -298,6 +336,12 @@ linked() {
   # ... and rows of tools/turns/rows.sql, written past the servers: a uri
   # search has no resource here that could hold one (R5's Observation has no
   # valueCanonical), so its tables are filled by hand for the questions
+  if [ "$DATABASE" = sqlite ]; then
+    # (the same rows under SQLite's table names)
+    sed -E 's/"([A-Za-z]+)"\.([a-z_]+)/\1_\2/g' "$ROOT/tools/turns/rows.sql" | sqlite3 "$SQLITE_FILE" \
+      || { echo "turns: FAIL -- tools/turns/rows.sql"; TURNS_FAILED=1; }
+    return
+  fi
   docker exec -i "$PG_NAME" psql -U postgres -d Fire -q < "$ROOT/tools/turns/rows.sql" \
     || { echo "turns: FAIL -- tools/turns/rows.sql"; TURNS_FAILED=1; }
 }
@@ -386,6 +430,11 @@ refusals() {
 # Everything the tables hold of a resource but its id, its times and its
 # bytes (their length instead), in the order it was written.
 other_rows() {
+  if [ "$DATABASE" = sqlite ]; then
+    lite "select $(lite_columns "$1_resource_history" id last_updated content history_timestamp), length(content) from $1_resource_history where id = '$2'"
+    lite "select $(lite_columns "$1" id last_updated content), length(content) from $1 where id = '$2'"
+    return
+  fi
   docker exec "$PG_NAME" psql -U postgres -d Fire -Atc "
     select to_jsonb(h) - 'id' - 'last_updated' - 'content' - 'history_timestamp', length(content)
       from \"$1\".resource_history h where id = '$2'

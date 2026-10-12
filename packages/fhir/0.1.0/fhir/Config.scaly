@@ -39,3 +39,8 @@ function port_of(url: Slice[u8], fallback: int) returns int
         return fallback
     n
 }
+
+; The databases a server can run on; which one it does is
+; database_in_use() (fhir/Database.scaly).
+define DATABASE_POSTGRESQL: u64 1
+define DATABASE_SQLITE: u64 2

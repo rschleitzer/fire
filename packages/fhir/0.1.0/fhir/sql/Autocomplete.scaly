@@ -3,7 +3,7 @@
 ; finds by the beginning of its value. A parameter is known here when it has
 ; a string, token or date table (upstream's ResolveSearchTable).
 
-use pg.Conn.PgConn
+use fhir.Db.DbConn
 
 ; The column autocomplete reads of a parameter's table; empty when the
 ; parameter has none it knows.
@@ -65,7 +65,7 @@ procedure autocomplete_condition(mutable sql: ref[Array[u8]], mutable values: re
 
 ; The answers into text and cells. STORED, FAILED when the database does
 ; not answer, BROKEN for a statement it refuses (upstream's exception).
-procedure postgresql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool
+procedure sql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slice[u8], property: Slice[u8], count: i64, offset: i64, mutable text: ref[Array[u8]], mutable cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread
 {
     let property_line search_line(type, property)
     let property_column autocomplete_column(property_line)
@@ -157,10 +157,10 @@ procedure postgresql_autocomplete(type: Slice[u8], param: Slice[u8], value: Slic
         put_bytes(&sql, paging.as_slice())
     }
 
-    let got scoped(0)
-    if got = null
+    var held connection(0)
+    if held.missing()
         return FAILED
-    var c got as ref[PgConn]
+    var c &held
     var ok c.prepare_unnamed(sql.as_slice())
     if ok
     {

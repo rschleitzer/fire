@@ -36,7 +36,7 @@ procedure healthz(req: ref[Request], mutable res: ref[Response])
     res.send("text/plain", "healthy")
 
 ; GET /readyz: the database answers.
-procedure readyz(req: ref[Request], mutable res: ref[Response]) mutable pg_pool
+procedure readyz(req: ref[Request], mutable res: ref[Response]) mutable pg_pool, sqlite_thread
 {
     if database_ready()
         return res.send("text/plain", "ready")
