@@ -15,26 +15,48 @@ for request, and the comparison is what this repository is for.
 Both servers built for release, each on a PostgreSQL 18 of its own with
 2000 Patients and 2000 Observations, 64 connections, ten seconds a scenario
 (`tools/throughput.sh postgresql`; an M-series Mac with ten cores, the
-database in Docker, the load generator on the same machine):
+database in Docker, the load generator on the same machine). "cores" is the
+processor time the server process took per second of the run.
+
+The C# server as the generator writes it leaves its database driver at the
+defaults: Npgsql prepares no statement and resets a connection at every use.
+The Scaly server prepares its statements. So there are two comparisons.
+
+**The C# server as generated:**
 
 | scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 45 399 | 0.96 | 34 052 | 4.63 | 1.3x | 6.4x |
-| read a Patient | 18 967 | 1.33 | 13 132 | 2.30 | 1.4x | 2.5x |
-| search by name | 4 197 | 0.62 | 3 238 | 1.02 | 1.3x | 2.1x |
-| search by reference | 8 978 | 0.99 | 6 347 | 1.62 | 1.4x | 2.3x |
-| update | 895 | 1.20 | 712 | 1.73 | 1.3x | 1.8x |
-| create | 1 862 | 1.16 | 1 484 | 1.63 | 1.3x | 1.8x |
+| metadata (no database) | 45 526 | 1.00 | 36 610 | 4.80 | 1.2x | 6.0x |
+| read a Patient | 20 054 | 1.42 | 15 413 | 2.30 | 1.3x | 2.1x |
+| search by name | 5 216 | 0.60 | 4 040 | 1.07 | 1.3x | 2.3x |
+| search by reference | 11 863 | 1.31 | 7 640 | 1.71 | 1.6x | 2.0x |
+| update | 984 | 1.26 | 892 | 1.98 | 1.1x | 1.7x |
+| create | 2 002 | 1.18 | 1 693 | 1.66 | 1.2x | 1.7x |
 
-"cores" is the processor time the server process took per second of the
-run. Memory after the run: 26 MB for the Scaly server, 270 MB for the C#
+**The C# server with its driver preparing too**
+(`FIRE_CSHARP_OPTIONS="No Reset On Close=true;Max Auto Prepare=50"`):
+
+| scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
+|---|---|---|---|---|---|---|
+| metadata (no database) | 41 533 | 0.98 | 33 418 | 4.60 | 1.2x | 5.8x |
+| read a Patient | 16 793 | 1.35 | 14 656 | 3.32 | 1.1x | 2.8x |
+| search by name | 3 906 | 0.74 | 3 967 | 1.11 | 1.0x | 1.5x |
+| search by reference | 10 045 | 1.29 | 9 716 | 2.64 | 1.0x | 2.1x |
+| update | 839 | 1.25 | 864 | 2.24 | 1.0x | 1.7x |
+| create | 1 782 | 1.21 | 1 903 | 2.12 | 0.9x | 1.6x |
+
+Memory after a run: 27 MB for the Scaly server, 268 to 277 MB for the C#
 server.
 
-How to read it: this is one run on one machine, and runs differ by ten to
-thirty per cent. The load generator shares the machine and is the limit of
-the first scenario, and the database is the limit of every scenario that
-queries, so requests a second compare the two servers within a run and are
-not a machine's capacity. What a server costs is the last column.
+How to read it: each table is one run on one machine, and runs differ by
+ten to thirty per cent — the second was a slower moment for both servers,
+so compare within a table, not across. The load generator shares the
+machine and is the limit of the first scenario; the database is the limit
+of every scenario that queries, and once both servers prepare their
+statements they send it the same work and answer about as many requests a
+second. What differs then is what the server itself costs: the Scaly
+server answers them with half the processor time or less, and a tenth of
+the memory.
 
 ## How it is made
 

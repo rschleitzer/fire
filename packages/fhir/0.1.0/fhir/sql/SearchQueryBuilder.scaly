@@ -209,34 +209,22 @@ function readable_number(s: Slice[u8]) returns bool
 }
 
 ; The pattern a column in lower case is compared with: what begins with
-; the value, or (anywhere) what has it within. PostgreSQL lowers the value
-; itself. For SQLite it is lowered here and handed in whole, as upstream
-; does with .NET's ToLower: SQLite's own LOWER knows the ASCII letters
-; alone, so there a stored upper-case letter beyond them is never matched.
+; the value, or (anywhere) what has it within. The value is lowered HERE and
+; handed in whole, as upstream does with .NET's ToLower -- a pattern the
+; database had to make of the parameter would be made anew for every row.
+; (SQLite's own LOWER knows the ASCII letters alone, so there a stored
+; upper-case letter beyond them is never matched.)
 procedure put_like_pattern(mutable q: ref[SearchQuery], joined: bool, value: Slice[u8], anywhere: bool)
 {
     var pattern Array[u8]()
-    if database_in_use() <> DATABASE_POSTGRESQL
-    {
-        var whole Array[u8]()
-        if anywhere
-            whole.add(37 as u8)
-        put_lower_case(&whole, value)
+    var whole Array[u8]()
+    if anywhere
         whole.add(37 as u8)
-        cell(&q.text, &q.cells, whole.as_slice())
-        pattern.add(36 as u8)
-        put_decimal(&pattern, (q.cells.length / 2) as i64)
-    }
-    else
-    {
-        if anywhere
-            put_bytes(&pattern, "'%' || ")
-        put_bytes(&pattern, "LOWER(")
-        cell(&q.text, &q.cells, value)
-        pattern.add(36 as u8)
-        put_decimal(&pattern, (q.cells.length / 2) as i64)
-        put_bytes(&pattern, "::text) || '%'")
-    }
+    put_lower_case(&whole, value)
+    whole.add(37 as u8)
+    cell(&q.text, &q.cells, whole.as_slice())
+    pattern.add(36 as u8)
+    put_decimal(&pattern, (q.cells.length / 2) as i64)
     if joined
         q.joins.append(pattern.as_slice())
     else

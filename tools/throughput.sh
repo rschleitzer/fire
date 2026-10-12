@@ -19,6 +19,11 @@
 # requests a second here, whatever answers them). So requests a second
 # compare the two servers within one run and are not a machine's capacity;
 # what a server COSTS is the other column: requests for a core.
+#   FIRE_CSHARP_OPTIONS   more of the C# server's connection string. As the
+#       generator writes it, the server leaves its driver at the defaults:
+#       Npgsql prepares nothing and resets a connection at every use, where
+#       the Scaly server prepares its statements. With
+#       "No Reset On Close=true;Max Auto Prepare=50" both prepare.
 #   FIRE_LOAD (thousands of resources of each type, 1 to 9: 2)
 #   FIRE_SECONDS (10 a scenario)   FIRE_CONNECTIONS (64)
 set -u
@@ -82,7 +87,7 @@ measure() {
   if [ "$server" = scaly ]; then
     "$ROOT/server/build/fire-release" > /dev/null 2>&1 &
   else
-    (cd "$ROOT/upstream/server" && exec dotnet bin/Release/net10.0/Fire.dll) > /dev/null 2>&1 &
+    (cd "$ROOT/upstream/server" && ConnectionString="$connection${FIRE_CSHARP_OPTIONS:+;$FIRE_CSHARP_OPTIONS}" exec dotnet bin/Release/net10.0/Fire.dll) > /dev/null 2>&1 &
   fi
   SERVER_PID=$!
   local i=0

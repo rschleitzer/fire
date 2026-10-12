@@ -10,11 +10,39 @@ use pg.Conn.PgConn
 use sqlite.Conn.SqliteConn
 use tds.Conn.TdsConn
 
+; How many texts of queries a PostgreSQL connection keeps prepared
+; (DbConn.begin_query).
+define QUERY_SHAPES: size_t 64
+
+; The name a query's text is prepared under: "q:" and the FNV-1a hash of
+; the text, in hexadecimal.
+procedure put_shape_name(mutable out: ref[Array[u8]], sql: Slice[u8])
+{
+    var hash: u64 14695981039346656037
+    var i: size_t 0
+    while i < sql.length
+    {
+        hash := (hash xor (sql[i] as u64)) * 1099511628211
+        i := i + 1
+    }
+    put_bytes(out, "q:")
+    let digits: Slice[u8] "0123456789abcdef"
+    var k 0
+    while k < 16
+    {
+        out.add(digits[((hash >> (((15 - k) * 4) as u64)) & 15) as size_t])
+        k := k + 1
+    }
+}
+
 ; The SQL of fhir/sql/ is written as PostgreSQL reads it. For SQLite it is
 ; rendered here, on its way to the connection, by what differs in the
 ; LETTER of the two (what differs in meaning is asked at its place):
 ;   "Type".table  ->  Type_table     upstream's SQLite schema has no
-;   "name"        ->  name           schemas and quotes nothing
+;   "name"        ->  name           schemas and quotes no column
+;   "Type"        ->  "Type"         a resource's own table keeps its quotes
+;                                    (Group is a word of SQL); it is told
+;                                    from a column by its capital
 ;   x::type       ->  x              SQLite has no casts of that form ...
 ;   FOR UPDATE    ->  (nothing)      ... and no row locks: a transaction
 ;                                    that writes holds the database
@@ -42,15 +70,21 @@ procedure put_for_sqlite(mutable out: ref[Array[u8]], sql: Slice[u8])
         if c = 34
         {
             ; a quoted name: without its quotes, and a dot behind it (the
-            ; schema's) is the underscore of upstream's table names
+            ; schema's) is the underscore of upstream's table names; a
+            ; type's name that stands alone is its table and stays quoted
             var end i + 1
             while end < sql.length and sql[end] <> 34
-            {
-                out.add(sql[end])
                 end := end + 1
-            }
+            let name sql.subslice(i + 1, end)
+            let schema end + 1 < sql.length and (sql[end + 1] = 46)
+            let table schema = false and name.length > 0 and name[0] >= 65 and name[0] <= 90
+            if table
+                out.add(34 as u8)
+            out.append(name)
+            if table
+                out.add(34 as u8)
             i := end + 1
-            if i < sql.length and sql[i] = 46
+            if schema
             {
                 out.add(95 as u8)
                 i := i + 1
@@ -293,7 +327,37 @@ define DbConn
         if kind = DATABASE_POSTGRESQL
         {
             var c pg as ref[PgConn]
-            c.start_unnamed(sql, columns)
+            ; The text is made for the request, but of few SHAPES (the
+            ; parameters asked for, not their values): a shape is prepared
+            ; under a name made of its text and run by it from then on, so
+            ; the server parses and plans it once a connection. No more
+            ; than QUERY_SHAPES of them are kept; a text beyond that
+            ; travels with its parameters, as before.
+            var name Array[u8]()
+            put_shape_name(&name, sql)
+            var shapes: size_t 0
+            var known false
+            var i: size_t 0
+            while i < c.prepared.length
+            {
+                let have c.prepared.at(i).as_slice()
+                if have.equals(name.as_slice())
+                {
+                    known := true
+                    break
+                }
+                if have.starts_with("q:")
+                    shapes := shapes + 1
+                i := i + 1
+            }
+            if known = false and shapes >= QUERY_SHAPES
+            {
+                c.start_unnamed(sql, columns)
+                return true
+            }
+            if known = false and c.prepare(name.as_slice(), sql) = false
+                return false
+            c.start(name.as_slice())
             return true
         }
         if this.prepare_unnamed(sql) = false
@@ -602,6 +666,52 @@ function scope_of(c: ref[DbConn]) returns u64
 ; The schema at software_version on connection c, created when the database
 ; has none (upstream's Database.GetDatabaseVersion without the migration of
 ; a legacy database).
+; Is line the header the schema script begins a resource with
+; ("-- <Project> FHIR Server - <Type> Schema")?
+function schema_header(line: Slice[u8]) returns bool
+{
+    if line.starts_with("-- ") = false or line.length < 26
+        return false
+    if line.slice_from(line.length - 7).equals(" Schema") = false
+        return false
+    var i: size_t 3
+    while i + 15 <= line.length
+    {
+        if line.subslice(i, i + 15).equals(" FHIR Server - ")
+            return true
+        i := i + 1
+    }
+    false
+}
+
+; The schema script, one resource at a time, as upstream's
+; ExecuteInitialSchema runs it: as one statement it is one transaction, and
+; PostgreSQL keeps a lock for every table and index made in it -- a model
+; with many resources ends in "out of shared memory".
+procedure run_schema(mutable c: ref[DbConn], script: Slice[u8]) returns bool
+{
+    var from: size_t 0
+    var at: size_t 0
+    while at <= script.length
+    {
+        var end at
+        while end < script.length and script[end] <> 10
+            end := end + 1
+        let cut at > from and schema_header(script.subslice(at, end))
+        if cut or end >= script.length
+        {
+            var to at
+            if cut = false
+                to := script.length
+            if to > from and c.run_script(script.subslice(from, to)) = false
+                return false
+            from := to
+        }
+        at := end + 1
+    }
+    true
+}
+
 procedure prepare_schema(mutable c: ref[DbConn], software_version: Slice[u8]) returns bool
 {
     var known c.prepare_unnamed("SELECT value FROM \"fire_meta\".dbinfo WHERE name = 'version'")
@@ -635,7 +745,7 @@ procedure prepare_schema(mutable c: ref[DbConn], software_version: Slice[u8]) re
     if has_meta = false
     {
         Console.println("Creating database schema...")
-        if c.run_script(database_script_named("schema")) = false
+        if run_schema(c, database_script_named("schema")) = false
             return false
         version := software_version
         database_created()
