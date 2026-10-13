@@ -1019,6 +1019,100 @@ procedure add_parameter(mutable q: ref[SearchQuery], type: Slice[u8], whole_key:
     table_condition(q, type, line[0], entry(line, 32, 1), value, modifier, problem)
 }
 
+; The value of the line of `lines` that begins with key and a blank; empty
+; when there is none.
+function line_value(lines: Slice[u8], key: Slice[u8]) returns Slice[u8]
+{
+    var at: size_t 0
+    while at < lines.length
+    {
+        let line line_from(lines, at)
+        at := at + line.length + 1
+        if line.length > key.length + 1 and line[key.length] = 32 and line.slice_to(key.length).equals(key)
+            return line.slice_from(key.length + 1)
+    }
+    lines.slice_to(0)
+}
+
+; Is word one of the words of list, blanks between them?
+function has_word(list: Slice[u8], word: Slice[u8]) returns bool
+{
+    var at: size_t 0
+    while at < list.length
+    {
+        var end at
+        while end < list.length and list[end] <> 32
+            end := end + 1
+        if list.subslice(at, end).equals(word)
+            return true
+        at := end + 1
+    }
+    false
+}
+
+; The sort key reference:Type.key of `type`, put together: the column the
+; key of the target sorts by, reached through the reference's rows -- as
+; upstream's chain-sort-cases-for-target writes it. False when the type has
+; no such reference, the reference no such target, the target no such key.
+procedure put_chain_sort(type: Slice[u8], key: Slice[u8], mutable out: ref[Array[u8]]) returns bool
+{
+    var colon: size_t 0
+    while colon < key.length and key[colon] <> 58
+        colon := colon + 1
+    var dot colon
+    while dot < key.length and key[dot] <> 46
+        dot := dot + 1
+    if dot >= key.length
+        return false
+    ; (the reference's line: its table, then the types it may point to)
+    let reference line_value(model_sorts(type), key.slice_to(colon + 1))
+    var blank: size_t 0
+    while blank < reference.length and reference[blank] <> 32
+        blank := blank + 1
+    if blank >= reference.length
+        return false
+    let target key.subslice(colon + 1, dot)
+    if has_word(reference.slice_from(blank + 1), target) = false
+        return false
+    let parameter key.slice_from(dot + 1)
+    var column: Slice[u8] ""
+    var joined: Slice[u8] ""
+    if parameter.equals("_lastUpdated") = false
+    {
+        let found line_value(model_sort_targets(target), parameter)
+        if found.length < 3
+            return false
+        column := found.slice_to(1)
+        joined := found.slice_from(2)
+    }
+    put_bytes(out, "(SELECT ")
+    if column.equals("t") or column.equals("d")
+    {
+        if column.equals("d")
+            put_bytes(out, "c.value_low FROM ")
+        else
+            put_bytes(out, "c.value FROM ")
+        put_bytes(out, reference.slice_to(blank))
+        put_bytes(out, " src JOIN ")
+        put_bytes(out, joined)
+        put_bytes(out, " c ON c.resource_id = src.target_id WHERE src.resource_id = r2.id LIMIT 1)")
+        return true
+    }
+    if column.equals("i")
+    {
+        put_bytes(out, "t.")
+        put_bytes(out, joined)
+    }
+    else
+        put_bytes(out, "t.last_updated")
+    put_bytes(out, " FROM ")
+    put_bytes(out, reference.slice_to(blank))
+    put_bytes(out, " src JOIN \"")
+    put_bytes(out, target)
+    put_bytes(out, "\" t ON t.id = src.target_id WHERE src.resource_id = r2.id LIMIT 1)")
+    true
+}
+
 ; What the model says of sorting a type by `key`: the expression over the
 ; rows named `r2`, `!` for a reference parameter, nothing for a key that is
 ; none to sort by.
@@ -1057,7 +1151,10 @@ procedure put_order(mutable q: ref[SearchQuery], type: Slice[u8], mutable out: r
             direction := " DESC"
             key := key.slice_from(1)
         }
-        let expression sort_expression(type, key)
+        var expression sort_expression(type, key)
+        var chained Array[u8]()
+        if expression.length = 0 and put_chain_sort(type, key, &chained)
+            expression := chained.as_slice()
         if expression.equals("!")
         {
             put_bytes(problem, "Sorting by reference parameter '")

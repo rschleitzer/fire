@@ -146,6 +146,11 @@ procedure model_search_names(name: Slice[u8]) returns Slice[u8]
 procedure model_sorts(name: Slice[u8]) returns Slice[u8]
     model_value(79, name)
 
+; What a type may be sorted by through a reference to it: a line per key,
+; `i` and a column of its own, `t` or `d` and a search table.
+procedure model_sort_targets(name: Slice[u8]) returns Slice[u8]
+    model_value(89, name)
+
 procedure model_unversioned() returns Slice[u8]
     model_value(61, "unversioned")
 
