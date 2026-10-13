@@ -247,48 +247,63 @@
 
 ; Column list: "id, version_id, last_updated, content, active, gender"
 (define (repo-column-list inline-list has-history db)
-    ($"id, version_id, last_updated, content"
-        (apply $ (map (lambda (s) ($", "(db-quote-col-cs (search-col s) db))) inline-list))))
+    (if (generic-inline? inline-list)
+        "id, version_id, last_updated, content\\uE004C\\uE005"
+        ($"id, version_id, last_updated, content"
+        (apply $ (map (lambda (s) ($", "(db-quote-col-cs (search-col s) db))) inline-list)))))
 
 ; Prefixed column list for SELECT: "r.id, r.version_id, r.last_updated, r.content, r.active, r.gender"
 (define (repo-column-list-prefixed prefix inline-list has-history db)
-    ($ prefix ".id, " prefix ".version_id, " prefix ".last_updated, " prefix ".content"
-        (apply $ (map (lambda (s) ($", " prefix "."(db-quote-col-cs (search-col s) db))) inline-list))))
+    (if (generic-inline? inline-list)
+        ($ prefix ".id, " prefix ".version_id, " prefix ".last_updated, " prefix ".content\\uE004C" prefix ".\\uE005")
+        ($ prefix ".id, " prefix ".version_id, " prefix ".last_updated, " prefix ".content"
+        (apply $ (map (lambda (s) ($", " prefix "."(db-quote-col-cs (search-col s) db))) inline-list)))))
 
 ; Parameter placeholders: "$1, $2, $3, $4, $5, $6" or "@p1, @p2, ..."
 (define (repo-param-list inline-list has-history db)
-    (let ((pre (pp-prefix db)))
+    (if (generic-inline? inline-list)
+        (let ((pre (pp-prefix db))) ($ pre "1, " pre "2, " pre "3, " pre "4\\uE004P5\\uE005"))
+        (let ((pre (pp-prefix db)))
     ($ pre "1, " pre "2, " pre "3, " pre "4"
         (let loop ((items inline-list) (idx 5))
             (if (null? items)""
-                ($", " pre (number->string idx) (loop (cdr items) (+ idx 1))))))))
+                ($", " pre (number->string idx) (loop (cdr items) (+ idx 1)))))))))
 
 ; History INSERT column list: "id, version_id, last_updated, content, active, gender, history_operation"
 (define (repo-history-column-list inline-list db)
-    ($"id, version_id, last_updated, content"
+    (if (generic-inline? inline-list)
+        "id, version_id, last_updated, content\\uE004C\\uE005, history_operation"
+        ($"id, version_id, last_updated, content"
         (apply $ (map (lambda (s) ($", "(db-quote-col-cs (search-col s) db))) inline-list))
-        ", history_operation"))
+        ", history_operation")))
 
 ; History INSERT params: "$1, $2, $3, $4, $5, $6, 'UPDATE'" or "@p1, @p2, ..."
 (define (repo-history-param-list inline-list operation db)
-    (let ((pre (pp-prefix db)))
+    (if (generic-inline? inline-list)
+        (let ((pre (pp-prefix db))) ($ pre "1, " pre "2, " pre "3, " pre "4\\uE004P5\\uE005, '" operation "'"))
+        (let ((pre (pp-prefix db)))
     ($ pre "1, " pre "2, " pre "3, " pre "4"
         (let loop ((items inline-list) (idx 5))
             (if (null? items)""
                 ($", " pre (number->string idx) (loop (cdr items) (+ idx 1)))))
-        ", '" operation "'")))
+        ", '" operation "'"))))
 
 ; UPDATE SET clause: "version_id = $2, last_updated = $3, content = $4, ..."
 (define (repo-update-set inline-list has-history db)
-    (let ((pre (pp-prefix db)))
+    (if (generic-inline? inline-list)
+        (let ((pre (pp-prefix db))) ($ "version_id = " pre "2, last_updated = " pre "3, content = " pre "4\\uE004U5\\uE005"))
+        (let ((pre (pp-prefix db)))
     ($"version_id = " pre "2, last_updated = " pre "3, content = " pre "4"
         (let loop ((items inline-list) (idx 5))
             (if (null? items)""
-                ($", "(db-quote-col-cs (search-col (car items)) db)" = " pre (number->string idx) (loop (cdr items) (+ idx 1))))))))
+                ($", "(db-quote-col-cs (search-col (car items)) db)" = " pre (number->string idx) (loop (cdr items) (+ idx 1)))))))))
 
 ; AddWithValue calls for inline params
 (define (repo-addwithvalue inline-list var-prefix start-idx db)
-    (case db ((Any)
+    (if (generic-inline? inline-list)
+        ($"
+            AddInline(cmd, " (number->string start-idx) ", " (if (string=? var-prefix "") "inline" ($ "InlineOf(" (substring var-prefix 0 (- (string-length var-prefix) 1)) ")")) ");")
+        (case db ((Any)
         (let loop ((items inline-list) (idx start-idx))
             (if (null? items)""
                 ($"
@@ -303,7 +318,7 @@
             AddValue(cmd, \""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
                 ((Sqlite) ($"
             cmd.Parameters.AddWithValue(\""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);")))
-                (loop (cdr items) (+ idx 1))))))))
+                (loop (cdr items) (+ idx 1)))))))))
 
 ; Reader column fields for inline params (starting at index 4)
 (define (repo-reader-fields inline-list has-history)
@@ -330,17 +345,21 @@
 
 ; Constructor args for inline params: ", active, gender"
 (define (repo-constructor-inline-args inline-list)
-    (apply $ (map (lambda (s) ($", "(search-query-camel s))) inline-list)))
+    (if (generic-inline? inline-list)
+        ", inline"
+        (apply $ (map (lambda (s) ($", "(search-query-camel s))) inline-list))))
 
 ; Destructure tuple: "var (active, gender) = ..." or "var status = ..." for single
 (define (repo-destructure-inline inline-list)
-    (if (= 1 (length inline-list))
+    (if (generic-inline? inline-list)
+        "var inline"
+        (if (= 1 (length inline-list))
         ($"var "(search-query-camel (car inline-list)))
         ($"var ("
             (let loop ((items inline-list) (first? #t))
                 (if (null? items)""
                     ($ (if first? "" ", ") (search-query-camel (car items)) (loop (cdr items) #f))))
-            ")")))
+            ")"))))
 
 ; Get C# extractor call for a string search index
 (define (repo-string-extractor-call rn search all-hn-all)
@@ -539,6 +558,186 @@ public interface I"rn"Repository : "
 "))))))
 
 ; ===================================================================
+; The base classes: what does not depend on a resource's search parameters
+; ===================================================================
+; Create, read, update, patch, delete, rollback, undelete, the histories, the purge and the
+; helpers that write an index row are the same for every resource but for its name and the
+; columns of its own. They are written ONCE, into ResourceRepository (and
+; UnversionedResourceRepository, for a resource without history), by running the very
+; sections below with a resource that is none: the name mark, the columns `generic-inline`.
+;   - a type the section names answers the class's type parameter, a call into the resource's
+;     extractor a method the resource's own class overrides (r-res, r-read, r-inject ...);
+;   - inside an SQL string the resource's name is the mark , and a list over its columns
+;      kind argument  (C a column list with a prefix, P placeholders from a number
+;     on, U the SET clause from a number on); the class's Sql puts the running resource's in.
+(define generic-inline '("*"))
+(define (generic-inline? inline-list) (equal? inline-list generic-inline))
+(define repo-generic-rn "\\uE003")
+(define (r-generic? rn) (string=? rn repo-generic-rn))
+(define (r-res rn) (if (r-generic? rn) "TResource" ($ rn "Resource")))
+(define (r-row rn) (if (r-generic? rn) "TRow" ($ rn "HistoryRow")))
+(define (r-read rn) (if (r-generic? rn) "ReadResource" ($ "Read" rn "Resource")))
+(define (r-new-res rn) (if (r-generic? rn) "MakeResource(" ($ "new " rn "Resource(")))
+(define (r-new-row rn) (if (r-generic? rn) "MakeRow(" ($ "new " rn "HistoryRow(")))
+(define (r-extract-inline rn) (if (r-generic? rn) "ExtractInline(content)" ($ rn "SearchExtractor.ExtractInlineParams(content)")))
+(define (r-inject rn) (if (r-generic? rn) "InjectMeta" ($ rn "SearchExtractor.InjectMeta")))
+
+; The base class of a resource's repository, with its records.
+(define (repo-base-of rn)
+    (if (history? (current-node))
+        ($ "ResourceRepository<" rn "Resource, " rn "HistoryRow>")
+        ($ "UnversionedResourceRepository<" rn "Resource>")))
+
+(define (repo-base-head has-history)
+    ($
+"using System.Collections.Concurrent;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using "(project-name)".Search;
+using ConnType = System.Data.Common.DbConnection;
+using TxType = System.Data.Common.DbTransaction;
+using CmdType = System.Data.Common.DbCommand;
+using ReaderType = System.Data.Common.DbDataReader;
+using ParamType = System.Data.Common.DbParameter;
+
+namespace "(project-name)".Repositories;
+
+// What every resource's repository does the same way: all that does not depend on its search
+// parameters. A resource's own class says what it is called, which columns of its own it has
+// and how its records are made, and keeps the methods that go by search parameter.
+//
+// In the SQL here the resource's name is the mark , and a list over its own columns
+//  kind argument ; Sql puts the running resource's in (and Db.Cmd, behind it, the
+// database's text).
+public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
+    where TResource : class, IResourceRecord
+    where TRow : class, IHistoryRow") ($ "UnversionedResourceRepository<""TResource>
+    where TResource : class, IResourceRecord"))"
+{
+    protected abstract string Name { get; }
+    protected abstract string[] InlineColumns { get; }
+    protected abstract object?[] ExtractInline(JsonNode content);
+    protected abstract object?[] InlineOf(TResource resource);
+    protected abstract TResource MakeResource(string id, int versionId, DateTime lastUpdated, byte[] content, object?[] inline);
+"(if has-history "    protected abstract TRow MakeRow(string id, int versionId, DateTime lastUpdated, byte[]? content, string historyOperation);
+" "")"    protected abstract TResource ReadResource(ReaderType reader);
+    protected abstract void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated);
+    protected abstract Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content);
+    protected abstract Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId);
+
+    // The values of the resource's own columns as parameters first, first + 1, ...
+    protected static void AddInline(CmdType cmd, int first, object?[] inline)
+    {
+        for (var i = 0; i < inline.Length; i++)
+            Db.AddValue(cmd, first + i, inline[i] ?? DBNull.Value);
+    }
+
+    protected CmdType Cmd(string sql, ConnType conn, TxType? tx = null) => Db.Cmd(Sql(sql), conn, tx);
+
+    private readonly ConcurrentDictionary<""string, string> _sql = new();
+
+    // sql with the resource's name and the lists over its columns put in. A text is worked
+    // out once (the texts here are few; the bound is for what a caller might compose).
+    protected string Sql(string sql)
+    {
+        if (sql.IndexOf('') < 0 && sql.IndexOf('') < 0) return sql;
+        if (_sql.TryGetValue(sql, out var known)) return known;
+        var sb = new StringBuilder(sql.Length + 64);
+        var columns = InlineColumns;
+        for (var i = 0; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            if (c == '') { sb.Append(Name); continue; }
+            if (c != '') { sb.Append(c); continue; }
+            var end = sql.IndexOf('', i);
+            var kind = sql[i + 1];
+            var argument = sql.Substring(i + 2, end - i - 2);
+            for (var k = 0; k < columns.Length; k++)
+            {
+                sb.Append(\", \");
+                if (kind == 'C') sb.Append(argument).Append(Db.Col(columns[k]));
+                else if (kind == 'P') sb.Append(Db.P(int.Parse(argument) + k));
+                else sb.Append(Db.Col(columns[k])).Append(\" = \").Append(Db.P(int.Parse(argument) + k));
+            }
+            i = end;
+        }
+        var made = sb.ToString();
+        if (_sql.Count < 4096) _sql[sql] = made;
+        return made;
+    }
+
+"))
+
+; The sections of a base class, run for no resource in particular. What they declare private
+; a resource's class must reach, and their commands go through the class's own Cmd.
+(define (repo-base-body has-history)
+    (let ((rn repo-generic-rn) (schema repo-generic-rn) (inline-list generic-inline) (db 'Any))
+        (string-replace (string-replace (string-replace
+            ($
+                (repo-create rn schema inline-list has-history db)
+                (repo-read rn schema inline-list has-history db)
+                (if has-history (repo-vread rn schema inline-list has-history db) "")
+                (repo-update rn schema inline-list has-history db)
+                (repo-patch rn schema inline-list has-history db)
+                (repo-delete rn schema inline-list has-history db)
+                (if has-history (repo-is-deleted schema db) "")
+                (if has-history (repo-rollback rn schema inline-list db) "")
+                (if has-history (repo-undelete rn schema inline-list db) "")
+                (if has-history (repo-undelete-all rn schema inline-list db) "")
+                (if has-history (repo-instance-history rn schema db) "")
+                (if has-history (repo-type-history rn schema db) "")
+                (repo-purge rn schema has-history db)
+                (repo-utc-helper)
+                (repo-insert-helpers schema db)
+                (repo-insert-quantity-helper schema db)
+                (repo-insert-date-list-helper schema db)
+                (repo-db-class-helpers db))
+            "Db.Cmd(" "Cmd(")
+            "    private " "    protected ")
+            ; (the helpers that write an index row name the resource's tables: no longer static)
+            "    protected static async Task Insert" "    protected async Task Insert")))
+
+(define (repo-base-files)
+    (sosofo-append
+        (file "ResourceRepository.cs" ($ (repo-base-head #t) (repo-base-body #t) "}
+"))
+        (file "UnversionedResourceRepository.cs" ($ (repo-base-head #f) (repo-base-body #f) "}
+"))))
+
+; A resource's own class beside its base: what it is called, its columns, its records.
+(define (repo-overrides rn inline-list has-history)
+    (let ((names (map search-query-camel inline-list))
+          (types (map (lambda (s) (let ((prop (search-property s))) ($ (csharp-type (if prop (% "type" prop) "code")) "?"))) inline-list)))
+        ($
+"    protected override string Name => \"" rn "\";
+    protected override string[] InlineColumns { get; } = new string[] {" (apply $ (map (lambda (s) ($ " \"" (search-col s) "\",")) inline-list)) " };
+    protected override object?[] ExtractInline(JsonNode content)
+    {
+"       (if (null? inline-list)
+            ($"        return Array.Empty<""object?>();
+")
+            ($"        " (repo-destructure-inline inline-list) " = " rn "SearchExtractor.ExtractInlineParams(content);
+        return new object?[] {" (apply $ (map (lambda (n) ($ " " n ",")) names)) " };
+"))
+"    }
+    protected override object?[] InlineOf(" rn "Resource resource) => new object?[] {" (apply $ (map (lambda (n) ($ " resource." n ",")) names)) " };
+    protected override " rn "Resource MakeResource(string id, int versionId, DateTime lastUpdated, byte[] content, object?[] inline)
+        => new(id, versionId, lastUpdated, content"
+        (let loop ((ts types) (i 0))
+            (if (null? ts) "" ($ ", (" (car ts) ")inline[" (number->string i) "]" (loop (cdr ts) (+ i 1)))))
+        ");
+"       (if has-history ($
+"    protected override " rn "HistoryRow MakeRow(string id, int versionId, DateTime lastUpdated, byte[]? content, string historyOperation)
+        => new(id, versionId, lastUpdated, content, historyOperation);
+") "")
+"    protected override " rn "Resource ReadResource(ReaderType reader) => Read" rn "Resource(reader);
+    protected override void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated)
+        => " rn "SearchExtractor.InjectMeta(content, id, versionId, lastUpdated);
+
+")))
+
+; ===================================================================
 ; Main repository function
 ; ===================================================================
 
@@ -596,36 +795,53 @@ public interface I"rn"Repository : "
             (map (lambda (db)
                 (repo-folder db
                 (file ($ rn "Repository.cs")
+                    (if (single-repository? rn)
+                        ; its own class beside the base: the methods that go by search parameter
+                        ($
+                            (repo-header rn schema inline-list db)
+                            (repo-overrides rn inline-list has-history)
+                            (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
+                            (repo-search rn schema inline-list all-table-search-list has-history db)
+                            (repo-autocomplete schema string-searches token-searches date-searches db)
+                            (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
+                            (repo-drop-search schema all-table-search-list db)
+                            (repo-read-resource-helper rn inline-list has-history db)
+                            (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
+                            (repo-delete-search-indexes schema all-table-search-list db)
+                            (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
+                            "}
+")
                     ($
-                        (repo-header rn schema inline-list db)
-                        (repo-create rn schema inline-list has-history db)
-                        (repo-read rn schema inline-list has-history db)
-                        (if has-history (repo-vread rn schema inline-list has-history db)"")
-                        (repo-update rn schema inline-list has-history db)
-                        (repo-patch rn schema inline-list has-history db)
-                        (repo-delete rn schema inline-list has-history db)
-                        (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
-                        (if has-history (repo-is-deleted schema db)"")
-                        (if has-history (repo-rollback rn schema inline-list db)"")
-                        (if has-history (repo-undelete rn schema inline-list db)"")
-                        (if has-history (repo-undelete-all rn schema inline-list db)"")
-                        (repo-search rn schema inline-list all-table-search-list has-history db)
-                        (if has-history (repo-instance-history rn schema db)"")
-                        (if has-history (repo-type-history rn schema db)"")
-                        (repo-autocomplete schema string-searches token-searches date-searches db)
-                        (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
-                        (repo-drop-search schema all-table-search-list db)
-                        (repo-purge rn schema has-history db)
-                        (repo-read-resource-helper rn inline-list has-history db)
-                        (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
-                        (repo-delete-search-indexes schema all-table-search-list db)
-                        (repo-insert-helpers schema db)
-                        (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
-                        (if (null? (filter search-is-date-list? all-table-search-list)) "" (repo-insert-date-list-helper schema db))
-                        (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
-                        (repo-db-class-helpers db)
-                        "}
+                            (repo-header rn schema inline-list db)
+                            (repo-create rn schema inline-list has-history db)
+                            (repo-read rn schema inline-list has-history db)
+                            (if has-history (repo-vread rn schema inline-list has-history db)"")
+                            (repo-update rn schema inline-list has-history db)
+                            (repo-patch rn schema inline-list has-history db)
+                            (repo-delete rn schema inline-list has-history db)
+                            (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
+                            (if has-history (repo-is-deleted schema db)"")
+                            (if has-history (repo-rollback rn schema inline-list db)"")
+                            (if has-history (repo-undelete rn schema inline-list db)"")
+                            (if has-history (repo-undelete-all rn schema inline-list db)"")
+                            (repo-search rn schema inline-list all-table-search-list has-history db)
+                            (if has-history (repo-instance-history rn schema db)"")
+                            (if has-history (repo-type-history rn schema db)"")
+                            (repo-autocomplete schema string-searches token-searches date-searches db)
+                            (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
+                            (repo-drop-search schema all-table-search-list db)
+                            (repo-purge rn schema has-history db)
+                            (repo-read-resource-helper rn inline-list has-history db)
+                            (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
+                            (repo-delete-search-indexes schema all-table-search-list db)
+                            (repo-insert-helpers schema db)
+                            (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
+                            (if (null? (filter search-is-date-list? all-table-search-list)) "" (repo-insert-date-list-helper schema db))
+                            (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
+                            (repo-db-class-helpers db)
+                            "}
 "
+                        )
                     )))) (if (single-repository? rn) '(Any) target-databases))))))
 
 ; ===================================================================
@@ -648,8 +864,9 @@ using ParamType = System.Data.Common.DbParameter;
 
 namespace "(project-name)".Repositories;
 
-// One class for every database: the dialect is Db's, chosen when the server starts.
-public class "rn"Repository : I"rn"Repository
+// The resource's own part of its repository: what goes by search parameter, and what the
+// base class asks of a resource. One class for every database (the dialect is Db's).
+public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
 {
 "))
     (else ($
@@ -713,7 +930,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-create rn schema inline-list has-history db)
     ($
-"    public async Task<"rn"Resource> CreateAsync(JsonNode content, string? clientId = null)
+"    public async Task<"(r-res rn)"> CreateAsync(JsonNode content, string? clientId = null)
     {
         var id = clientId ?? Guid.NewGuid().ToString();
         var lastUpdated = DateTime.UtcNow;
@@ -740,8 +957,8 @@ public class "rn"Repository : I"rn"Repository
         ")
         "        var versionId = 1;
 ")
-    rn "SearchExtractor.InjectMeta(content, id, versionId, lastUpdated);
-"(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+    (r-inject rn) "(content, id, versionId, lastUpdated);
+"(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
         ($"        // Binary: extract data before storing
@@ -801,7 +1018,7 @@ public class "rn"Repository : I"rn"Repository
 "        await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, versionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, versionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
@@ -812,7 +1029,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-read rn schema inline-list has-history db)
     ($
-"    public async Task<"rn"Resource?> ReadAsync(string id)
+"    public async Task<"(r-res rn)"?> ReadAsync(string id)
     {
 "
     (open-conn-scoped db)"
@@ -823,7 +1040,7 @@ public class "rn"Repository : I"rn"Repository
         await using var reader = await cmd.ExecuteReaderAsync();
         if (!await reader.ReadAsync()) return null;
 
-        var resource = Read"rn"Resource(reader);
+        var resource = "(r-read rn)"(reader);
         await reader.CloseAsync();
 "
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
@@ -857,7 +1074,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-vread rn schema inline-list has-history db)
     ($
-"    public async Task<"rn"Resource?> VersionReadAsync(string id, int versionId)
+"    public async Task<"(r-res rn)"?> VersionReadAsync(string id, int versionId)
     {
         // Check current table first
 "
@@ -871,7 +1088,7 @@ public class "rn"Repository : I"rn"Repository
         await using var reader = await cmd.ExecuteReaderAsync();
         if (await reader.ReadAsync())
         {
-            var resource = Read"rn"Resource(reader);
+            var resource = "(r-read rn)"(reader);
             await reader.CloseAsync();
 "
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
@@ -908,7 +1125,7 @@ public class "rn"Repository : I"rn"Repository
         await using var histReader = await histCmd.ExecuteReaderAsync();
         if (await histReader.ReadAsync())
         {
-            var resource = Read"rn"Resource(histReader);
+            var resource = "(r-read rn)"(histReader);
             await histReader.CloseAsync();
 "
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
@@ -950,20 +1167,20 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-update-versioned rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> UpdateAsync(string id, JsonNode content, int? ifMatchVersion = null)
+"    public async Task<"(r-res rn)"?> UpdateAsync(string id, JsonNode content, int? ifMatchVersion = null)
     {
 "
     (open-conn-tx db)"
 
         // Read current
-        "rn"Resource? current = null;
+        "(r-res rn)"? current = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl-public rn db) (table-lock-hint db)" WHERE id = "(pp 1 db) (select-lock db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                current = Read"rn"Resource(reader);
+                current = "(r-read rn)"(reader);
         }
 
         if (current == null)
@@ -994,8 +1211,8 @@ public class "rn"Repository : I"rn"Repository
 
         var newVersionId = current.versionId + 1;
         var lastUpdated = DateTime.UtcNow;
-        "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
-" (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+        "(r-inject rn)"(content, id, newVersionId, lastUpdated);
+" (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
         ($"        // Binary: extract data before storing
@@ -1050,14 +1267,14 @@ public class "rn"Repository : I"rn"Repository
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
 
 (define (repo-update-non-versioned rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> UpdateAsync(string id, JsonNode content)
+"    public async Task<"(r-res rn)"?> UpdateAsync(string id, JsonNode content)
     {
 "
        (open-conn-tx db)"
@@ -1079,8 +1296,8 @@ public class "rn"Repository : I"rn"Repository
 
         var newVersionId = currentVersionId + 1;
         var lastUpdated = DateTime.UtcNow;
-        "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
-"       (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+        "(r-inject rn)"(content, id, newVersionId, lastUpdated);
+"       (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "       ))
     (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
         ($"        // Binary: extract data before storing
@@ -1135,7 +1352,7 @@ public class "rn"Repository : I"rn"Repository
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
@@ -1201,20 +1418,20 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-patch-versioned rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> PatchAsync(string id, JsonArray patchOps, int? ifMatchVersion = null)
+"    public async Task<"(r-res rn)"?> PatchAsync(string id, JsonArray patchOps, int? ifMatchVersion = null)
     {
 "
     (open-conn-tx db)"
 
         // Read current
-        "rn"Resource? current = null;
+        "(r-res rn)"? current = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl-public rn db) (table-lock-hint db)" WHERE id = "(pp 1 db) (select-lock db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                current = Read"rn"Resource(reader);
+                current = "(r-read rn)"(reader);
         }
 
         if (current == null)
@@ -1247,8 +1464,8 @@ public class "rn"Repository : I"rn"Repository
         var lastUpdated = DateTime.UtcNow;
         var content = JsonNode.Parse(current.content)!;
 "(repo-patch-binary-read rn schema db)"        JsonPatcher.Apply(content, patchOps);
-        "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
-"(if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+        "(r-inject rn)"(content, id, newVersionId, lastUpdated);
+"(if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))(repo-patch-binary-take rn db)"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
@@ -1270,27 +1487,27 @@ public class "rn"Repository : I"rn"Repository
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
 
 (define (repo-patch-non-versioned rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> PatchAsync(string id, JsonArray patchOps)
+"    public async Task<"(r-res rn)"?> PatchAsync(string id, JsonArray patchOps)
     {
 "
     (open-conn-tx db)"
 
         // Read current
-        "rn"Resource? current = null;
+        "(r-res rn)"? current = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #f db)" FROM "(tbl-public rn db) (table-lock-hint db)" WHERE id = "(pp 1 db) (select-lock db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                current = Read"rn"Resource(reader);
+                current = "(r-read rn)"(reader);
         }
 
         if (current == null)
@@ -1303,8 +1520,8 @@ public class "rn"Repository : I"rn"Repository
         var lastUpdated = DateTime.UtcNow;
         var content = JsonNode.Parse(current.content)!;
 "(repo-patch-binary-read rn schema db)"        JsonPatcher.Apply(content, patchOps);
-        "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
-"(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+        "(r-inject rn)"(content, id, newVersionId, lastUpdated);
+"(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))(repo-patch-binary-take rn db)"        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
@@ -1326,7 +1543,7 @@ public class "rn"Repository : I"rn"Repository
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
@@ -1347,14 +1564,14 @@ public class "rn"Repository : I"rn"Repository
 "
     (open-conn-tx db)"
 
-        "rn"Resource? current = null;
+        "(r-res rn)"? current = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl-public rn db) (table-lock-hint db)" WHERE id = "(pp 1 db) (select-lock db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                current = Read"rn"Resource(reader);
+                current = "(r-read rn)"(reader);
         }
 
         if (current == null)
@@ -1485,19 +1702,19 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-rollback rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> RollbackAsync(string id, int currentVersionId)
+"    public async Task<"(r-res rn)"?> RollbackAsync(string id, int currentVersionId)
     {
 "
     (open-conn-tx db)"
 
-        "rn"Resource? current = null;
+        "(r-res rn)"? current = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl-public rn db) (table-lock-hint db)" WHERE id = "(pp 1 db) (select-lock db)"\", conn, tx))
         {
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                current = Read"rn"Resource(reader);
+                current = "(r-read rn)"(reader);
         }
 
         if (current == null || current.versionId != currentVersionId)
@@ -1529,7 +1746,7 @@ public class "rn"Repository : I"rn"Repository
 "
         // Find the most recent history entry - the DELETE row included, because it is the
         // version the resource stood in when it was deleted.
-        "rn"Resource? previous = null;
+        "(r-res rn)"? previous = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl schema "resource_history" db)" \" +
             \"WHERE id = "(pp 1 db)" ORDER BY version_id DESC "(db-limit-1 db)"\", conn, tx))
@@ -1537,7 +1754,7 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                previous = Read"rn"Resource(reader);
+                previous = "(r-read rn)"(reader);
         }
 
         if (previous == null)
@@ -1575,7 +1792,7 @@ public class "rn"Repository : I"rn"Repository
                 {
                     var shown = JsonNode.Parse(previous.content)!;
                     shown[\"data\"] = Convert.ToBase64String(storedData);
-                    previous = new "rn"Resource(previous.id, previous.versionId, previous.lastUpdated,
+                    previous = "(r-new-res rn)"previous.id, previous.versionId, previous.lastUpdated,
                         JsonSerializer.SerializeToUtf8Bytes(shown));
                 }
             }
@@ -1620,7 +1837,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-undelete rn schema inline-list db)
     ($
-"    public async Task<"rn"Resource?> UndeleteAsync(string id)
+"    public async Task<"(r-res rn)"?> UndeleteAsync(string id)
     {
 "
     (open-conn-tx db)"
@@ -1645,7 +1862,7 @@ public class "rn"Repository : I"rn"Repository
         // Find the latest history entry, the DELETE row included: it carries the state the
         // resource was in when it was deleted. Skipping it restored the version before the
         // last edit and silently dropped that edit.
-        "rn"Resource? previous = null;
+        "(r-res rn)"? previous = null;
         await using (var cmd = "(new-cmd db)"
             \"SELECT "(repo-column-list inline-list #t db)" FROM "(tbl schema "resource_history" db)" \" +
             \"WHERE id = "(pp 1 db)" ORDER BY version_id DESC "(db-limit-1 db)"\", conn, tx))
@@ -1653,7 +1870,7 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-line 1 "id" db)"
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
-                previous = Read"rn"Resource(reader);
+                previous = "(r-read rn)"(reader);
         }
 
         if (previous == null)
@@ -1674,8 +1891,8 @@ public class "rn"Repository : I"rn"Repository
         var newVersionId = maxVersionId + 1;
         var lastUpdated = DateTime.UtcNow;
         var content = JsonNode.Parse(previous.content)!;
-        "rn"SearchExtractor.InjectMeta(content, id, newVersionId, lastUpdated);
-"   (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "rn"SearchExtractor.ExtractInlineParams(content);
+        "(r-inject rn)"(content, id, newVersionId, lastUpdated);
+"   (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))"        var contentBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(content);
 
         await using (var cmd = "(new-cmd db)"
@@ -1720,7 +1937,7 @@ public class "rn"Repository : I"rn"Repository
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
-        return new "rn"Resource(id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
+        return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
     }
 
 "))
@@ -2079,7 +2296,7 @@ public class "rn"Repository : I"rn"Repository
 ; than the bundle carries. A DELETE row yields two entries - see repo-history-union.
 (define (repo-instance-history rn schema db)
     ($
-"    public async Task<(List<"rn"HistoryRow> rows, int total)> InstanceHistoryAsync(string id, int count, int offset)
+"    public async Task<(List<"(r-row rn)"> rows, int total)> InstanceHistoryAsync(string id, int count, int offset)
     {
 "
     (open-conn db)
@@ -2112,14 +2329,14 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-8-for "cmd2" 3 "offset" db)
 "
 
-        var rows = new List<"rn"HistoryRow>();
+        var rows = new List<"(r-row rn)">();
         await using var reader = await cmd2.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
 "(if (binary-data-table? rn db) ($
 "            rows.Add(Read"rn"HistoryRowWithData(reader));
 ") ($
-"            rows.Add(new "rn"HistoryRow(
+"            rows.Add("(r-new-row rn)"
                 reader.GetString(0),
                 reader.GetInt32(1),
                 Utc(reader.GetDateTime(2)),
@@ -2137,7 +2354,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-type-history rn schema db)
     ($
-"    public async Task<(List<"rn"HistoryRow> rows, int total)> TypeHistoryAsync(int count, int offset)
+"    public async Task<(List<"(r-row rn)"> rows, int total)> TypeHistoryAsync(int count, int offset)
     {
 "       (open-conn db)
 "
@@ -2167,14 +2384,14 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-8-for "cmd2" 2 "offset" db)
 "
 
-        var rows = new List<"rn"HistoryRow>();
+        var rows = new List<"(r-row rn)">();
         await using var reader = await cmd2.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
 "(if (binary-data-table? rn db) ($
 "            rows.Add(Read"rn"HistoryRowWithData(reader));
 ") ($
-"            rows.Add(new "rn"HistoryRow(
+"            rows.Add("(r-new-row rn)"
                 reader.GetString(0),
                 reader.GetInt32(1),
                 Utc(reader.GetDateTime(2)),
@@ -2730,7 +2947,8 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-read-resource-helper rn inline-list has-history db)
     ($
-    (repo-utc-helper)
+    ; (a single repository has it from its base class)
+    (case db ((Any) "") (else (repo-utc-helper)))
 "    private static "rn"Resource Read"rn"Resource(ReaderType reader)
     {
         return new "rn"Resource(
@@ -2785,7 +3003,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
     ($
-"    private async Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
+"    "(case db ((Any) "protected override") (else "private"))" async Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
     {
 "
         ; String indexes
@@ -2962,7 +3180,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-delete-search-indexes schema all-table-search-list db)
     ($
-"    private static async Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId)
+"    "(case db ((Any) "protected override") (else "private static"))" async Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId)
     {
         var tables = new string[]
         {
@@ -3412,6 +3630,7 @@ internal static class SortTargets
         (file "Db.cs" (db-runtime-cs))
         (repo-generic-interfaces)
         (sort-targets-file)
+        (repo-base-files)
         (file "SearchQueryBuilder.cs"
             ($ (sqb-header 'Any) (sqb-body 'Any)"}
 "))
