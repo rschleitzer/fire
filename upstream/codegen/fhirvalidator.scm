@@ -110,25 +110,48 @@ public static partial class ModelValidator
                     (fhir-validate-single-direct vtype ref-attr property field-name var-name el))))))
 
 ; Validate a variant group (choice type) — mutual exclusion + individual validation
+; A choice of three types or more says its exclusion once, in a local function the block of
+; each type calls with its own name: written out it is a line for every PAIR of types
+; (value[x] of an extension: fifty types, 2450 pairs). The messages and their order are the
+; same either way.
 (define (fhir-validate-variant-group property el var-name)
-    (let ((variant-nodes (children (select-children "variants" property))))
+    (let* ((variant-nodes (children (select-children "variants" property)))
+           (shared? (> (node-list-length variant-nodes) 2))
+           (only-name ($ "only_" (string-replace (model-item-name property (node-list-first variant-nodes) #t) "@" ""))))
+        ($
+        (if shared? ($
+"
+        void "only-name"(string set)
+        {"
+            (for variant-nodes (lambda (other-variant)
+                (let ((other-name (model-item-name property other-variant #t))) ($
+"
+            if (set != \""other-name"\" && "var-name"."other-name" != null)
+                errors.Add($\""var-name"."other-name" must be null if "var-name".{set} is not null.\");"
+                ))))
+"
+        }
+") "")
         (for variant-nodes (lambda (variant)
             (let ((field-name (model-item-name property variant #t)))
                 ($
 "
         if ("var-name"."field-name" != null)
         {"
+                    (if shared? ($
+"
+            "only-name"(\""field-name"\");")
                     (for (node-list-filter (lambda (v) (not (node-list=? v variant))) variant-nodes)
                         (lambda (other-variant)
                             (let ((other-name (model-item-name property other-variant #t))) ($
 "
             if ("var-name"."other-name" != null)
                 errors.Add(\""var-name"."other-name" must be null if "var-name"."field-name" is not null.\");"
-                            ))))
+                            )))))
                     (fhir-validate-primitive-direct (% "type" variant) (or (% "ref" variant) (% "ref" property)) property ($ var-name"."field-name) var-name el "")
 "
         }
-"))))))
+")))))))
 
 ; Returns true if the FHIR type maps to a C# string and should use IsNullOrWhiteSpace
 (define (fhir-is-string-type? vtype)
@@ -143,12 +166,15 @@ public static partial class ModelValidator
                         ($ var-name "." field-name " != null")))
           (not-null-msg (if (fhir-is-string-type? vtype)
                             " must not be null or whitespace."
-                            " must not be null.")))
+                            " must not be null."))
+          (checks (fhir-validate-primitive-direct vtype ref-attr property ($ var-name"."field-name) var-name el "")))
+    ; (a field nothing is checked of and that may be absent: no block at all)
+    (if (and (string=? checks "") (not (true? "notnull" property))) ""
     ($
 "
         if ("condition")
         {"
-    (fhir-validate-primitive-direct vtype ref-attr property ($ var-name"."field-name) var-name el "")
+    checks
 "
         }
 "   (if (true? "notnull" property) ($
@@ -156,18 +182,21 @@ public static partial class ModelValidator
         {
             errors.Add(\""var-name"."field-name""not-null-msg"\");
         }
-") ""))))
+") "")))))
 
 ; Validate a collection field
-(define (fhir-validate-collection-direct vtype ref-attr property field-name var-name el) ($
+(define (fhir-validate-collection-direct vtype ref-attr property field-name var-name el)
+    (let ((checks (fhir-validate-primitive-direct vtype ref-attr property "_item" "_item" el "    ")))
+    (if (string=? checks "") ""
+    ($
 "
         if ("var-name"."field-name" != null)
             foreach (var _item in "var-name"."field-name")
             {"
-    (fhir-validate-primitive-direct vtype ref-attr property "_item" "_item" el "    ")
+    checks
 "
             }
-"))
+"))))
 
 ; --- Primitive/element type validation ---
 
