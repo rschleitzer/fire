@@ -623,18 +623,9 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 "(if has-history "    protected abstract TRow MakeRow(string id, int versionId, DateTime lastUpdated, byte[]? content, string historyOperation);
 " "")"    protected abstract TResource ReadResource(ReaderType reader);
     protected abstract void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated);
-    protected abstract Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content);
-    protected abstract Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId);
-    protected abstract (string? tableName, string column, bool isToken) ResolveSearchTable(string name);
-    // A search: the condition of one parameter of the resource's own (false: it has none of
-    // that name), a filter a project adds, the modifiers, the order.
-    protected abstract bool AddSearch(string key, string modifier, string[] orValues, List<""string> joins, List<""string> whereClauses,
-        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex);
+    // A filter a project adds to the search, and the order.
     protected virtual bool AddOwnFilter(KeyValuePair<""string, Microsoft.Extensions.Primitives.StringValues> param, string key, List<""string> joins,
         List<""string> whereClauses, List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex) => false;
-    protected abstract void MissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex);
-    protected abstract void NotSearch(string key, string value, List<""string> joins, List<""string> wheres,
-        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex);
     protected abstract string OrderBy(string sortParam);
 
     // The values of the resource's own columns as parameters first, first + 1, ...
@@ -747,9 +738,9 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 
 (define (repo-base-files)
     (sosofo-append
-        (file "ResourceRepository.cs" ($ (repo-base-head #t) (repo-base-body #t) "}
-"))
-        (file "UnversionedResourceRepository.cs" ($ (repo-base-head #f) (repo-base-body #f) "}
+        (file "ResourceRepository.cs" ($ (repo-base-head #t) (repo-base-body #t) (repo-base-parameters #t) "}
+" (repo-search-parameter-record)))
+        (file "UnversionedResourceRepository.cs" ($ (repo-base-head #f) (repo-base-body #f) (repo-base-parameters #f) "}
 "))))
 
 ; A resource's own class beside its base: what it is called, its columns, its records.
@@ -781,11 +772,6 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 "    protected override " rn "Resource ReadResource(ReaderType reader) => Read" rn "Resource(reader);
     protected override void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated)
         => " rn "SearchExtractor.InjectMeta(content, id, versionId, lastUpdated);
-    protected override void MissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex)
-        => AddMissingSearch(key, isMissing, joins, wheres, ref aliasIndex);
-    protected override void NotSearch(string key, string value, List<""string> joins, List<""string> wheres,
-        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
-        => AddNotSearch(key, value, joins, wheres, parameters, ref paramIndex, ref aliasIndex);
     protected override string OrderBy(string sortParam) => BuildOrderBy(sortParam);
 
 ")))
@@ -796,21 +782,6 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 (define (repo-search-own rn schema inline-list all-table-search-list db)
     (let ((own (repo-exists-filter-cases rn db)))
         ($
-"    protected override bool AddSearch(string key, string modifier, string[] orValues, List<""string> joins, List<""string> whereClauses,
-        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
-    {
-                switch (key)
-                {
-"
-            (apply $ (map (lambda (s) (repo-search-case-inline s db)) inline-list))
-            (apply $ (map (lambda (s) (repo-search-case-table s schema)) all-table-search-list))
-"                    default:
-                        return false;
-                }
-        return true;
-    }
-
-"
             (if (string=? own "") "" ($
 "    protected override bool AddOwnFilter(KeyValuePair<""string, Microsoft.Extensions.Primitives.StringValues> param, string key, List<""string> joins,
         List<""string> whereClauses, List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
@@ -821,6 +792,369 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 
 "))
         )))
+
+
+; What goes by search parameter, once for every resource: it asks the resource's list.
+(define (repo-base-parameters has-history)
+    (let ((rn repo-generic-rn) (schema repo-generic-rn) (db 'Any))
+        ($ "    // -- The resource's search parameters --
+
+    // What the resource may be searched by: Parameters, in the resource's own class, names
+    // each parameter, its kind and where it is kept. IndexAsync writes the rows of a
+    // resource's search tables -- of all of them, or of the parameter `only` names.
+    protected abstract SearchParameter[] Parameters { get; }
+    protected abstract Task IndexAsync(ConnType conn, TxType tx, string? only, string resourceId, JsonNode content);
+
+    private Dictionary<""string, SearchParameter>? _parameters;
+    protected SearchParameter? Parameter(string name)
+    {
+        _parameters ??= Parameters.ToDictionary(p => p.Name);
+        return _parameters.TryGetValue(name, out var found) ? found : null;
+    }
+
+    protected static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
+
+    protected Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
+        => IndexAsync(conn, tx, null, resourceId, content);
+
+    protected async Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId)
+    {
+        foreach (var parameter in Parameters)
+        {
+            if (!parameter.IsTable) continue;
+            var table = parameter.Target;
+            await using var cmd = Cmd($\"DELETE FROM " (tbl-interp schema "table" db) " WHERE resource_id = {P(1)}\", conn, tx);
+            cmd.Parameters.Add(NewParam(1, resourceId));
+            await cmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    // The condition of one parameter of the resource's own; false: it has none of that name.
+    protected bool AddSearch(string key, string modifier, string[] orValues, List<""string> joins, List<""string> whereClauses,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
+    {
+        if (Parameter(key) is not { } p) return false;
+        var column = p.IsTable ? \"\" : \"r.\" + Db.Col(p.Target);
+        switch (p.Kind)
+        {
+            case 's':
+                SearchQueryBuilder.AddStringSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues, modifier);
+                break;
+            case 't':
+                SearchQueryBuilder.AddTokenSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues, modifier);
+                break;
+            case 'u':
+                SearchQueryBuilder.AddUriSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues, modifier);
+                break;
+            case 'd':
+                SearchQueryBuilder.AddDateSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues);
+                break;
+            case 'r':
+                SearchQueryBuilder.AddReferenceSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues);
+                break;
+            case 'n':
+                SearchQueryBuilder.AddNumberSearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues);
+                break;
+" (if (any-quantity-table-search?) "            case 'q':
+                SearchQueryBuilder.AddQuantitySearchOr(Name, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex,
+                    p.Target, orValues);
+                break;
+" "") "            case 'B':
+                if (orValues.Length == 1)
+                {
+                    whereClauses.Add($\"{column} = {P(paramIndex)}\");
+                    parameters.Add(NewParam(paramIndex, bool.Parse(orValues[0])));
+                    paramIndex++;
+                }
+                else
+                {
+                    var orParts = new List<""string>();
+                    foreach (var v in orValues)
+                    {
+                        orParts.Add($\"{column} = {P(paramIndex)}\");
+                        parameters.Add(NewParam(paramIndex, bool.Parse(v)));
+                        paramIndex++;
+                    }
+                    whereClauses.Add($\"({string.Join(\" OR \", orParts)})\");
+                }
+                break;
+            case 'I':
+                SearchQueryBuilder.AddInlineInstantSearch(column, key, whereClauses, parameters, ref paramIndex, orValues);
+                break;
+            case 'N':
+                SearchQueryBuilder.AddInlineIntSearch(column, key, whereClauses, parameters, ref paramIndex, orValues);
+                break;
+            case 'L':
+                SearchQueryBuilder.AddInlineLongSearch(column, key, whereClauses, parameters, ref paramIndex, orValues);
+                break;
+            case 'M':
+                SearchQueryBuilder.AddInlineDecimalSearch(column, key, whereClauses, parameters, ref paramIndex, orValues);
+                break;
+            default:
+                // a code or a text in a column: matched exactly, and :contains loosens the value
+                // side (substring, ignoring case)
+                if (modifier == \"contains\")
+                {
+                    var containsParts = new List<""string>();
+                    foreach (var v in orValues)
+                    {
+                        containsParts.Add($\"LOWER({column}) LIKE {P(paramIndex)}\");
+                        parameters.Add(NewParam(paramIndex, $\"%{v.ToLowerInvariant()}%\"));
+                        paramIndex++;
+                    }
+                    whereClauses.Add(containsParts.Count == 1 ? containsParts[0] : $\"({string.Join(\" OR \", containsParts)})\");
+                }
+                else if (orValues.Length == 1)
+                {
+                    whereClauses.Add($\"{column} = {P(paramIndex)}\");
+                    parameters.Add(NewParam(paramIndex, orValues[0]));
+                    paramIndex++;
+                }
+                else
+                {
+                    var inParams = new List<""string>();
+                    foreach (var v in orValues)
+                    {
+                        inParams.Add($\"{P(paramIndex)}\");
+                        parameters.Add(NewParam(paramIndex, v));
+                        paramIndex++;
+                    }
+                    whereClauses.Add($\"{column} IN ({string.Join(\", \", inParams)})\");
+                }
+                break;
+        }
+        return true;
+    }
+
+    protected void MissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex)
+    {
+        if (key == \"_lastUpdated\")
+        {
+            wheres.Add(isMissing ? \"r.last_updated IS NULL\" : \"r.last_updated IS NOT NULL\");
+            return;
+        }
+        if (Parameter(key) is not { } p) return;
+        if (!p.IsTable)
+        {
+            wheres.Add(isMissing ? $\"r.{Db.Col(p.Target)} IS NULL\" : $\"r.{Db.Col(p.Target)} IS NOT NULL\");
+            return;
+        }
+        var table = p.Target;
+        var alias = NextAlias(ref aliasIndex);
+        if (isMissing)
+        {
+            joins.Add($\"LEFT JOIN " (tbl-interp schema "table" db) " {alias} ON {alias}.resource_id = r.id\");
+            wheres.Add($\"{alias}.resource_id IS NULL\");
+        }
+        else
+        {
+            joins.Add($\"JOIN " (tbl-interp schema "table" db) " {alias} ON {alias}.resource_id = r.id\");
+        }
+    }
+
+    protected void NotSearch(string key, string value, List<""string> joins, List<""string> wheres,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
+    {
+        if (Parameter(key) is not { } p) return;
+        if (!p.IsTable)
+        {
+            var column = \"r.\" + Db.Col(p.Target);
+            object parsed = value;
+            if (p.Kind == 'B')
+                parsed = bool.Parse(value);
+            else if (p.Kind == 'N')
+            {
+                if (!int.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out int number))
+                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '{key}'\");
+                parsed = number;
+            }
+            else if (p.Kind == 'L')
+            {
+                if (!long.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out long number))
+                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '{key}'\");
+                parsed = number;
+            }
+            else if (p.Kind == 'M')
+            {
+                if (!decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal number))
+                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '{key}'\");
+                parsed = number;
+            }
+            wheres.Add($\"({column} IS NULL OR {column} != {P(paramIndex)})\");
+            parameters.Add(NewParam(paramIndex, parsed));
+            paramIndex++;
+            return;
+        }
+        if (p.Kind == 's')
+        {
+            var stringTable = p.Target;
+            var alias = NextAlias(ref aliasIndex);
+            joins.Add($\"LEFT JOIN " (tbl-interp schema "stringTable" db) " {alias} ON {alias}.resource_id = r.id AND LOWER({alias}.value) LIKE {P(paramIndex)}\");
+            wheres.Add($\"{alias}.resource_id IS NULL\");
+            parameters.Add(NewParam(paramIndex, $\"{value.ToLowerInvariant()}%\"));
+            paramIndex++;
+        }
+        else if (p.Kind == 't')
+            SearchQueryBuilder.AddTokenNotSearch(Name, joins, wheres, parameters, ref paramIndex, ref aliasIndex, p.Target, value);
+    }
+
+    // What autocomplete reads of a parameter: its table, the expression of its value, and
+    // whether a value may name a system.
+    protected (string? tableName, string column, bool isToken) ResolveSearchTable(string name)
+    {
+        var p = Parameter(name);
+        return p?.Kind switch
+        {
+            's' => (p.Target, \"value\", false),
+            't' => (p.Target, \"value\", true),
+            'd' => (p.Target, \"" (db3 db (lambda (db) (case db
+                    ((PostgreSql) "TO_CHAR(value_low, 'YYYY-MM-DD')")
+                    ((Sqlite)     "STRFTIME('%Y-%m-%d', value_low)")
+                    ((SqlServer)  "FORMAT(value_low, 'yyyy-MM-dd')")))) "\", false),
+            _ => (null, \"value\", false)
+        };
+    }
+
+    // A parameter's table with its indexes, as the schema has them.
+    private string SearchTableDdl(SearchParameter p)
+    {
+        var table = p.Target;
+        return p.Kind switch
+        {
+            's' or 'u' => $\"" (search-table-ddl schema "{table}" "string" rn db)(search-index-ddl schema "{table}" "string" "" db) "\",
+            't' => p.Name is \"identifier\" or \"language\"
+                ? $\"" (search-table-ddl schema "{table}" "token" rn db)(search-index-ddl schema "{table}" "token" "identifier" db) "\"
+                : $\"" (search-table-ddl schema "{table}" "token" rn db)(search-index-ddl schema "{table}" "token" "" db) "\",
+            'd' => $\"" (search-table-ddl schema "{table}" "date" rn db)(search-index-ddl schema "{table}" "date" "" db) "\",
+            'r' => $\"" (search-table-ddl schema "{table}" "reference" rn db)(search-index-ddl schema "{table}" "reference" "" db) "\",
+            'n' => $\"" (search-table-ddl schema "{table}" "number" rn db)(search-index-ddl schema "{table}" "number" "" db) "\",
+            _ => $\"" (search-table-ddl schema "{table}" "quantity" rn db)(search-index-ddl schema "{table}" "quantity" "" db) "\"
+        };
+    }
+
+    // A search parameter added to a database that is in use: its table made and filled from
+    // every stored resource, or -- a column of the resource's own, which the schema or an
+    // upgrade step has made -- the column filled. Like the writes it joins a transaction that
+    // is open, so a step's index is made of the step's content and goes with it.
+    public async Task CreateSearchAsync(string parameter)
+    {
+" (open-conn-scoped db) "
+        if (Parameter(parameter) is not { } p) throw new ArgumentException($\"Unknown search parameter: {parameter}\");
+        if (p.IsTable)
+        {
+            await CreateSearchTableAsync(conn, tx, SearchTableDdl(p), (id, content) => IndexAsync(conn, tx!, parameter, id, content));
+            return;
+        }
+        var position = Array.IndexOf(InlineColumns, p.Target);
+        var resources = new List<""(string id, JsonNode content)>();
+        await using (var readCmd = Cmd(\"SELECT id, content FROM " (tbl-public rn db) "\", conn, tx))
+        {
+            await using var reader = await readCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                resources.Add((reader.GetString(0), JsonNode.Parse(reader.GetFieldValue<""byte[]>(1))!));
+        }
+        foreach (var (id, content) in resources)
+        {
+            await using var updCmd = Cmd($\"UPDATE " (tbl-public rn db) " SET {Db.Col(p.Target)} = {P(1)} WHERE id = {P(2)}\", conn, tx);
+            Db.AddValue(updCmd, 1, ExtractInline(content)[position] ?? DBNull.Value);
+            Db.AddValue(updCmd, 2, id);
+            await updCmd.ExecuteNonQueryAsync();
+        }
+    }
+
+    // The table is the one the resource's own list names for the parameter, never text of the
+    // caller's.
+    public async Task DropSearchAsync(string parameter)
+    {
+" (open-conn-scoped db) "
+        if (Parameter(parameter) is not { IsTable: true } p) throw new ArgumentException($\"Unknown search parameter: {parameter}\");
+        var table = p.Target;
+        await ExecuteAsync(conn, tx, $\"DROP TABLE IF EXISTS " (tbl-interp schema "table" db) "\");
+    }
+
+")))
+
+(define (repo-search-parameter-record)
+    "
+// A search parameter of a resource: its name, its kind and where it is kept -- a search table
+// (the kind in lower case: s string, t token, d date, r reference, n number, q quantity,
+// u uri) or a column of the resource's own (B boolean, C code or text, I instant, N integer,
+// L long, M decimal).
+public sealed record SearchParameter(string Name, char Kind, string Target)
+{
+    public bool IsTable => char.IsLower(Kind);
+}
+")
+
+; The kind of a parameter in a resource's list (see SearchParameter).
+(define (search-parameter-kind s inline?)
+    (if inline?
+        (let* ((prop (search-property s))
+               (prop-type (if prop (% "type" prop) "code")))
+            (cond
+                ((string=? "boolean" prop-type) "B")
+                ((string=? "instant" prop-type) "I")
+                ((member prop-type '("integer" "positiveInt" "unsignedInt")) "N")
+                ((string=? "integer64" prop-type) "L")
+                ((string=? "decimal" prop-type) "M")
+                (else "C")))
+        (let ((type (% "type" s)))
+            (cond
+                ((string=? "string" type) "s")
+                ((string=? "token" type) "t")
+                ((string=? "date" type) "d")
+                ((string=? "reference" type) "r")
+                ((string=? "number" type) "n")
+                ((string=? "quantity" type) "q")
+                (else "u")))))
+
+; A line of IndexAsync: the rows of one parameter, written when all are or when it is the
+; one asked for.
+(define (repo-index-only s lines)
+    ($"        if (only is null or \""(% "name" s)"\")
+        {
+" lines "        }
+"))
+
+; A resource's own part: the list of its parameters, and how the rows of each are made.
+(define (repo-own-parameters rn inline-list all-table-search-list string-searches token-searches date-searches ref-searches number-searches quantity-searches uri-searches hn-all)
+    ($
+"    private static readonly SearchParameter[] _parameters =
+    {
+"
+        (apply $ (map (lambda (s)
+            ($"        new(\""(% "name" s)"\", '"(search-parameter-kind s #t)"', \""(search-col s)"\"),
+")) inline-list))
+        (apply $ (map (lambda (s)
+            ($"        new(\""(% "name" s)"\", '"(search-parameter-kind s #f)"', \""(search-table-name s)"\"),
+")) all-table-search-list))
+"    };
+    protected override SearchParameter[] Parameters => _parameters;
+
+    protected override async Task IndexAsync(ConnType conn, TxType tx, string? only, string resourceId, JsonNode content)
+    {
+"
+        (apply $ (map (lambda (s) (repo-index-only s
+            ($"        await InsertStringIndexAsync(conn, tx, \""(search-table-name s)"\", resourceId, "(repo-string-extractor-call rn s hn-all)");
+"))) string-searches))
+        (apply $ (map (lambda (s) (repo-index-only s (repo-token-index-line rn s))) token-searches))
+        (apply $ (map (lambda (s) (repo-index-only s (repo-date-index-line rn s))) date-searches))
+        (apply $ (map (lambda (s) (repo-index-only s (repo-reference-index-line rn s))) ref-searches))
+        (apply $ (map (lambda (s) (repo-index-only s (repo-number-index-line rn s))) number-searches))
+        (apply $ (map (lambda (s) (repo-index-only s (repo-quantity-index-line rn s))) quantity-searches))
+        (apply $ (map (lambda (s) (repo-index-only s
+            ($"        await InsertStringIndexAsync(conn, tx, \""(search-table-name s)"\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal (% "name" s))"(content));
+"))) uri-searches))
+"        await Task.CompletedTask;
+    }
+
+"))
 
 ; ===================================================================
 ; Main repository function
@@ -887,13 +1221,9 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
                             (repo-overrides rn inline-list has-history)
                             (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
                             (repo-search-own rn schema inline-list all-table-search-list db)
-                            (repo-autocomplete-own schema string-searches token-searches date-searches db)
-                            (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
-                            (repo-drop-search schema all-table-search-list db)
+                            (repo-own-parameters rn inline-list all-table-search-list string-searches token-searches date-searches ref-searches number-searches quantity-searches uri-searches hn-all)
                             (repo-read-resource-helper rn inline-list has-history db)
-                            (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
-                            (repo-delete-search-indexes schema all-table-search-list db)
-                            (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
+                            (repo-build-order-by schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
                             "}
 ")
                     ($
