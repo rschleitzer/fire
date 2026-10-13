@@ -625,6 +625,17 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
     protected abstract void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated);
     protected abstract Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content);
     protected abstract Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId);
+    protected abstract (string? tableName, string column, bool isToken) ResolveSearchTable(string name);
+    // A search: the condition of one parameter of the resource's own (false: it has none of
+    // that name), a filter a project adds, the modifiers, the order.
+    protected abstract bool AddSearch(string key, string modifier, string[] orValues, List<""string> joins, List<""string> whereClauses,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex);
+    protected virtual bool AddOwnFilter(KeyValuePair<""string, Microsoft.Extensions.Primitives.StringValues> param, string key, List<""string> joins,
+        List<""string> whereClauses, List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex) => false;
+    protected abstract void MissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex);
+    protected abstract void NotSearch(string key, string value, List<""string> joins, List<""string> wheres,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex);
+    protected abstract string OrderBy(string sortParam);
 
     // The values of the resource's own columns as parameters first, first + 1, ...
     protected static void AddInline(CmdType cmd, int first, object?[] inline)
@@ -665,6 +676,17 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
     {
         if (sql.IndexOf('') < 0 && sql.IndexOf('') < 0) return sql;
         if (_sql.TryGetValue(sql, out var known)) return known;
+        var made = Resolve(sql);
+        if (_sql.Count < 4096) _sql[sql] = made;
+        return made;
+    }
+
+    // A command of a text composed for one request (a search, with its conditions and its
+    // page): worked out each time, never kept.
+    protected CmdType CmdOnce(string sql, ConnType conn, TxType? tx = null) => Db.Cmd(Resolve(sql), conn, tx);
+
+    protected string Resolve(string sql)
+    {
         var sb = new StringBuilder(sql.Length + 64);
         var columns = InlineColumns;
         for (var i = 0; i < sql.Length; i++)
@@ -684,9 +706,7 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
             }
             i = end;
         }
-        var made = sb.ToString();
-        if (_sql.Count < 4096) _sql[sql] = made;
-        return made;
+        return sb.ToString();
     }
 
 "))
@@ -710,6 +730,11 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
                 (if has-history (repo-instance-history rn schema db) "")
                 (if has-history (repo-type-history rn schema db) "")
                 (repo-purge rn schema has-history db)
+                ; (their texts are composed for the request)
+                (string-replace
+                    ($ (repo-search rn schema inline-list '() has-history db)
+                       (repo-autocomplete-body schema db))
+                    "Db.Cmd(" "CmdOnce(")
                 (repo-utc-helper)
                 (repo-insert-helpers schema db)
                 (repo-insert-quantity-helper schema db)
@@ -756,8 +781,46 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 "    protected override " rn "Resource ReadResource(ReaderType reader) => Read" rn "Resource(reader);
     protected override void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated)
         => " rn "SearchExtractor.InjectMeta(content, id, versionId, lastUpdated);
+    protected override void MissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex)
+        => AddMissingSearch(key, isMissing, joins, wheres, ref aliasIndex);
+    protected override void NotSearch(string key, string value, List<""string> joins, List<""string> wheres,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
+        => AddNotSearch(key, value, joins, wheres, parameters, ref paramIndex, ref aliasIndex);
+    protected override string OrderBy(string sortParam) => BuildOrderBy(sortParam);
 
 ")))
+
+; A resource's part of a search: the conditions of its own parameters, and the filters a
+; project adds (existsfilter.scm writes them for the loop over the query: its `continue`
+; is this method's `true`).
+(define (repo-search-own rn schema inline-list all-table-search-list db)
+    (let ((own (repo-exists-filter-cases rn db)))
+        ($
+"    protected override bool AddSearch(string key, string modifier, string[] orValues, List<""string> joins, List<""string> whereClauses,
+        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
+    {
+                switch (key)
+                {
+"
+            (apply $ (map (lambda (s) (repo-search-case-inline s db)) inline-list))
+            (apply $ (map (lambda (s) (repo-search-case-table s schema)) all-table-search-list))
+"                    default:
+                        return false;
+                }
+        return true;
+    }
+
+"
+            (if (string=? own "") "" ($
+"    protected override bool AddOwnFilter(KeyValuePair<""string, Microsoft.Extensions.Primitives.StringValues> param, string key, List<""string> joins,
+        List<""string> whereClauses, List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
+    {
+"               (string-replace own "continue;" "return true;")
+"        return false;
+    }
+
+"))
+        )))
 
 ; ===================================================================
 ; Main repository function
@@ -823,8 +886,8 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
                             (repo-header rn schema inline-list db)
                             (repo-overrides rn inline-list has-history)
                             (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
-                            (repo-search rn schema inline-list all-table-search-list has-history db)
-                            (repo-autocomplete schema string-searches token-searches date-searches db)
+                            (repo-search-own rn schema inline-list all-table-search-list db)
+                            (repo-autocomplete-own schema string-searches token-searches date-searches db)
                             (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
                             (repo-drop-search schema all-table-search-list db)
                             (repo-read-resource-helper rn inline-list has-history db)
@@ -2004,7 +2067,7 @@ public class "rn"Repository : I"rn"Repository
 
 (define (repo-search rn schema inline-list all-table-search-list has-history db)
     ($
-"    public async Task<(List<"rn"Resource> resources, int total)> SearchAsync(
+"    public async Task<(List<"(r-res rn)"> resources, int total)> SearchAsync(
         IQueryCollection queryParams, int count, int offset)
     {
         var whereClauses = new List<""string>();
@@ -2037,7 +2100,10 @@ public class "rn"Repository : I"rn"Repository
             }
 "
         ; Reverse-existence filter cases (per-project; see existsfilter.scm)
-        (repo-exists-filter-cases rn db)
+        (if (r-generic? rn)
+"            if (AddOwnFilter(param, key, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex)) continue;
+"
+            (repo-exists-filter-cases rn db))
 "
             // Handle modifiers
             var modifier = \"\";
@@ -2052,14 +2118,14 @@ public class "rn"Repository : I"rn"Repository
             if (modifier == \"missing\")
             {
                 var isMissing = param.Value.ToString().Equals(\"true\", StringComparison.OrdinalIgnoreCase);
-                AddMissingSearch(key, isMissing, joins, whereClauses, ref aliasIndex);
+                "(if (r-generic? rn) "MissingSearch" "AddMissingSearch")"(key, isMissing, joins, whereClauses, ref aliasIndex);
                 continue;
             }
 
             // Handle :not modifier
             if (modifier == \"not\")
             {
-                AddNotSearch(key, param.Value.ToString(), joins, whereClauses, parameters, ref paramIndex, ref aliasIndex);
+                "(if (r-generic? rn) "NotSearch" "AddNotSearch")"(key, param.Value.ToString(), joins, whereClauses, parameters, ref paramIndex, ref aliasIndex);
                 continue;
             }
 
@@ -2104,13 +2170,16 @@ public class "rn"Repository : I"rn"Repository
 
 "
         ; Inline search param cases
-        (apply $ (map (lambda (s) (repo-search-case-inline s db)) inline-list))
+        (if (r-generic? rn) "" (apply $ (map (lambda (s) (repo-search-case-inline s db)) inline-list)))
         ; _lastUpdated inline case (uses r.last_updated directly, no JOIN)
         (repo-search-case-last-updated rn)
         ; Table search param cases
         (apply $ (map (lambda (s) (repo-search-case-table s schema)) all-table-search-list))
 "                    default:
-                        throw new ArgumentException($\"Unknown search parameter: {key}\");
+"       (if (r-generic? rn)
+"                        if (AddSearch(key, modifier, orValues, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex)) break;
+" "")
+"                        throw new ArgumentException($\"Unknown search parameter: {key}\");
                 }
             }
         }
@@ -2119,7 +2188,7 @@ public class "rn"Repository : I"rn"Repository
         var joinClause = string.Join(\" \", joins);
 
         // Determine sort order
-        var orderBy = BuildOrderBy(sortParam);
+        var orderBy = "(if (r-generic? rn) "OrderBy" "BuildOrderBy")"(sortParam);
 
         // Count total
         var countSql = $\"SELECT COUNT(DISTINCT r.id) FROM "(tbl-public rn db)" r {joinClause} {whereClause}\";
@@ -2135,7 +2204,7 @@ public class "rn"Repository : I"rn"Repository
         }
 
         if (count == 0)
-            return (new List<"rn"Resource>(), total);
+            return (new List<"(r-res rn)">(), total);
 
         // Fetch page
         string selectSql;
@@ -2154,14 +2223,14 @@ public class "rn"Repository : I"rn"Repository
                         $\"ORDER BY {orderBy} "(db-paginate "count" "offset" db)"\";
         }
 
-        var resources = new List<"rn"Resource>();
+        var resources = new List<"(r-res rn)">();
         await using (var cmd = "(new-cmd-alias db)"selectSql, conn, tx))
         {
             for (int i = 0; i < parameters.Count; i++)
                 cmd.Parameters.Add(CopyParam(parameters[i]));
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                resources.Add(Read"rn"Resource"(if (binary-data-table? rn db) "WithData" "")"(reader));
+                resources.Add("(if (r-generic? rn) "ReadResource" ($ "Read"rn"Resource"(if (binary-data-table? rn db) "WithData" "")))"(reader));
         }
 
         return (resources, total);
@@ -2497,6 +2566,16 @@ public class "rn"Repository : I"rn"Repository
 (define (repo-autocomplete schema string-searches token-searches date-searches db)
     ($
     (repo-autocomplete-resolve schema string-searches token-searches date-searches db)
+    (repo-autocomplete-body schema db)))
+
+; A resource's class beside the base has the table of its parameters alone; the method is
+; the base's.
+(define (repo-autocomplete-own schema string-searches token-searches date-searches db)
+    (string-replace (repo-autocomplete-resolve schema string-searches token-searches date-searches db)
+        "    private static (string? tableName" "    protected override (string? tableName"))
+
+(define (repo-autocomplete-body schema db)
+    ($
 "    public async Task<""List<""string>> AutocompleteAsync(string param, string value, string property, int? count, int? offset)
     {
 "       (open-conn db)
