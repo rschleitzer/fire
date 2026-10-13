@@ -6,8 +6,6 @@
 ;   SELECT t.status FROM Observation t JOIN Observation.search_subject rs
 ;   ON rs.resource_id = t.id WHERE rs.target_id = r.id LIMIT 1
 ; A model without repos has none.
-; The helpers chain-sort-cases-for-target and chain-sort-cases-for-ref remain
-; in repositories.scm.
 
 ; The repo block a model declares for a resource below repos, if it has one
 (define (find-service-repo-for rn-lc)

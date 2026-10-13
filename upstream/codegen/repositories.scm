@@ -13,6 +13,126 @@
 (define (binary-data-table? rn db)
     (and (string=? rn "Binary") (case db ((PostgreSql) #t) (else #f))))
 
+; The base class is written for no resource in particular: what a data table needs is in it,
+; and asked for when the server runs -- HasDataTable, which a resource's class answers
+; (Binary: on PostgreSQL). data-table? is whether the code is to be written at all, and
+; data-guard puts the question around a block of it.
+(define (data-table? rn db) (or (r-generic? rn) (binary-data-table? rn db)))
+(define (data-guard rn code)
+    (if (r-generic? rn)
+        ($ "        if (HasDataTable)
+        {
+" code "
+        }
+")
+        code))
+
+; Before a content is stored: its data taken out (the row keeps "data": null).
+(define (repo-data-take rn)
+    (if (r-generic? rn) ($
+"        // a data table: the bytes are kept there, not in the content
+        byte[]? binaryData = null;
+        JsonNode? binaryDataNode = null;
+        if (HasDataTable && content[\"data\"] is { } dataElement)
+        {
+            binaryDataNode = dataElement.DeepClone();
+            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
+            content[\"data\"] = null;
+        }
+")
+        ""))
+
+; After the row is written: the bytes stored under the version, and the content that is
+; answered given its data back.
+(define (repo-data-store rn schema db version)
+    (if (r-generic? rn) ($
+"        if (binaryData != null)
+        {
+            await using (var dataCmd = "(new-cmd db)"
+                \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ("(pp 1 db)", "(pp 2 db)", "(pp 3 db)")\", conn, tx))
+            {
+    "(add-param-line-for "dataCmd" 1 "id" db)"
+    "(add-param-line-for "dataCmd" 2 version db)"
+    "(add-param-line-for "dataCmd" 3 "binaryData" db)"
+                await dataCmd.ExecuteNonQueryAsync();
+            }
+            content[\"data\"] = binaryDataNode;
+            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
+        }
+
+")
+        ""))
+
+; A resource that was read: with its data, where the data lies in a table.
+(define (repo-data-read rn indent var)
+    (if (r-generic? rn) ($ indent var " = await WithDataAsync(conn, tx, " var ");
+")
+        ""))
+
+; What the base class has for a data table.
+(define (repo-data-members has-history db)
+    (let ((rn repo-generic-rn) (schema repo-generic-rn)) ($
+"    // -- A data table --
+
+    // Whether the resource keeps its data in a table of its own (Binary on PostgreSQL: raw
+    // bytes in resource_data, a row a version, the content with \"data\": null).
+    protected virtual bool HasDataTable => false;
+
+    private string DataColumn => HasDataTable ? \", rd.data\" : \"\";
+    private string DataJoin(string alias) => HasDataTable
+        ? $\"LEFT JOIN "(tbl schema "resource_data" db)" rd ON rd.resource_id = {alias}.id AND rd.version_id = {alias}.version_id \"
+        : \"\";
+
+    protected async Task<""TResource> WithDataAsync(ConnType conn, TxType? tx, TResource resource)
+    {
+        if (!HasDataTable) return resource;
+        await using var dataCmd = "(new-cmd db)"
+            \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx);
+"(add-param-8-for "dataCmd" 1 "resource.id" db)"
+"(add-param-8-for "dataCmd" 2 "resource.versionId" db)"
+        if (await dataCmd.ExecuteScalarAsync() is not byte[] bytes) return resource;
+        return WithData(resource, bytes);
+    }
+
+    private TResource WithData(TResource resource, byte[] bytes)
+    {
+        var parsed = JsonNode.Parse(resource.content)!;
+        parsed[\"data\"] = Convert.ToBase64String(bytes);
+        return MakeResource(resource.id, resource.versionId, resource.lastUpdated,
+            JsonSerializer.SerializeToUtf8Bytes(parsed), InlineOf(resource));
+    }
+
+    // A row of a search that joined the data table: the data is the column behind the
+    // resource's own.
+    private TResource ReadResourceWithData(ReaderType reader)
+    {
+        var resource = ReadResource(reader);
+        var at = 4 + InlineColumns.Length;
+        return reader.IsDBNull(at) ? resource : WithData(resource, reader.GetFieldValue<""byte[]>(at));
+    }
+
+"
+    (if has-history ($
+"    private TRow ReadHistoryRowWithData(ReaderType reader)
+    {
+        var content = reader.IsDBNull(3) ? null : reader.GetFieldValue<""byte[]>(3);
+        if (content != null && !reader.IsDBNull(5))
+        {
+            var bytes = reader.GetFieldValue<""byte[]>(5);
+            var parsed = JsonNode.Parse(content)!;
+            parsed[\"data\"] = Convert.ToBase64String(bytes);
+            content = JsonSerializer.SerializeToUtf8Bytes(parsed);
+        }
+        return MakeRow(
+            reader.GetString(0),
+            reader.GetInt32(1),
+            Utc(reader.GetDateTime(2)),
+            content,
+            reader.GetString(4));
+    }
+
+") ""))))
+
 ; Parameter placeholder: $1 or @p1
 (define (pp n db)
     (db3 db (lambda (db) (case db
@@ -49,166 +169,58 @@
 
 ; Connection opening
 (define (open-conn db)
-    (case db ((Any)
-        "        await using var conn = await Db.OpenAsync();")
-    (else (case db
-        ((PostgreSql)"        await using var conn = await _dataSource.OpenConnectionAsync();")
-        ((SqlServer)"        await using var conn = new SqlConnection(_connectionString);
-        await conn.OpenAsync();")
-        ((Sqlite)"        await using var conn = new SqliteConnection(_connectionString);
-        await conn.OpenAsync();")))))
+    "        await using var conn = await Db.OpenAsync();")
 
 ; The same where the generator wrote the alias: new CmdType(
 (define (new-cmd-alias db)
-    (case db ((Any) "Db.Cmd(") (else "new CmdType(")))
+    "Db.Cmd(")
 
 ; New command: new XxxCommand(
 (define (new-cmd db)
-    (case db ((Any)
-        "Db.Cmd(")
-    (else ($ "new "(db-command-type db)"("))))
+    "Db.Cmd(")
 
-; Param type name
-(define (param-type db)
-    (db3 db (lambda (db) (case db
-        ((PostgreSql)"NpgsqlParameter")
-        ((SqlServer)"SqlParameter")
-        ((Sqlite)"SqliteParameter")))))
-
-; New param: new NpgsqlParameter { Value = xxx }
-(define (new-param value-expr db)
-    ($ "new "(param-type db)" { Value = " value-expr " }"))
-
-; New timestamp param
-(define (new-ts-param value-expr db)
-    (db3 db (lambda (db) (case db
-        ((PostgreSql) ($ "new NpgsqlParameter { Value = " value-expr ", NpgsqlDbType = NpgsqlDbType.TimestampTz }"))
-        ((SqlServer) ($ "new SqlParameter { Value = " value-expr ", SqlDbType = SqlDbType.DateTimeOffset }"))
-        ((Sqlite) ($ "new SqliteParameter { Value = " value-expr " }"))))))
-
-; Param type copy in search (for reusing params in count vs select query)
-(define (param-copy-typed db)
-    (db3 db (lambda (db) (case db
-        ((PostgreSql) ($"
-                if (parameters[i].NpgsqlDbType != NpgsqlDbType.Unknown)
-                    p.NpgsqlDbType = parameters[i].NpgsqlDbType;"))
-        ((SqlServer Sqlite)"")))))
-
-; AddWithValue call - positional for PG, named for others
-(define (awv n expr db)
-    (case db ((Any)
-        ($"
-            Db.Add(cmd, "(number->string n)", " expr ");"))
-    (else (case db
-        ((PostgreSql) ($"
-            cmd.Parameters.AddWithValue(" expr ");"))
-        ((SqlServer Sqlite) ($"
-            cmd.Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
-
-; Reader type name
-(define (reader-type db)
-    (db3 db (lambda (db) (case db
-        ((PostgreSql)"NpgsqlDataReader")
-        ((SqlServer)"SqlDataReader")
-        ((Sqlite)"SqliteDataReader")))))
 
 ; Connection + transaction opening. Inside a DbTransactionScope (transaction bundle) the method
 ; uses the connection and transaction of the scope and owns neither; every commit and rollback in
 ; such a method is guarded with txScope == null, the scope commits or rolls back once at the end.
 (define (open-conn-tx db)
-    (case db ((Any)
-        "        var txScope = DbTransactionScope.Current;
+    "        var txScope = DbTransactionScope.Current;
         await using var ownConn = txScope == null ? await Db.OpenAsync() : null;
         var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
         await using var ownTx = txScope == null ? await conn.BeginTransactionAsync() : null;
         var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")
-    (else (case db
-        ((PostgreSql)"        var txScope = DbTransactionScope.Current;
-        await using var ownConn = txScope == null ? await _dataSource.OpenConnectionAsync() : null;
-        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
-        await using var ownTx = txScope == null ? await conn.BeginTransactionAsync() : null;
-        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")
-        ((SqlServer)"        var txScope = DbTransactionScope.Current;
-        await using var ownConn = txScope == null ? new SqlConnection(_connectionString) : null;
-        if (ownConn != null) await ownConn.OpenAsync();
-        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
-        await using var ownTx = txScope == null ? (TxType)await conn.BeginTransactionAsync() : null;
-        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")
-        ((Sqlite)"        var txScope = DbTransactionScope.Current;
-        await using var ownConn = txScope == null ? new SqliteConnection(_connectionString) : null;
-        if (ownConn != null) await ownConn.OpenAsync();
-        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
-        using var ownTx = txScope == null ? conn.BeginTransaction() : null;
-        var tx = txScope == null ? ownTx! : (TxType)txScope.Transaction;")))))
 
 ; Connection opening for the reads a transaction bundle can reach (read, version read, search,
 ; delete without history). Inside a DbTransactionScope they run on its connection and within its
 ; transaction, so they see the writes of earlier bundle entries; SqlClient and Microsoft.Data.Sqlite
 ; also reject a command without the pending transaction. Outside a scope tx is null.
 (define (open-conn-scoped db)
-    (case db ((Any)
-        "        var txScope = DbTransactionScope.Current;
+    "        var txScope = DbTransactionScope.Current;
         await using var ownConn = txScope == null ? await Db.OpenAsync() : null;
         var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
         var tx = (TxType?)txScope?.Transaction;")
-    (else ($"        var txScope = DbTransactionScope.Current;
-"
-    (case db
-        ((PostgreSql)"        await using var ownConn = txScope == null ? await _dataSource.OpenConnectionAsync() : null;
-")
-        ((SqlServer)"        await using var ownConn = txScope == null ? new SqlConnection(_connectionString) : null;
-        if (ownConn != null) await ownConn.OpenAsync();
-")
-        ((Sqlite)"        await using var ownConn = txScope == null ? new SqliteConnection(_connectionString) : null;
-        if (ownConn != null) await ownConn.OpenAsync();
-"))
-"        var conn = txScope == null ? ownConn! : (ConnType)txScope.Connection;
-        var tx = (TxType?)txScope?.Transaction;"))))
 
 ; Table-level lock hint (goes after table name in SQL Server)
 (define (table-lock-hint db)
     (db3 db (lambda (db) (case db ((SqlServer)" WITH (UPDLOCK, ROWLOCK)") (else "")))))
 
-; Transaction type name
-(define (db-transaction-type db)
-    (db3 db (lambda (db) (case db
-        ((PostgreSql)"NpgsqlTransaction")
-        ((SqlServer)"SqlTransaction")
-        ((Sqlite)"SqliteTransaction")))))
 
 ; Single AddWithValue line (no leading newline), with configurable command name
 (define (add-param-line-for cmd-name n expr db)
-    (case db ((Any)
-        ($"            Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
-    (else (case db
-        ((PostgreSql) ($"            " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ; SQL Server: through AddValue, which keeps a time's precision
-        ((SqlServer) ($"            AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"            " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
+    ($"            Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
 
 (define (add-param-line n expr db) (add-param-line-for "cmd" n expr db))
 
 ; 8-space indent version for non-block contexts (Read, VRead, etc.)
 (define (add-param-8-for cmd-name n expr db)
-    (case db ((Any)
-        ($"        Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
-    (else (case db
-        ((PostgreSql) ($"        " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ((SqlServer) ($"        AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"        " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
+    ($"        Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
 
 (define (add-param-8 n expr db) (add-param-8-for "cmd" n expr db))
 
 
 ; Bind parameters from a runtime list of objects — positional for PG, named for others
 (define (bind-args-list cmd-name args-name db)
-    (case db ((Any)
-        ($"            for (int __i = 0; __i < " args-name ".Count; __i++) Db.Add(" cmd-name ", __i + 1, " args-name "[__i]);"))
-    (else (case db
-        ((PostgreSql)
-            ($"            foreach (var __a in " args-name ") " cmd-name ".Parameters.AddWithValue(__a);"))
-        ((SqlServer Sqlite)
-            ($"            for (int __i = 0; __i < " args-name ".Count; __i++) " cmd-name ".Parameters.AddWithValue($\"@p{__i + 1}\", " args-name "[__i]);"))))))
+    ($"            for (int __i = 0; __i < " args-name ".Count; __i++) Db.Add(" cmd-name ", __i + 1, " args-name "[__i]);"))
 
 ; Pagination: LIMIT/OFFSET vs OFFSET/FETCH
 ; count-expr and offset-expr are C# interpolation expressions like "count" or "offset"
@@ -303,22 +315,11 @@
     (if (generic-inline? inline-list)
         ($"
             AddInline(cmd, " (number->string start-idx) ", " (if (string=? var-prefix "") "inline" ($ "InlineOf(" (substring var-prefix 0 (- (string-length var-prefix) 1)) ")")) ");")
-        (case db ((Any)
         (let loop ((items inline-list) (idx start-idx))
             (if (null? items)""
                 ($"
             Db.AddValue(cmd, "(number->string idx)", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"
-                    (loop (cdr items) (+ idx 1))))))
-    (else (let loop ((items inline-list) (idx start-idx))
-        (if (null? items)""
-            ($ (case db
-                ((PostgreSql) ($"
-            cmd.Parameters.AddWithValue((object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
-                ((SqlServer) ($"
-            AddValue(cmd, \""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);"))
-                ((Sqlite) ($"
-            cmd.Parameters.AddWithValue(\""(pp idx db)"\", (object?)" var-prefix (search-query-camel (car items))" ?? DBNull.Value);")))
-                (loop (cdr items) (+ idx 1)))))))))
+                    (loop (cdr items) (+ idx 1)))))))
 
 ; Reader column fields for inline params (starting at index 4)
 (define (repo-reader-fields inline-list has-history)
@@ -504,8 +505,7 @@ public interface I"rn"Repository : "
 ; ===================================================================
 
 (define (repo-db-class-helpers db)
-    (case db ((Any)
-        "    // -- DB helpers --
+    "    // -- DB helpers --
 
     private static string P(int n) => Db.P(n);
     private static ParamType NewParam(int index, object value) => Db.Param(index, value);
@@ -513,49 +513,6 @@ public interface I"rn"Repository : "
     private static ParamType CopyParam(ParamType source) => Db.CopyParam(source);
 
 ")
-    (else ($
-"    // -- DB helpers --
-
-    private static string P(int n) => $\""
-    (pp-prefix db)
-    "{n}\";
-"
-    (case db
-        ((PostgreSql)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType { Value = value };
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType { Value = value, NpgsqlDbType = NpgsqlDbType.TimestampTz };
-    private static ParamType CopyParam(ParamType source)
-    {
-        var p = new ParamType { Value = source.Value };
-        if (source.NpgsqlDbType != NpgsqlDbType.Unknown)
-            p.NpgsqlDbType = source.NpgsqlDbType;
-        return p;
-    }
-
-")
-        ((SqlServer)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value) { SqlDbType = SqlDbType.DateTime2 };
-    // A parameter by its value - but a time as DATETIME2: AddWithValue alone takes a DateTime
-    // for the old DATETIME, whose steps are a 300th of a second, and last_updated and every
-    // instant in a column of its own were stored rounded to that.
-    private static void AddValue(SqlCommand cmd, string name, object value)
-    {
-        var p = cmd.Parameters.AddWithValue(name, value);
-        if (value is DateTime) p.SqlDbType = SqlDbType.DateTime2;
-    }
-    private static ParamType CopyParam(ParamType source) => new ParamType(source.ParameterName, source.Value) { SqlDbType = source.SqlDbType };
-
-")
-        ((Sqlite)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value);
-    private static ParamType CopyParam(ParamType source) => new ParamType(source.ParameterName, source.Value);
-
-"))))))
 
 ; ===================================================================
 ; The base classes: what does not depend on a resource's search parameters
@@ -730,7 +687,8 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
                 (repo-insert-helpers schema db)
                 (repo-insert-quantity-helper schema db)
                 (repo-insert-date-list-helper schema db)
-                (repo-db-class-helpers db))
+                (repo-db-class-helpers db)
+                (repo-data-members has-history db))
             "Db.Cmd(" "Cmd(")
             "    private " "    protected ")
             ; (the helpers that write an index row name the resource's tables: no longer static)
@@ -773,7 +731,11 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
     protected override void InjectMeta(JsonNode content, string id, int versionId, DateTime lastUpdated)
         => " rn "SearchExtractor.InjectMeta(content, id, versionId, lastUpdated);
     protected override string OrderBy(string sortParam) => BuildOrderBy(sortParam);
-
+"       (if (string=? rn "Binary")
+"    // (its bytes lie in a table of their own there)
+    protected override bool HasDataTable => Db.Kind == DbKind.PostgreSql;
+" "")
+"
 ")))
 
 ; A resource's part of a search: the conditions of its own parameters, and the filters a
@@ -1163,10 +1125,10 @@ public sealed record SearchParameter(string Name, char Kind, string Target)
 ; A resource has ONE repository, for every database (Db picks the dialect when the server
 ; starts) -- but Binary, whose bytes lie in a table of their own on PostgreSQL alone: its
 ; repositories differ in more than their SQL and are written for each database as before.
-(define (single-repository? rn) (not (string=? rn "Binary")))
+(define (single-repository? rn) #t)
 
 (define (repo-folder db content)
-    (case db ((Any) content) (else (make directory path: (db-folder db) content))))
+    content)
 
 ; For the program: Db told which database it is, and a resource's repository made for it.
 ; `source` is the C# expression the repositories of db are made with (a data source on
@@ -1214,7 +1176,6 @@ public sealed record SearchParameter(string Name, char Kind, string Target)
             (map (lambda (db)
                 (repo-folder db
                 (file ($ rn "Repository.cs")
-                    (if (single-repository? rn)
                         ; its own class beside the base: the methods that go by search parameter
                         ($
                             (repo-header rn schema inline-list db)
@@ -1225,47 +1186,14 @@ public sealed record SearchParameter(string Name, char Kind, string Target)
                             (repo-read-resource-helper rn inline-list has-history db)
                             (repo-build-order-by schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
                             "}
-")
-                    ($
-                            (repo-header rn schema inline-list db)
-                            (repo-create rn schema inline-list has-history db)
-                            (repo-read rn schema inline-list has-history db)
-                            (if has-history (repo-vread rn schema inline-list has-history db)"")
-                            (repo-update rn schema inline-list has-history db)
-                            (repo-patch rn schema inline-list has-history db)
-                            (repo-delete rn schema inline-list has-history db)
-                            (if (string=? rn "Provenance") (repo-hard-delete rn schema has-history db)"")
-                            (if has-history (repo-is-deleted schema db)"")
-                            (if has-history (repo-rollback rn schema inline-list db)"")
-                            (if has-history (repo-undelete rn schema inline-list db)"")
-                            (if has-history (repo-undelete-all rn schema inline-list db)"")
-                            (repo-search rn schema inline-list all-table-search-list has-history db)
-                            (if has-history (repo-instance-history rn schema db)"")
-                            (if has-history (repo-type-history rn schema db)"")
-                            (repo-autocomplete schema string-searches token-searches date-searches db)
-                            (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
-                            (repo-drop-search schema all-table-search-list db)
-                            (repo-purge rn schema has-history db)
-                            (repo-read-resource-helper rn inline-list has-history db)
-                            (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
-                            (repo-delete-search-indexes schema all-table-search-list db)
-                            (repo-insert-helpers schema db)
-                            (if (null? quantity-searches) "" (repo-insert-quantity-helper schema db))
-                            (if (null? (filter search-is-date-list? all-table-search-list)) "" (repo-insert-date-list-helper schema db))
-                            (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
-                            (repo-db-class-helpers db)
-                            "}
-"
-                        )
-                    )))) (if (single-repository? rn) '(Any) target-databases))))))
+")))) '(Any))))))
 
 ; ===================================================================
 ; Section: Header + class open + constructor
 ; ===================================================================
 
 (define (repo-header rn schema inline-list db)
-    (case db ((Any)
-        ($
+    ($
 "using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -1284,60 +1212,6 @@ namespace "(project-name)".Repositories;
 public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
 {
 "))
-    (else ($
-"using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
-using "(project-name)".Search;
-using "(project-name)".Repositories;
-using "(db-using db)";
-"
-    (case db
-        ((PostgreSql)"using NpgsqlTypes;
-using ConnType = Npgsql.NpgsqlConnection;
-using TxType = Npgsql.NpgsqlTransaction;
-using CmdType = Npgsql.NpgsqlCommand;
-using ReaderType = Npgsql.NpgsqlDataReader;
-using ParamType = Npgsql.NpgsqlParameter;
-")
-        ((SqlServer)"using System.Data;
-using ConnType = Microsoft.Data.SqlClient.SqlConnection;
-using TxType = Microsoft.Data.SqlClient.SqlTransaction;
-using CmdType = Microsoft.Data.SqlClient.SqlCommand;
-using ReaderType = Microsoft.Data.SqlClient.SqlDataReader;
-using ParamType = Microsoft.Data.SqlClient.SqlParameter;
-")
-        ((Sqlite)"using ConnType = Microsoft.Data.Sqlite.SqliteConnection;
-using TxType = Microsoft.Data.Sqlite.SqliteTransaction;
-using CmdType = Microsoft.Data.Sqlite.SqliteCommand;
-using ReaderType = Microsoft.Data.Sqlite.SqliteDataReader;
-using ParamType = Microsoft.Data.Sqlite.SqliteParameter;
-"))
-"
-namespace "(project-name)".Repositories."(db-namespace db)";
-
-public class "rn"Repository : I"rn"Repository
-{
-"
-    (case db
-        ((PostgreSql)
-            ($"    private readonly NpgsqlDataSource _dataSource;
-
-    public "rn"Repository(NpgsqlDataSource dataSource)
-    {
-        _dataSource = dataSource;
-    }
-
-"))
-        ((SqlServer Sqlite)
-            ($"    private readonly string _connectionString;
-
-    public "rn"Repository(string connectionString)
-    {
-        _connectionString = connectionString;
-    }
-
-")))))))
 
 ; ===================================================================
 ; Section: CreateAsync
@@ -1375,19 +1249,7 @@ public class "rn"Repository : I"rn"Repository
     (r-inject rn) "(content, id, versionId, lastUpdated);
 "(if (null? inline-list)""($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"        // Binary: extract data before storing
-        byte[]? binaryData = null;
-        JsonNode? binaryDataNode = null;
-        var dataElement = content[\"data\"];
-        if (dataElement != null)
-        {
-            binaryDataNode = dataElement.DeepClone();
-            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
-            content[\"data\"] = null;
-        }
-")
-        "")
+    (repo-data-take rn)
 "        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         await using (var cmd = "(new-cmd db)"
@@ -1412,24 +1274,7 @@ public class "rn"Repository : I"rn"Repository
         ; as soon as the next write archives that version.
         ""
         "")
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($ "        // Binary: store raw bytes separately
-        if (binaryData != null)
-        {
-            await using (var dataCmd = new NpgsqlCommand(
-                \"INSERT INTO \\\"Binary\\\".resource_data (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
-            {
-                dataCmd.Parameters.AddWithValue(id);
-                dataCmd.Parameters.AddWithValue(versionId);
-                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
-                await dataCmd.ExecuteNonQueryAsync();
-            }
-            content[\"data\"] = binaryDataNode;
-            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
-        }
-
-")
-        "")
+    (repo-data-store rn schema db "versionId")
 "        await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
@@ -1458,26 +1303,7 @@ public class "rn"Repository : I"rn"Repository
         var resource = "(r-read rn)"(reader);
         await reader.CloseAsync();
 "
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"
-        // Binary: inject data from resource_data
-        await using var dataCmd = new NpgsqlCommand(
-            \"SELECT data FROM \\\"Binary\\\".resource_data WHERE resource_id = $1 AND version_id = $2\", conn, tx);
-        dataCmd.Parameters.AddWithValue(id);
-        dataCmd.Parameters.AddWithValue(resource.versionId);
-        await using var dataReader = await dataCmd.ExecuteReaderAsync();
-        if (await dataReader.ReadAsync())
-        {
-            var bytes = dataReader.GetFieldValue<""byte[]>(0);
-            await dataReader.CloseAsync();
-            var parsed = JsonNode.Parse(resource.content)!;
-            parsed[\"data\"] = Convert.ToBase64String(bytes);
-            resource = new BinaryResource(resource.id, resource.versionId, resource.lastUpdated,
-                JsonSerializer.SerializeToUtf8Bytes(parsed));
-        }
-
-")
-        "")
+    (repo-data-read rn "        " "resource")
 "        return resource;
     }
 
@@ -1506,26 +1332,7 @@ public class "rn"Repository : I"rn"Repository
             var resource = "(r-read rn)"(reader);
             await reader.CloseAsync();
 "
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"
-            // Binary: inject data from resource_data
-            await using var dataCmd = new NpgsqlCommand(
-                \"SELECT data FROM \\\"Binary\\\".resource_data WHERE resource_id = $1 AND version_id = $2\", conn, tx);
-            dataCmd.Parameters.AddWithValue(id);
-            dataCmd.Parameters.AddWithValue(versionId);
-            await using var dataReader = await dataCmd.ExecuteReaderAsync();
-            if (await dataReader.ReadAsync())
-            {
-                var bytes = dataReader.GetFieldValue<""byte[]>(0);
-                await dataReader.CloseAsync();
-                var parsed = JsonNode.Parse(resource.content)!;
-                parsed[\"data\"] = Convert.ToBase64String(bytes);
-                resource = new BinaryResource(resource.id, resource.versionId, resource.lastUpdated,
-                    JsonSerializer.SerializeToUtf8Bytes(parsed));
-            }
-
-")
-        "")
+    (repo-data-read rn "            " "resource")
 "            return resource;
         }
         await reader.CloseAsync();
@@ -1543,26 +1350,7 @@ public class "rn"Repository : I"rn"Repository
             var resource = "(r-read rn)"(histReader);
             await histReader.CloseAsync();
 "
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"
-            // Binary: inject data from resource_data (history)
-            await using var histDataCmd = new NpgsqlCommand(
-                \"SELECT data FROM \\\"Binary\\\".resource_data WHERE resource_id = $1 AND version_id = $2\", conn, tx);
-            histDataCmd.Parameters.AddWithValue(id);
-            histDataCmd.Parameters.AddWithValue(versionId);
-            await using var histDataReader = await histDataCmd.ExecuteReaderAsync();
-            if (await histDataReader.ReadAsync())
-            {
-                var bytes = histDataReader.GetFieldValue<""byte[]>(0);
-                await histDataReader.CloseAsync();
-                var parsed = JsonNode.Parse(resource.content)!;
-                parsed[\"data\"] = Convert.ToBase64String(bytes);
-                resource = new BinaryResource(resource.id, resource.versionId, resource.lastUpdated,
-                    JsonSerializer.SerializeToUtf8Bytes(parsed));
-            }
-
-")
-        "")
+    (repo-data-read rn "            " "resource")
 "            return resource;
         }
 
@@ -1629,19 +1417,7 @@ public class "rn"Repository : I"rn"Repository
         "(r-inject rn)"(content, id, newVersionId, lastUpdated);
 " (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "))
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"        // Binary: extract data before storing
-        byte[]? binaryData = null;
-        JsonNode? binaryDataNode = null;
-        var dataElement = content[\"data\"];
-        if (dataElement != null)
-        {
-            binaryDataNode = dataElement.DeepClone();
-            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
-            content[\"data\"] = null;
-        }
-")
-        "")
+    (repo-data-take rn)
 "        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
@@ -1659,24 +1435,7 @@ public class "rn"Repository : I"rn"Repository
         }
 
 "
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        "        // Binary: store raw bytes separately
-        if (binaryData != null)
-        {
-            await using (var dataCmd = new NpgsqlCommand(
-                \"INSERT INTO \\\"Binary\\\".resource_data (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
-            {
-                dataCmd.Parameters.AddWithValue(id);
-                dataCmd.Parameters.AddWithValue(newVersionId);
-                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
-                await dataCmd.ExecuteNonQueryAsync();
-            }
-            content[\"data\"] = binaryDataNode;
-            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
-        }
-
-"
-        "")
+    (repo-data-store rn schema db "newVersionId")
 "        // Rebuild search indexes
         await DeleteSearchIndexesAsync(conn, tx, id);
         await InsertSearchIndexesAsync(conn, tx, id, content);
@@ -1714,19 +1473,7 @@ public class "rn"Repository : I"rn"Repository
         "(r-inject rn)"(content, id, newVersionId, lastUpdated);
 "       (if (null? inline-list)"" ($"        "(repo-destructure-inline inline-list)" = "(r-extract-inline rn)";
 "       ))
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        ($"        // Binary: extract data before storing
-        byte[]? binaryData = null;
-        JsonNode? binaryDataNode = null;
-        var dataElement = content[\"data\"];
-        if (dataElement != null)
-        {
-            binaryDataNode = dataElement.DeepClone();
-            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
-            content[\"data\"] = null;
-        }
-")
-        "")
+    (repo-data-take rn)
 "        var contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
 
         // Update resource
@@ -1744,24 +1491,7 @@ public class "rn"Repository : I"rn"Repository
         }
 
 "
-    (if (and (string=? "Binary" rn) (string=? (symbol->string db)"PostgreSql"))
-        "        // Binary: store raw bytes separately
-        if (binaryData != null)
-        {
-            await using (var dataCmd = new NpgsqlCommand(
-                \"INSERT INTO \\\"Binary\\\".resource_data (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
-            {
-                dataCmd.Parameters.AddWithValue(id);
-                dataCmd.Parameters.AddWithValue(newVersionId);
-                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
-                await dataCmd.ExecuteNonQueryAsync();
-            }
-            content[\"data\"] = binaryDataNode;
-            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
-        }
-
-"
-        "")
+    (repo-data-store rn schema db "newVersionId")
 "        // Rebuild search indexes
         await DeleteSearchIndexesAsync(conn, tx, id);
         await InsertSearchIndexesAsync(conn, tx, id, content);
@@ -1786,7 +1516,7 @@ public class "rn"Repository : I"rn"Repository
 ; its row there, as a create and an update give it one. Without these the
 ; patched version had no data at all.
 (define (repo-patch-binary-read rn schema db)
-    (if (binary-data-table? rn db) ($
+    (if (data-table? rn db) (data-guard rn ($
 "        // Binary: the stored content has no data; the patch sees it
         await using (var readCmd = "(new-cmd db)"
                 \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
@@ -1796,40 +1526,11 @@ public class "rn"Repository : I"rn"Repository
             if (await readCmd.ExecuteScalarAsync() is byte[] storedData)
                 content[\"data\"] = Convert.ToBase64String(storedData);
         }
-") ""))
+")) ""))
 
-(define (repo-patch-binary-take rn db)
-    (if (binary-data-table? rn db) ($
-"        // Binary: extract data before storing
-        byte[]? binaryData = null;
-        JsonNode? binaryDataNode = null;
-        var dataElement = content[\"data\"];
-        if (dataElement != null)
-        {
-            binaryDataNode = dataElement.DeepClone();
-            binaryData = Convert.FromBase64String(dataElement.GetValue<""string>());
-            content[\"data\"] = null;
-        }
-") ""))
+(define (repo-patch-binary-take rn db) (repo-data-take rn))
 
-(define (repo-patch-binary-store rn schema db)
-    (if (binary-data-table? rn db) ($
-"        // Binary: store raw bytes separately
-        if (binaryData != null)
-        {
-            await using (var dataCmd = new NpgsqlCommand(
-                \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
-            {
-                dataCmd.Parameters.AddWithValue(id);
-                dataCmd.Parameters.AddWithValue(newVersionId);
-                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
-                await dataCmd.ExecuteNonQueryAsync();
-            }
-            content[\"data\"] = binaryDataNode;
-            contentBytes = JsonSerializer.SerializeToUtf8Bytes(content);
-        }
-
-") ""))
+(define (repo-patch-binary-store rn schema db) (repo-data-store rn schema db "newVersionId"))
 
 (define (repo-patch-versioned rn schema inline-list db)
     ($
@@ -2030,14 +1731,14 @@ public class "rn"Repository : I"rn"Repository
 "
     (open-conn-scoped db)
     ; no history to keep the bytes for: they go with the resource
-    (if (binary-data-table? rn db) ($"
+    (if (data-table? rn db) (data-guard rn ($"
         await using (var dataCmd = "(new-cmd db)"
             \"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)"\", conn, tx))
         {
 "(add-param-line-for "dataCmd" 1 "id" db)"
             await dataCmd.ExecuteNonQueryAsync();
         }
-") "")
+")) "")
 "
         await using var cmd = "(new-cmd db)"
             \"DELETE FROM "(tbl-public rn db)" WHERE id = "(pp 1 db)"\", conn, tx);
@@ -2149,7 +1850,7 @@ public class "rn"Repository : I"rn"Repository
     ; the bytes of the version that is undone go with it: no foreign key takes
     ; them, and left behind they would stand in the way of the next version
     ; with that number
-    (if (binary-data-table? rn db) ($"
+    (if (data-table? rn db) (data-guard rn ($"
         await using (var cmd = "(new-cmd db)"
             \"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
         {
@@ -2157,7 +1858,7 @@ public class "rn"Repository : I"rn"Repository
 "(add-param-line 2 "currentVersionId" db)"
             await cmd.ExecuteNonQueryAsync();
         }
-") "")
+")) "")
 "
         // Find the most recent history entry - the DELETE row included, because it is the
         // version the resource stood in when it was deleted.
@@ -2196,22 +1897,7 @@ public class "rn"Repository : I"rn"Repository
 
         if (previousIsDelete)
         {
-"(if (binary-data-table? rn db) ($
-"            // Binary: what is answered has its data, as every other answer
-            await using (var readCmd = "(new-cmd db)"
-                \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
-            {
-    "(add-param-line-for "readCmd" 1 "id" db)"
-    "(add-param-line-for "readCmd" 2 "previous.versionId" db)"
-                if (await readCmd.ExecuteScalarAsync() is byte[] storedData)
-                {
-                    var shown = JsonNode.Parse(previous.content)!;
-                    shown[\"data\"] = Convert.ToBase64String(storedData);
-                    previous = "(r-new-res rn)"previous.id, previous.versionId, previous.lastUpdated,
-                        JsonSerializer.SerializeToUtf8Bytes(shown));
-                }
-            }
-") "")"            if (txScope == null) await tx.CommitAsync();
+"(repo-data-read rn "            " "previous")"            if (txScope == null) await tx.CommitAsync();
             return previous;
         }
 
@@ -2323,31 +2009,30 @@ public class "rn"Repository : I"rn"Repository
             await cmd.ExecuteNonQueryAsync();
         }
 
-"(if (binary-data-table? rn db) ($
-"        // Binary: the restored version gets the bytes of the version it restores -
-        // without them it came back with no data at all.
-        byte[]? binaryData = null;
-        await using (var readCmd = "(new-cmd db)"
-            \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
-        {
-"(add-param-line-for "readCmd" 1 "id" db)"
-"(add-param-line-for "readCmd" 2 "previous.versionId" db)"
-            binaryData = await readCmd.ExecuteScalarAsync() as byte[];
-        }
-        if (binaryData != null)
-        {
-            await using (var dataCmd = new NpgsqlCommand(
-                \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ($1, $2, $3)\", conn, tx))
+"(if (data-table? rn db) (data-guard rn ($
+"            // the restored version gets the bytes of the version it restores -
+            // without them it came back with no data at all.
+            byte[]? binaryData = null;
+            await using (var readCmd = "(new-cmd db)"
+                \"SELECT data FROM "(tbl schema "resource_data" db)" WHERE resource_id = "(pp 1 db)" AND version_id = "(pp 2 db)"\", conn, tx))
             {
-                dataCmd.Parameters.AddWithValue(id);
-                dataCmd.Parameters.AddWithValue(newVersionId);
-                dataCmd.Parameters.Add(new NpgsqlParameter { Value = binaryData, NpgsqlDbType = NpgsqlDbType.Bytea });
-                await dataCmd.ExecuteNonQueryAsync();
+    "(add-param-line-for "readCmd" 1 "id" db)"
+    "(add-param-line-for "readCmd" 2 "previous.versionId" db)"
+                binaryData = await readCmd.ExecuteScalarAsync() as byte[];
             }
-            content[\"data\"] = Convert.ToBase64String(binaryData);
-            contentBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(content);
-        }
-") "")"        // No history row for the restored version: it is the current one now and the
+            if (binaryData != null)
+            {
+                await using (var dataCmd = "(new-cmd db)"
+                    \"INSERT INTO "(tbl schema "resource_data" db)" (resource_id, version_id, data) VALUES ("(pp 1 db)", "(pp 2 db)", "(pp 3 db)")\", conn, tx))
+                {
+        "(add-param-line-for "dataCmd" 1 "id" db)"
+        "(add-param-line-for "dataCmd" 2 "newVersionId" db)"
+        "(add-param-line-for "dataCmd" 3 "binaryData" db)"
+                    await dataCmd.ExecuteNonQueryAsync();
+                }
+                content[\"data\"] = Convert.ToBase64String(binaryData);
+                contentBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(content);
+            }")) "")"        // No history row for the restored version: it is the current one now and the
         // history queries read the current version from the public table.
         await InsertSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
@@ -2541,15 +2226,15 @@ public class "rn"Repository : I"rn"Repository
         if (joins.Count > 0)
         {
             // Use subquery to avoid DISTINCT + ORDER BY conflict
-            selectSql = $\"SELECT "(repo-column-list-prefixed "r2" inline-list has-history db)(if (binary-data-table? rn db) ", rd.data" "")" \" +
-                        $\"FROM "(tbl-public rn db)" r2 "(if (binary-data-table? rn db) ($ "LEFT JOIN "(tbl schema "resource_data" db)" rd ON rd.resource_id = r2.id AND rd.version_id = r2.version_id ") "")"WHERE r2.id IN (\" +
+            selectSql = $\"SELECT "(repo-column-list-prefixed "r2" inline-list has-history db)(if (r-generic? rn) "{DataColumn}" "")" \" +
+                        $\"FROM "(tbl-public rn db)" r2 "(if (r-generic? rn) "{DataJoin(\"r2\")}" "")"WHERE r2.id IN (\" +
                         $\"SELECT DISTINCT r.id FROM "(tbl-public rn db)" r {joinClause} {whereClause}\" +
                         $\") ORDER BY {orderBy.Replace(\"r.\", \"r2.\")} "(db-paginate "count" "offset" db)"\";
         }
         else
         {
-            selectSql = $\"SELECT "(repo-column-list-prefixed "r" inline-list has-history db)(if (binary-data-table? rn db) ", rd.data" "")" \" +
-                        $\"FROM "(tbl-public rn db)" r "(if (binary-data-table? rn db) ($ "LEFT JOIN "(tbl schema "resource_data" db)" rd ON rd.resource_id = r.id AND rd.version_id = r.version_id ") "")"{whereClause} \" +
+            selectSql = $\"SELECT "(repo-column-list-prefixed "r" inline-list has-history db)(if (r-generic? rn) "{DataColumn}" "")" \" +
+                        $\"FROM "(tbl-public rn db)" r "(if (r-generic? rn) "{DataJoin(\"r\")}" "")"{whereClause} \" +
                         $\"ORDER BY {orderBy} "(db-paginate "count" "offset" db)"\";
         }
 
@@ -2560,7 +2245,7 @@ public class "rn"Repository : I"rn"Repository
                 cmd.Parameters.Add(CopyParam(parameters[i]));
             await using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
-                resources.Add("(if (r-generic? rn) "ReadResource" ($ "Read"rn"Resource"(if (binary-data-table? rn db) "WithData" "")))"(reader));
+                resources.Add("(if (r-generic? rn) "HasDataTable ? ReadResourceWithData(reader) : ReadResource(reader)" ($ "Read"rn"Resource(reader)"))");
         }
 
         return (resources, total);
@@ -2730,14 +2415,21 @@ public class "rn"Repository : I"rn"Repository
             total = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
 
-        var sql = "(if (binary-data-table? rn db) ($ "\"SELECT h.id, h.version_id, h.last_updated, h.content, h.history_operation, rd.data FROM (\" +
+        var sql = "(if (r-generic? rn) ($ "HasDataTable
+            ? \"SELECT h.id, h.version_id, h.last_updated, h.content, h.history_operation, rd.data FROM (\" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM " (tbl-public rn db) " WHERE id = " (pp 1 db) (db-union-close db) " \" +
                   \"UNION ALL \" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, history_operation FROM " (tbl schema "resource_history" db) " WHERE id = " (pp 1 db) (db-union-close db) " \" +
                   \"UNION ALL \" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM " (tbl schema "resource_history" db) " WHERE id = " (pp 1 db) " AND history_operation = 'DELETE'" (db-union-close db) "\" +
                   \") h LEFT JOIN " (tbl schema "resource_data" db) " rd ON rd.resource_id = h.id AND rd.version_id = h.version_id \" +
-                  \"ORDER BY h.version_id DESC, h.history_operation DESC " (db-paginate-params (pp 2 db) (pp 3 db) db) "\"") ($ "\""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db)" WHERE id = "(pp 1 db) (db-union-close db)" \" +
+                  \"ORDER BY h.version_id DESC, h.history_operation DESC " (db-paginate-params (pp 2 db) (pp 3 db) db) "\"
+            : \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db)" WHERE id = "(pp 1 db) (db-union-close db)" \" +
+                  \"UNION ALL \" +
+                  \""(db-union-open db)"SELECT id, version_id, last_updated, content, history_operation FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db) (db-union-close db)" \" +
+                  \"UNION ALL \" +
+                  \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db)" AND history_operation = 'DELETE'"(db-union-close db)" \" +
+                  \"ORDER BY version_id DESC, history_operation DESC "(db-paginate-params (pp 2 db) (pp 3 db) db) "\"") ($ "\""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db)" WHERE id = "(pp 1 db) (db-union-close db)" \" +
                   \"UNION ALL \" +
                   \""(db-union-open db)"SELECT id, version_id, last_updated, content, history_operation FROM "(tbl schema "resource_history" db)" WHERE id = "(pp 1 db) (db-union-close db)" \" +
                   \"UNION ALL \" +
@@ -2754,16 +2446,15 @@ public class "rn"Repository : I"rn"Repository
         await using var reader = await cmd2.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-"(if (binary-data-table? rn db) ($
-"            rows.Add(Read"rn"HistoryRowWithData(reader));
-") ($
+"(if (r-generic? rn) "            if (HasDataTable) { rows.Add(ReadHistoryRowWithData(reader)); continue; }
+" "")
 "            rows.Add("(r-new-row rn)"
                 reader.GetString(0),
                 reader.GetInt32(1),
                 Utc(reader.GetDateTime(2)),
                 reader.IsDBNull(3) ? null : reader.GetFieldValue<""byte[]>(3),
                 reader.GetString(4)));
-"))"        }
+        }
         return (rows, total);
     }
 
@@ -2786,14 +2477,21 @@ public class "rn"Repository : I"rn"Repository
             total = Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
 
-        var sql = "(if (binary-data-table? rn db) ($ "\"SELECT h.id, h.version_id, h.last_updated, h.content, h.history_operation, rd.data FROM (\" +
+        var sql = "(if (r-generic? rn) ($ "HasDataTable
+            ? \"SELECT h.id, h.version_id, h.last_updated, h.content, h.history_operation, rd.data FROM (\" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM " (tbl-public rn db) (db-union-close db) " \" +
                   \"UNION ALL \" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, history_operation FROM " (tbl schema "resource_history" db) (db-union-close db) " \" +
                   \"UNION ALL \" +
                   \"" (db-union-open db) "SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM " (tbl schema "resource_history" db) " WHERE history_operation = 'DELETE'" (db-union-close db) "\" +
                   \") h LEFT JOIN " (tbl schema "resource_data" db) " rd ON rd.resource_id = h.id AND rd.version_id = h.version_id \" +
-                  \"ORDER BY h.last_updated DESC, h.history_operation DESC " (db-paginate-params (pp 1 db) (pp 2 db) db) "\"") ($ "\""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db) (db-union-close db)" \" +
+                  \"ORDER BY h.last_updated DESC, h.history_operation DESC " (db-paginate-params (pp 1 db) (pp 2 db) db) "\"
+            : \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db) (db-union-close db)" \" +
+                  \"UNION ALL \" +
+                  \""(db-union-open db)"SELECT id, version_id, last_updated, content, history_operation FROM "(tbl schema "resource_history" db) (db-union-close db)" \" +
+                  \"UNION ALL \" +
+                  \""(db-union-open db)"SELECT id, version_id, last_updated, content, 'TOMBSTONE' as history_operation FROM "(tbl schema "resource_history" db)" WHERE history_operation = 'DELETE'"(db-union-close db)" \" +
+                  \"ORDER BY last_updated DESC, history_operation DESC "(db-paginate-params (pp 1 db) (pp 2 db) db) "\"") ($ "\""(db-union-open db)"SELECT id, version_id, last_updated, content, 'CURRENT' as history_operation FROM "(tbl-public rn db) (db-union-close db)" \" +
                   \"UNION ALL \" +
                   \""(db-union-open db)"SELECT id, version_id, last_updated, content, history_operation FROM "(tbl schema "resource_history" db) (db-union-close db)" \" +
                   \"UNION ALL \" +
@@ -2809,16 +2507,15 @@ public class "rn"Repository : I"rn"Repository
         await using var reader = await cmd2.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
-"(if (binary-data-table? rn db) ($
-"            rows.Add(Read"rn"HistoryRowWithData(reader));
-") ($
+"(if (r-generic? rn) "            if (HasDataTable) { rows.Add(ReadHistoryRowWithData(reader)); continue; }
+" "")
 "            rows.Add("(r-new-row rn)"
                 reader.GetString(0),
                 reader.GetInt32(1),
                 Utc(reader.GetDateTime(2)),
                 reader.IsDBNull(3) ? null : reader.GetFieldValue<""byte[]>(3),
                 reader.GetString(4)));
-"))"        }
+        }
         return (rows, total);
     }
 
@@ -2828,81 +2525,6 @@ public class "rn"Repository : I"rn"Repository
 ; Section: AutocompleteAsync
 ; ===================================================================
 
-(define (repo-autocomplete-resolve schema string-searches token-searches date-searches db)
-    ($
-"    private static (string? tableName, string column, bool isToken) ResolveSearchTable(string name)
-    {
-        var tableName = name switch
-        {
-"
-        (apply $ (map (lambda (s)
-            ($"            \""(% "name" s)"\" => \""(search-table-name s)"\",
-"))
-            string-searches))
-        (apply $ (map (lambda (s)
-            (let ((sn (% "name" s)))
-                (if (search-is-inline? s)
-                    ""
-                    ($"            \"" sn "\" => \""(search-table-name s)"\",
-"))))
-            token-searches))
-        (apply $ (map (lambda (s)
-            ($"            \""(% "name" s)"\" => \""(search-table-name s)"\",
-"))
-            date-searches))
-"            _ => (string?)null
-        };
-        var column = name switch
-        {
-"
-        (apply $ (map (lambda (s) ($"            \""(% "name" s)"\" => \"value\",
-"))
-            string-searches))
-        (apply $ (map (lambda (s)
-            (let ((sn (% "name" s)))
-                (if (search-is-inline? s)""
-                    ; Token-Index befuellt nur system+value (display bleibt leer),
-                    ; daher liefert Autocomplete fuer alle Token-Params die value-Spalte (den Code).
-                    ($"            \"" sn "\" => \"value\",
-"))))
-            token-searches))
-        (apply $ (map (lambda (s)
-            ($"            \""(% "name" s)"\" => \""
-                (db3 db (lambda (db) (case db
-                    ((PostgreSql) "TO_CHAR(value_low, 'YYYY-MM-DD')")
-                    ((Sqlite)     "STRFTIME('%Y-%m-%d', value_low)")
-                    ((SqlServer)  "FORMAT(value_low, 'yyyy-MM-dd')"))))
-                "\",
-"))
-            date-searches))
-"            _ => \"value\"
-        };
-        var isToken = name switch
-        {
-"
-        (apply $ (map (lambda (s)
-            (let ((sn (% "name" s)))
-                (if (search-is-inline? s)""
-                    ($"            \"" sn "\" => true,
-"))))
-            token-searches))
-"            _ => false
-        };
-        return (tableName, column, isToken);
-    }
-
-"))
-
-(define (repo-autocomplete schema string-searches token-searches date-searches db)
-    ($
-    (repo-autocomplete-resolve schema string-searches token-searches date-searches db)
-    (repo-autocomplete-body schema db)))
-
-; A resource's class beside the base has the table of its parameters alone; the method is
-; the base's.
-(define (repo-autocomplete-own schema string-searches token-searches date-searches db)
-    (string-replace (repo-autocomplete-resolve schema string-searches token-searches date-searches db)
-        "    private static (string? tableName" "    protected override (string? tableName"))
 
 (define (repo-autocomplete-body schema db)
     ($
@@ -3090,205 +2712,6 @@ public class "rn"Repository : I"rn"Repository
         (("number" "quantity") ($"; " ci "ix_" schema "_" tn "_value ON " (tbl schema tn db) " (value)"))
         (else ""))))
 
-; Re-index call for a search parameter
-(define (search-reindex-call rn stype sn search hn-all)
-    (let ((tn (search-table-name search)))
-    (case stype
-        (("string")
-            ($"                    await InsertStringIndexAsync(conn, tx!, \""tn"\", id, "(repo-string-extractor-call rn search hn-all)");
-"))
-        (("token")
-            (cond
-                ((search-is-cast? search)
-                    ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))
-                ((and (search-is-contactpoint? search) (string=? "telecom" sn))
-                    ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.ExtractTelecom(content));
-"))
-                ((search-is-contactpoint? search)
-                    ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.ExtractTelecom(content, \""sn"\"));
-"))
-                ((search-has-variants? search)
-                    (let ((method ($ "Extract"(kebab-to-pascal sn)))
-                          (var-name (string-replace sn "-" "_")))
-                    ($"                    var "var-name" = "rn"SearchExtractor."method"(content);
-                    if ("var-name".HasValue)
-                        await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, new List<(string?, string?)> { "var-name".Value });
-")))
-                (else
-                    ($"                    await InsertTokenIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))))
-        (("date")
-            (let ((method ($ "Extract"(kebab-to-pascal sn)))
-                  (var-name (string-replace sn "-" "_")))
-            (if (search-is-date-list? search)
-            ($"                    await InsertDateListIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor."method"(content));
-")
-            ($"                    var "var-name" = "rn"SearchExtractor."method"(content);
-                    if ("var-name".HasValue)
-                        await InsertDateIndexAsync(conn, tx!, \""tn"\", id, "var-name".Value.low, "var-name".Value.high);
-"))))
-        (("reference")
-            (let ((parts (search-path-parts search)))
-            (if (and (<= (length parts) 1) (not (search-is-cast? search)))
-                (let* ((prop (search-property search))
-                       (fhir-field (if prop (% "name" prop) sn)))
-                ($"                    await InsertReferenceIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.ExtractReference(content, \""fhir-field"\"));
-"))
-                ($"                    await InsertReferenceIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))))
-        (("number")
-            ($"                    await InsertNumberIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))
-        (("quantity")
-            ($"                    await InsertQuantityIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))
-        (("uri")
-            ($"                    await InsertStringIndexAsync(conn, tx!, \""tn"\", id, "rn"SearchExtractor.Extract"(kebab-to-pascal sn)"(content));
-"))
-        (else ""))))
-
-; Deconstruction of the inline tuple that keeps only one of its values: the backfill of a
-; single column has no use for the others, and naming them would leave unread locals behind.
-(define (repo-destructure-inline-one inline-list target)
-    (if (= 1 (length inline-list))
-        ($"var "(search-query-camel target))
-        ($"var ("
-            (let loop ((items inline-list) (first? #t))
-                (if (null? items)""
-                    ($ (if first? "" ", ")
-                       (if (string=? (% "name" (car items)) (% "name" target)) (search-query-camel target) "_")
-                       (loop (cdr items) #f))))
-            ")")))
-
-; AddWithValue line at the indent of the backfill loop.
-(define (add-param-line-20 cmd-name n expr db)
-    (case db ((Any)
-        ($"                    Db.AddValue(" cmd-name ", "(number->string n)", " expr ");"))
-    (else (case db
-        ((PostgreSql) ($"                    " cmd-name ".Parameters.AddWithValue(" expr ");"))
-        ((SqlServer) ($"                    AddValue(" cmd-name ", \""(pp n db)"\", " expr ");"))
-        ((Sqlite) ($"                    " cmd-name ".Parameters.AddWithValue(\""(pp n db)"\", " expr ");"))))))
-
-; An inline search parameter is a column on the resource table, so there is no table to create -
-; the column comes with the schema or, for one added later, with the upgrade DDL. What is left is
-; the fill, and it matters just as much as it does for a subtable: an inline parameter added to an
-; existing installation would otherwise read NULL for every row written before it and silently
-; drop those rows out of every filter and sort over it.
-(define (repo-create-search-inline rn inline-list db)
-    (apply $ (map (lambda (s)
-        (let ((sn (% "name" s))
-              (var (search-query-camel s))
-              (col (db-quote-col-cs (search-col s) db)))
-        ($"            case \""sn"\":
-            {
-                var resources = new List<""(string id, JsonNode content)>();
-                await using (var readCmd = "(new-cmd db)"
-                    \"SELECT id, content FROM "(tbl-public rn db)"\", conn, tx))
-                {
-                    await using var reader = await readCmd.ExecuteReaderAsync();
-                    while (await reader.ReadAsync())
-                        resources.Add((reader.GetString(0), JsonNode.Parse(reader.GetFieldValue<""byte[]>(1))!));
-                }
-                foreach (var (id, content) in resources)
-                {
-                    "(repo-destructure-inline-one inline-list s)" = "rn"SearchExtractor.ExtractInlineParams(content);
-                    await using var updCmd = "(new-cmd db)"
-                        \"UPDATE "(tbl-public rn db)" SET "col" = "(pp 1 db)" WHERE id = "(pp 2 db)"\", conn, tx);
-"(add-param-line-20 "updCmd" 1 ($"(object?)"var" ?? DBNull.Value") db)"
-"(add-param-line-20 "updCmd" 2 "id" db)"
-                    await updCmd.ExecuteNonQueryAsync();
-                }
-                break;
-            }
-"       ))) inline-list)))
-
-; CreateSearchAsync and DropSearchAsync join a DbTransactionScope like the write methods: a
-; versioned upgrade step or the one-time data migration adds a search parameter within its
-; transaction, so the index is built from the uncommitted content and rolls back with the step.
-(define (repo-create-search rn schema all-table-search-list inline-list string-searches token-searches date-searches ref-searches number-searches hn-all db)
-    ($
-"    public async Task CreateSearchAsync(string parameter)
-    {
-"   (open-conn-scoped db)"
-        switch (parameter)
-        {
-"   (apply $ (map (lambda (s)
-        (let* ((sn (% "name" s))
-               (stype (% "type" s))
-               (tn (search-table-name s)))
-        (case db
-            ; a single repository: the table made and filled by its base class, the parameter
-            ; says only how a resource's rows are written
-            ((Any) ($"            case \""sn"\":
-                await CreateSearchTableAsync(conn, tx,
-                    \""(search-table-ddl schema tn stype rn db)(search-index-ddl schema tn stype sn db)"\",
-                    async (id, content) =>
-                    {
-"                   (search-reindex-call rn stype sn s hn-all)
-"                    });
-                break;
-"))
-            (else ($"            case \""sn"\":
-            {
-                await using (var cmd = "(new-cmd db)"
-                    \""(search-table-ddl schema tn stype rn db)(search-index-ddl schema tn stype sn db)"\", conn, tx))
-                    await cmd.ExecuteNonQueryAsync();
-                var resources = new List<""(string id, JsonNode content)>();
-                await using (var readCmd = "(new-cmd db)"
-                    \"SELECT id, content FROM "(tbl-public rn db)"\", conn, tx))
-                {
-                    await using var reader = await readCmd.ExecuteReaderAsync();
-                    while (await reader.ReadAsync())
-                        resources.Add((reader.GetString(0), JsonNode.Parse(reader.GetFieldValue<""byte[]>(1))!));
-                }
-                foreach (var (id, content) in resources)
-                {
-"                   (search-reindex-call rn stype sn s hn-all)
-"                }
-                break;
-            }
-"))))) all-table-search-list))
-   (repo-create-search-inline rn inline-list db)
-"            default:
-                throw new ArgumentException($\"Unknown search parameter: {parameter}\");
-        }
-    }
-
-"))
-
-; ===================================================================
-; Section: DropSearchAsync
-; ===================================================================
-
-; The table name is selected through a whitelist switch over the known
-; search-parameter names (never interpolated from the caller-supplied value)
-; so an attacker-controlled "parameter" cannot be injected into the DDL.
-(define (repo-drop-search schema all-table-search-list db)
-    ($
-"    public async Task DropSearchAsync(string parameter)
-    {
-"   (open-conn-scoped db)"
-        switch (parameter)
-        {
-"   (apply $ (map (lambda (s)
-        (let* ((sn (% "name" s))
-               (tn (search-table-name s)))
-        (case db
-            ((Any) ($"            case \""sn"\": await ExecuteAsync(conn, tx, \"DROP TABLE IF EXISTS "(tbl schema tn db)"\"); break;
-"))
-            (else ($"            case \""sn"\":
-                await using (var cmd = "(new-cmd db)"
-                    \"DROP TABLE IF EXISTS "(tbl schema tn db)"\", conn, tx))
-                    await cmd.ExecuteNonQueryAsync();
-                break;
-"))))) all-table-search-list))
-"            default:
-                throw new ArgumentException($\"Unknown search parameter: {parameter}\");
-        }
-    }
-
-"))
 
 ; ===================================================================
 ; Section: PurgeAsync
@@ -3304,12 +2727,7 @@ public class "rn"Repository : I"rn"Repository
 ; last_updated: the DELETE row copies it from the live row, so it names the resource's last
 ; change, and a resource written once and deleted days later was purged at the next run.
 (define (purge-before-param db)
-    (case db ((Any)
-        "Db.TsParam(1, before.Value)")
-    (else (case db
-        ((PostgreSql) "new NpgsqlParameter { Value = before.Value, NpgsqlDbType = NpgsqlDbType.TimestampTz }")
-        ((SqlServer) "new SqlParameter(\"@p1\", before.Value) { SqlDbType = SqlDbType.DateTime2 }")
-        ((Sqlite) "new SqliteParameter(\"@p1\", before.Value)")))))
+    "Db.TsParam(1, before.Value)")
 
 (define (repo-purge rn schema has-history db)
     (if has-history
@@ -3339,7 +2757,7 @@ public class "rn"Repository : I"rn"Repository
         if (count == 0)
             return 0;
 "
-    (if (binary-data-table? rn db) ($"
+    (if (data-table? rn db) (data-guard rn ($"
         // the bytes of the versions that go (no foreign key takes them)
         await using (var cmd = "(new-cmd db)"$\"DELETE FROM "(tbl schema "resource_data" db)" WHERE resource_id IN ({selection})\", conn))
         {
@@ -3347,7 +2765,7 @@ public class "rn"Repository : I"rn"Repository
                 cmd.Parameters.Add("(purge-before-param db)");
             await cmd.ExecuteNonQueryAsync();
         }
-") "")
+")) "")
 "
         await using (var cmd = "(new-cmd db)"$\"DELETE FROM "(tbl schema "resource_history" db)" WHERE id IN ({selection})\", conn))
         {
@@ -3394,7 +2812,7 @@ public class "rn"Repository : I"rn"Repository
 (define (repo-read-resource-helper rn inline-list has-history db)
     ($
     ; (a single repository has it from its base class)
-    (case db ((Any) "") (else (repo-utc-helper)))
+    ""
 "    private static "rn"Resource Read"rn"Resource(ReaderType reader)
     {
         return new "rn"Resource(
@@ -3404,104 +2822,12 @@ public class "rn"Repository : I"rn"Repository
             reader.GetFieldValue<""byte[]>(3)"(repo-reader-fields inline-list has-history)");
     }
 
-"
-    (if (binary-data-table? rn db) ($
-"    private static "rn"Resource Read"rn"ResourceWithData(ReaderType reader)
-    {
-        var resource = Read"rn"Resource(reader);
-        if (!reader.IsDBNull("(number->string (+ 4 (length inline-list)))"))
-        {
-            var bytes = reader.GetFieldValue<""byte[]>("(number->string (+ 4 (length inline-list)))");
-            var parsed = JsonNode.Parse(resource.content)!;
-            parsed[\"data\"] = Convert.ToBase64String(bytes);
-            resource = new "rn"Resource(resource.id, resource.versionId, resource.lastUpdated,
-                JsonSerializer.SerializeToUtf8Bytes(parsed));
-        }
-        return resource;
-    }
-
-"
-    ; the reader of a history row only where there is a history
-    (if has-history ($
-"    private static "rn"HistoryRow Read"rn"HistoryRowWithData(ReaderType reader)
-    {
-        var content = reader.IsDBNull(3) ? null : reader.GetFieldValue<""byte[]>(3);
-        if (content != null && !reader.IsDBNull(5))
-        {
-            var bytes = reader.GetFieldValue<""byte[]>(5);
-            var parsed = JsonNode.Parse(content)!;
-            parsed[\"data\"] = Convert.ToBase64String(bytes);
-            content = JsonSerializer.SerializeToUtf8Bytes(parsed);
-        }
-        return new "rn"HistoryRow(
-            reader.GetString(0),
-            reader.GetInt32(1),
-            Utc(reader.GetDateTime(2)),
-            content,
-            reader.GetString(4));
-    }
-
-") "")) "")))
+"))
 
 ; ===================================================================
 ; Section: InsertSearchIndexesAsync
 ; ===================================================================
 
-(define (repo-insert-search-indexes rn schema string-searches token-searches date-searches instant-searches ref-searches number-searches quantity-searches uri-searches hn-all db)
-    ($
-"    "(case db ((Any) "protected override") (else "private"))" async Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
-    {
-"
-        ; String indexes
-        (if (null? string-searches)""
-            ($"        // String indexes
-"
-            (apply $ (map (lambda (s)
-                ($"        await InsertStringIndexAsync(conn, tx, \""(search-table-name s)"\", resourceId, "(repo-string-extractor-call rn s hn-all)");
-"))
-                string-searches))))
-        ; Token indexes
-        (if (null? token-searches)""
-            ($"
-        // Token indexes
-"
-            (apply $ (map (lambda (s) (repo-token-index-line rn s)) token-searches))))
-        ; Date indexes
-        (if (null? date-searches)""
-            ($"
-        // Date indexes
-"
-            (apply $ (map (lambda (s) (repo-date-index-line rn s)) date-searches))))
-        ; Reference indexes
-        (if (null? ref-searches)""
-            ($"
-        // Reference indexes
-"
-            (apply $ (map (lambda (s) (repo-reference-index-line rn s)) ref-searches))))
-        ; Number indexes
-        (if (null? number-searches)""
-            ($"
-        // Number indexes
-"
-            (apply $ (map (lambda (s) (repo-number-index-line rn s)) number-searches))))
-        ; Quantity indexes
-        (if (null? quantity-searches)""
-            ($"
-        // Quantity indexes
-"
-            (apply $ (map (lambda (s) (repo-quantity-index-line rn s)) quantity-searches))))
-        ; Uri indexes: the table of a string search, filled by the paths of the search
-        (if (null? uri-searches)""
-            ($"
-        // Uri indexes
-"
-            (apply $ (map (lambda (s)
-                ($"        await InsertStringIndexAsync(conn, tx, \""(search-table-name s)"\", resourceId, "rn"SearchExtractor.Extract"(kebab-to-pascal (% "name" s))"(content));
-"))
-                uri-searches))))
-"    }
-
-"))
 
 ; Quantity index line for InsertSearchIndexesAsync
 (define (repo-quantity-index-line rn search)
@@ -3621,37 +2947,6 @@ public class "rn"Repository : I"rn"Repository
 "))))
 
 ; ===================================================================
-; Section: DeleteSearchIndexesAsync
-; ===================================================================
-
-(define (repo-delete-search-indexes schema all-table-search-list db)
-    ($
-"    "(case db ((Any) "protected override") (else "private static"))" async Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId)
-    {
-        var tables = new string[]
-        {
-"
-        (let loop ((items all-table-search-list) (first? #t))
-            (if (null? items)""
-                (let ((tn (search-table-name (car items))))
-                    ($ (if first? "" ",
-")
-                       "            \"" tn "\""
-                       (loop (cdr items) #f)))))
-"
-        };
-
-        foreach (var table in tables)
-        {
-            await using var cmd = "(new-cmd-alias db)"$\"DELETE FROM "(tbl-interp schema "table" db)" WHERE resource_id = {P(1)}\", conn, tx);
-            cmd.Parameters.Add(NewParam(1, resourceId));
-            await cmd.ExecuteNonQueryAsync();
-        }
-    }
-
-"))
-
-; ===================================================================
 ; Section: Insert helper methods
 ; ===================================================================
 
@@ -3728,74 +3023,6 @@ public class "rn"Repository : I"rn"Repository
 ; Section: Search helper methods
 ; ===================================================================
 
-(define (repo-search-helpers rn schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
-    ($
-"    // -- Search helpers --
-
-    private static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
-
-"
-        (repo-build-order-by schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
-        (repo-add-missing-search schema inline-list all-table-search-list db)
-        (repo-add-not-search rn schema inline-list string-searches
-            (filter (lambda (s) (string=? "token" (% "type" s))) all-table-search-list) db)
-    ))
-
-; --- Chained sort helpers ---
-; Emit switch cases for a target resource:
-;   "refName:TargetRn.inlineParam"   → subquery joining target main table
-;   "refName:TargetRn._lastUpdated"  → subquery joining target main table
-;   "refName:TargetRn.tableParam"    → subquery joining target search-index table
-(define (chain-sort-cases-for-target src-schema src-tbl src-name tgt-rn tgt-elem db)
-    (let* ((tgt-inline (node-list->list (inline-searches tgt-elem)))
-           (tgt-table-s (node-list->list (table-searches tgt-elem)))
-           (tgt-sortable-table (filter (lambda (s)
-               (let ((t (% "type" s)))
-                   (or (string=? "string" t)
-                       (string=? "token" t)
-                       (string=? "date" t)
-                       (string=? "number" t)))) tgt-table-s)))
-      ($
-        ; Inline searches on target
-        (apply $ (map (lambda (s)
-            ($"                \""src-name":"tgt-rn"."(% "name" s)"\" => \"("
-               (db-select-top1 db)" t."(db-quote-col-cs (search-col s) db)
-               " FROM "(tbl src-schema src-tbl db)" src JOIN "(tbl-public tgt-rn db)" t ON t.id = src.target_id"
-               " WHERE src.resource_id = r.id"(db-trailing-limit1 db)")\",
-")) tgt-inline))
-        ; _lastUpdated on target
-        ($"                \""src-name":"tgt-rn"._lastUpdated\" => \"("
-           (db-select-top1 db)" t.last_updated"
-           " FROM "(tbl src-schema src-tbl db)" src JOIN "(tbl-public tgt-rn db)" t ON t.id = src.target_id"
-           " WHERE src.resource_id = r.id"(db-trailing-limit1 db)")\",
-")
-        ; Table searches on target (string/token → value, date → value_low, number → value)
-        (apply $ (map (lambda (s)
-            (let ((col (if (string=? "date" (% "type" s)) "value_low" "value")))
-              ($"                \""src-name":"tgt-rn"."(% "name" s)"\" => \"("
-                 (db-select-top1 db)" c."col
-                 " FROM "(tbl src-schema src-tbl db)" src JOIN "(tbl tgt-rn (search-table-name s) db)" c ON c.resource_id = src.target_id"
-                 " WHERE src.resource_id = r.id"(db-trailing-limit1 db)")\",
-"))) tgt-sortable-table)))))
-
-; Emit chain-sort switch cases for one reference search param of the source resource
-(define (chain-sort-cases-for-ref src-schema ref-search db)
-    (let* ((src-tbl (search-table-name ref-search))
-           (src-name (% "name" ref-search))
-           (paths-node (select-children "paths" ref-search))
-           (path-nodes (if (node-list-empty? paths-node) (empty-node-list)
-                          (select-children "path" (node-list-first paths-node))))
-           (first-path (if (node-list-empty? path-nodes) #f (node-list-first path-nodes)))
-           (targets-node (if first-path (select-children "targets" first-path) (empty-node-list)))
-           (target-nodes (if (node-list-empty? targets-node) '()
-                            (node-list->list (children (node-list-first targets-node))))))
-      (apply $ (map (lambda (tgt)
-          (let* ((tgt-rn (% "resource" tgt))
-                 (tgt-elem (if tgt-rn (element-with-id (downcase-string tgt-rn)) #f)))
-            (if (and tgt-elem (active? tgt-elem))
-                (chain-sort-cases-for-target src-schema src-tbl src-name tgt-rn tgt-elem db)
-                "")))
-          target-nodes))))
 
 ; --- Sorting through a reference ---
 
@@ -3913,156 +3140,6 @@ internal static class SortTargets
 
 ; --- BuildOrderBy is defined in orderby.scm (per-project; see map.dsl) ---
 
-; --- AddMissingSearch ---
-(define (repo-add-missing-search schema inline-list all-table-search-list db)
-    ($
-"    private static void AddMissingSearch(string key, bool isMissing, List<""string> joins, List<""string> wheres, ref int aliasIndex)
-    {
-        switch (key)
-        {
-"
-        ; Inline params → direct column IS NULL / IS NOT NULL
-        (apply $ (map (lambda (s)
-            ($"            case \""(% "name" s)"\":
-                wheres.Add(isMissing ? \"r."(db-quote-col-cs (search-col s) db)" IS NULL\" : \"r."(db-quote-col-cs (search-col s) db)" IS NOT NULL\");
-                break;
-"))
-            inline-list))
-"            case \"_lastUpdated\":
-                wheres.Add(isMissing ? \"r.last_updated IS NULL\" : \"r.last_updated IS NOT NULL\");
-                break;
-"
-"            default:
-            {
-                var table = key switch
-                {
-"
-        ; All table searches
-        (apply $ (map (lambda (s)
-            ($"                    \""(% "name" s)"\" => \""(search-table-name s)"\",
-"))
-            all-table-search-list))
-"                    _ => (string?)null
-                };
-                if (table == null) break;
-                var alias = NextAlias(ref aliasIndex);
-                if (isMissing)
-                {
-                    joins.Add($\"LEFT JOIN "(tbl-interp schema "table" db)" {alias} ON {alias}.resource_id = r.id\");
-                    wheres.Add($\"{alias}.resource_id IS NULL\");
-                }
-                else
-                {
-                    joins.Add($\"JOIN "(tbl-interp schema "table" db)" {alias} ON {alias}.resource_id = r.id\");
-                }
-                break;
-            }
-        }
-    }
-
-"))
-
-; --- AddNotSearch ---
-(define (repo-add-not-search rn schema inline-list string-searches token-searches db)
-    ($
-"    private static void AddNotSearch(string key, string value, List<""string> joins, List<""string> wheres,
-        List<""ParamType> parameters, ref int paramIndex, ref int aliasIndex)
-    {
-        switch (key)
-        {
-"
-        ; Inline params
-        (apply $ (map (lambda (s)
-            (let* ((sn (% "name" s))
-                   (col (db-quote-col-cs (search-col s) db))
-                   (prop (search-property s))
-                   (prop-type (if prop (% "type" prop)"code")))
-                (cond
-                    ((string=? "boolean" prop-type)
-                        ($"            case \"" sn "\":
-                wheres.Add($\"(r." col " IS NULL OR r." col " != {P(paramIndex)})\");
-                parameters.Add(NewParam(paramIndex, bool.Parse(value)));
-                paramIndex++;
-                break;
-"))
-                    ((member prop-type '("integer" "positiveInt" "unsignedInt"))
-                        ($"            case \"" sn "\":
-                if (!int.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out int "(search-col s)"NotParsed))
-                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '" sn "'\");
-                wheres.Add($\"(r." col " IS NULL OR r." col " != {P(paramIndex)})\");
-                parameters.Add(NewParam(paramIndex, "(search-col s)"NotParsed));
-                paramIndex++;
-                break;
-"))
-                    ((string=? "integer64" prop-type)
-                        ($"            case \"" sn "\":
-                if (!long.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out long "(search-col s)"NotParsed))
-                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '" sn "'\");
-                wheres.Add($\"(r." col " IS NULL OR r." col " != {P(paramIndex)})\");
-                parameters.Add(NewParam(paramIndex, "(search-col s)"NotParsed));
-                paramIndex++;
-                break;
-"))
-                    ((string=? "decimal" prop-type)
-                        ($"            case \"" sn "\":
-                if (!decimal.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decimal "(search-col s)"NotParsed))
-                    throw new ArgumentException($\"Invalid value '{value}' for number search parameter '" sn "'\");
-                wheres.Add($\"(r." col " IS NULL OR r." col " != {P(paramIndex)})\");
-                parameters.Add(NewParam(paramIndex, "(search-col s)"NotParsed));
-                paramIndex++;
-                break;
-"))
-                    (else
-                        ($"            case \"" sn "\":
-                wheres.Add($\"(r." col " IS NULL OR r." col " != {P(paramIndex)})\");
-                parameters.Add(NewParam(paramIndex, value));
-                paramIndex++;
-                break;
-")))))
-            inline-list))
-"            default:
-            {
-                var stringTable = key switch
-                {
-"
-        ; String searches for :not
-        (apply $ (map (lambda (s)
-            ($"                    \""(% "name" s)"\" => \""(search-table-name s)"\",
-"))
-            string-searches))
-"                    _ => (string?)null
-                };
-                if (stringTable != null)
-                {
-                    var alias = NextAlias(ref aliasIndex);
-                    joins.Add($\"LEFT JOIN "(tbl-interp schema "stringTable" db)" {alias} ON {alias}.resource_id = r.id AND LOWER({alias}.value) LIKE {P(paramIndex)}\");
-                    wheres.Add($\"{alias}.resource_id IS NULL\");
-                    parameters.Add(NewParam(paramIndex, $\"{value.ToLowerInvariant()}%\"));
-                    paramIndex++;
-                    break;
-                }
-                var tokenTable = key switch
-                {
-"
-        ; Token searches for :not
-        (apply $ (map (lambda (s)
-            ($"                    \""(% "name" s)"\" => \""(search-table-name s)"\",
-"))
-            token-searches))
-"                    _ => (string?)null
-                };
-                if (tokenTable != null)
-                {
-                    SearchQueryBuilder.AddTokenNotSearch(\""rn"\", joins, wheres, parameters, ref paramIndex, ref aliasIndex, tokenTable, value);
-                    break;
-                }
-                break;
-            }
-        }
-    }
-
-"))
-
 
 ; ===================================================================
 ; Section: SearchQueryBuilder (one per backend, generated from resources)
@@ -4077,15 +3154,9 @@ internal static class SortTargets
         (repo-generic-interfaces)
         (sort-targets-file)
         (repo-base-files)
-        (file "SearchQueryBuilder.cs"
+        (list (file "SearchQueryBuilder.cs"
             ($ (sqb-header 'Any) (sqb-body 'Any)"}
-"))
-        (map (lambda (db)
-            (make directory path: (db-folder db)
-            (file "SearchQueryBuilder.cs"
-                ($ (sqb-header db) (sqb-body db)"}
-"))))
-            target-databases))))
+"))))))
 
 (define (db-runtime-cs) ($
 "using System.Data.Common;
@@ -4266,8 +3337,7 @@ public static class Db
 "))
 
 (define (sqb-header db)
-    (case db ((Any)
-        ($
+    ($
 "using ParamType = System.Data.Common.DbParameter;
 
 namespace "(project-name)".Repositories;
@@ -4275,24 +3345,6 @@ namespace "(project-name)".Repositories;
 internal static class SearchQueryBuilder
 {
 "))
-    (else ($
-"using "(db-using db)";
-"
-    (case db
-        ((PostgreSql)"using NpgsqlTypes;
-using ParamType = Npgsql.NpgsqlParameter;
-")
-        ((SqlServer)"using System.Data;
-using ParamType = Microsoft.Data.SqlClient.SqlParameter;
-")
-        ((Sqlite)"using ParamType = Microsoft.Data.Sqlite.SqliteParameter;
-"))
-"
-namespace "(project-name)".Repositories."(db-namespace db)";
-
-internal static class SearchQueryBuilder
-{
-"))))
 
 (define (sqb-body db)
     ($
@@ -4310,27 +3362,12 @@ internal static class SearchQueryBuilder
     (sqb-add-reference-search-or db)))
 
 (define (sqb-schema-table db)
-    (case db ((Any)
-        "    private static string SchemaTable(string schema, string table) => Db.SchemaTable(schema, table);
+    "    private static string SchemaTable(string schema, string table) => Db.SchemaTable(schema, table);
 
 ")
-    (else (case db
-        ((PostgreSql)
-"    private static string SchemaTable(string schema, string table) => $\"\\\"\" + schema + \"\\\"\" + \".\" + table;
-
-")
-        ((SqlServer)
-"    private static string SchemaTable(string schema, string table) => $\"[{schema}].{table}\";
-
-")
-        ((Sqlite)
-"    private static string SchemaTable(string schema, string table) => $\"{schema}_{table}\";
-
-")))))
 
 (define (sqb-helpers db)
-    (case db ((Any)
-        "    private static string P(int n) => Db.P(n);
+    "    private static string P(int n) => Db.P(n);
 
     private static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
 
@@ -4338,32 +3375,6 @@ internal static class SearchQueryBuilder
     private static ParamType NewTsParam(int index, DateTime value) => Db.TsParam(index, value);
 
 ")
-    (else ($
-"    private static string P(int n) => $\""
-    (pp-prefix db)
-    "{n}\";
-
-    private static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
-"
-    (case db
-        ((PostgreSql)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType { Value = value };
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType { Value = value, NpgsqlDbType = NpgsqlDbType.TimestampTz };
-
-")
-        ((SqlServer)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value) { SqlDbType = SqlDbType.DateTime2 };
-
-")
-        ((Sqlite)
-"
-    private static ParamType NewParam(int index, object value) => new ParamType($\"@p{index}\", value);
-    private static ParamType NewTsParam(int index, DateTime value) => new ParamType($\"@p{index}\", value);
-
-"))))))
 
 (define (sqb-add-string-search-or db)
     ($
