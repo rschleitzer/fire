@@ -1,9 +1,78 @@
 ; Generic BuildOrderBy generation.
 ; Emits sort cases for inline, _lastUpdated, table searches, forward-chain refs.
-; Reverse-chain sort cases are project-specific and live in a project-local
-; override of this file.
+; And for reverse chains, where the model declares one: a param with ref and chain below
+; repos, for another resource -- the key is _has:Resource:reference:parameter, as the
+; reverse-chain search writes it, and the value the first one's that points here:
+;   SELECT t.status FROM Observation t JOIN Observation.search_subject rs
+;   ON rs.resource_id = t.id WHERE rs.target_id = r.id LIMIT 1
+; A model without repos has none.
 ; The helpers chain-sort-cases-for-target and chain-sort-cases-for-ref remain
 ; in repositories.scm.
+
+; The repo block a model declares for a resource below repos, if it has one
+(define (find-service-repo-for rn-lc)
+    (let* ((root (tree-root (current-node)))
+           (repos-nl (select-children "repos" root))
+           (all-repos (if (node-list-empty? repos-nl)
+                          (empty-node-list)
+                          (select-children "repo" (node-list-first repos-nl)))))
+      (node-list-filter (lambda (r)
+                           (let ((ref (% "ref" r)))
+                             (if ref (string=? (downcase-string ref) rn-lc) #f)))
+                         all-repos)))
+
+(define (sortable-chain-type? t)
+    (or (string=? "string" t)
+        (string=? "token" t)
+        (string=? "date" t)
+        (string=? "number" t)))
+
+(define (reverse-chain-sort-param? param rn-lc)
+    (let ((chain-attr (% "chain" param))
+          (ref-attr (% "ref" param)))
+      (if (and chain-attr ref-attr)
+          (let* ((ref-search (element-with-id ref-attr))
+                 (src-res (if ref-search (parent (parent ref-search)) #f))
+                 (src-id (if src-res (% "id" src-res) #f))
+                 (chain-search (element-with-id chain-attr))
+                 (chain-type (if chain-search (% "type" chain-search) #f)))
+            (and src-id
+                 (not (string=? src-id rn-lc))
+                 chain-type
+                 (sortable-chain-type? chain-type)))
+          #f)))
+
+(define (reverse-chain-sort-params rn)
+    (let* ((rn-lc (downcase-string rn))
+           (repo-nl (find-service-repo-for rn-lc)))
+      (if (node-list-empty? repo-nl)
+          '()
+          (let ((all-params (node-list->list (select-descendants "param" (node-list-first repo-nl)))))
+            (filter (lambda (p) (reverse-chain-sort-param? p rn-lc)) all-params)))))
+
+(define (reverse-chain-sort-case param db)
+    (let* ((ref-search (element-with-id (% "ref" param)))
+           (src-res (parent (parent ref-search)))
+           (src-rn (% "name" src-res))
+           (src-schema src-rn)
+           (ref-name (% "name" ref-search))
+           (ref-table (search-table-name ref-search))
+           (chain-search (element-with-id (% "chain" param)))
+           (chain-name (% "name" chain-search))
+           (chain-type (% "type" chain-search))
+           (key ($ "_has:" src-rn ":" ref-name ":" chain-name)))
+      (cond
+        ((search-is-inline? chain-search)
+         ($"                \""key"\" => \"("(db-select-top1 db)" t."(db-quote-col-cs (search-col chain-search) db)" FROM "(tbl-public src-rn db)" t JOIN "(tbl src-schema ref-table db)" rs ON rs.resource_id = t.id WHERE rs.target_id = r.id"(db-trailing-limit1 db)")\",
+"))
+        ((search-is-last-updated? chain-search)
+         ($"                \""key"\" => \"("(db-select-top1 db)" t.last_updated FROM "(tbl-public src-rn db)" t JOIN "(tbl src-schema ref-table db)" rs ON rs.resource_id = t.id WHERE rs.target_id = r.id"(db-trailing-limit1 db)")\",
+"))
+        (else
+         (let* ((chain-table (search-table-name chain-search))
+                (col (if (string=? "date" chain-type) "value_low" "value")))
+           ($"                \""key"\" => \"("(db-select-top1 db)" c."col" FROM "(tbl src-schema ref-table db)" rs JOIN "(tbl src-schema chain-table db)" c ON c.resource_id = rs.resource_id WHERE rs.target_id = r.id"(db-trailing-limit1 db)")\",
+"))))))
 
 (define (repo-build-order-by schema inline-list all-table-search-list string-searches token-searches date-searches number-searches ref-searches db)
     (let* ((hn-family (filter (lambda (s) (and (search-is-humanname? s) (equal? "family" (search-humanname-field s)))) string-searches))
@@ -56,6 +125,7 @@
                 ($"                \""(% "name" s)"\" => \"("(db-select-top1 db)" t.value FROM " (tbl schema (search-table-name s) db)" t WHERE t.resource_id = r.id"(db-trailing-limit1 db)")\",
 "))
                 token-searches))
+            (apply $ (map (lambda (p) (reverse-chain-sort-case p db)) (reverse-chain-sort-params schema)))
             ; (through a reference: put together when it is asked for, see ChainSort below --
             ; written out, every reference times every type it may point to times every key
             ; of that type was most of a repository's text)
