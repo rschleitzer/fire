@@ -635,6 +635,28 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
 
     protected CmdType Cmd(string sql, ConnType conn, TxType? tx = null) => Db.Cmd(Sql(sql), conn, tx);
 
+    protected async Task ExecuteAsync(ConnType conn, TxType? tx, string sql)
+    {
+        await using var cmd = Cmd(sql, conn, tx);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // A search table made (ddl) and filled: index writes the rows of one resource, and is
+    // called for every stored one.
+    protected async Task CreateSearchTableAsync(ConnType conn, TxType? tx, string ddl, Func<""string, JsonNode, Task> index)
+    {
+        await ExecuteAsync(conn, tx, ddl);
+        var resources = new List<""(string id, JsonNode content)>();
+        await using (var readCmd = Cmd(\"SELECT id, content FROM \\uE000\\\"\\uE003\\\"\\uE001\\\"\\uE003\\\"\\uE001[\\uE003]\\uE002\", conn, tx))
+        {
+            await using var reader = await readCmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                resources.Add((reader.GetString(0), JsonNode.Parse(reader.GetFieldValue<""byte[]>(1))!));
+        }
+        foreach (var (id, content) in resources)
+            await index(id, content);
+    }
+
     private readonly ConcurrentDictionary<""string, string> _sql = new();
 
     // sql with the resource's name and the lists over its columns put in. A text is worked
@@ -2786,7 +2808,19 @@ public class "rn"Repository : I"rn"Repository
         (let* ((sn (% "name" s))
                (stype (% "type" s))
                (tn (search-table-name s)))
-        ($"            case \""sn"\":
+        (case db
+            ; a single repository: the table made and filled by its base class, the parameter
+            ; says only how a resource's rows are written
+            ((Any) ($"            case \""sn"\":
+                await CreateSearchTableAsync(conn, tx,
+                    \""(search-table-ddl schema tn stype rn db)(search-index-ddl schema tn stype sn db)"\",
+                    async (id, content) =>
+                    {
+"                   (search-reindex-call rn stype sn s hn-all)
+"                    });
+                break;
+"))
+            (else ($"            case \""sn"\":
             {
                 await using (var cmd = "(new-cmd db)"
                     \""(search-table-ddl schema tn stype rn db)(search-index-ddl schema tn stype sn db)"\", conn, tx))
@@ -2805,7 +2839,7 @@ public class "rn"Repository : I"rn"Repository
 "                }
                 break;
             }
-"       ))) all-table-search-list))
+"))))) all-table-search-list))
    (repo-create-search-inline rn inline-list db)
 "            default:
                 throw new ArgumentException($\"Unknown search parameter: {parameter}\");
@@ -2831,12 +2865,15 @@ public class "rn"Repository : I"rn"Repository
 "   (apply $ (map (lambda (s)
         (let* ((sn (% "name" s))
                (tn (search-table-name s)))
-        ($"            case \""sn"\":
+        (case db
+            ((Any) ($"            case \""sn"\": await ExecuteAsync(conn, tx, \"DROP TABLE IF EXISTS "(tbl schema tn db)"\"); break;
+"))
+            (else ($"            case \""sn"\":
                 await using (var cmd = "(new-cmd db)"
                     \"DROP TABLE IF EXISTS "(tbl schema tn db)"\", conn, tx))
                     await cmd.ExecuteNonQueryAsync();
                 break;
-"       ))) all-table-search-list))
+"))))) all-table-search-list))
 "            default:
                 throw new ArgumentException($\"Unknown search parameter: {parameter}\");
         }
