@@ -462,6 +462,28 @@ define DbConn
         c.run()
     }
 
+    ; Statements that only write, sent together (see PgConn.begin_batch): on
+    ; PostgreSQL one exchange for all of them up to send_batch. SQLite runs
+    ; in the process, and SQL Server's are sent one by one as before.
+    procedure begin_batch(mutable this)
+    {
+        if kind = DATABASE_POSTGRESQL
+        {
+            var c pg as ref[PgConn]
+            c.begin_batch()
+        }
+    }
+
+    procedure send_batch(mutable this) returns bool
+    {
+        if kind = DATABASE_POSTGRESQL
+        {
+            var c pg as ref[PgConn]
+            return c.send_batch()
+        }
+        true
+    }
+
     procedure execute(mutable this, sql: Slice[u8]) returns bool
     {
         if kind = DATABASE_SQLITE

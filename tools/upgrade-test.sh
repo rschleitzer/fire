@@ -15,6 +15,11 @@
 # files (before.sqlite.sql, rows.sqlite.sql); scratch and logs in
 # ~/.cache/fire-measure/upgrade. dazzle on the PATH, or $DAZZLE.
 set -u
+# (FIRE_SCALY_HOME: a Scaly checkout to build the Scaly server with, as tools/measure.sh)
+scaly_build() {
+  if [ -n "${FIRE_SCALY_HOME:-}" ]; then SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build "$@"
+  else scaly build "$@"; fi
+}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATABASE="${FIRE_DATABASE:-postgresql}"
 WORK="${FIRE_MEASURE_HOME:-$HOME/.cache/fire-measure}/upgrade"
@@ -64,7 +69,7 @@ python3 "$ROOT/tools/upgrade/model.py" "$ROOT/model/fhir.xml" "$WORK/model/fhir.
 echo "upgrade-test: 1 -- a database of the model as it is, with resources, set back"
 "$ROOT/tools/generate.sh" > "$WORK/generate.log" 2>&1 || die "tools/generate.sh"
 mkdir -p "$ROOT/server/build"
-(cd "$ROOT" && scaly build server/fire.scaly -o server/build/fire) > "$WORK/build.a.log" 2>&1 || { cat "$WORK/build.a.log" >&2; die "the server of the model as it is does not build"; }
+(cd "$ROOT" && scaly_build server/fire.scaly -o server/build/fire) > "$WORK/build.a.log" 2>&1 || { cat "$WORK/build.a.log" >&2; die "the server of the model as it is does not build"; }
 if [ "$DATABASE" = sqlserver ]; then
   docker rm -f -v "$PG_NAME" > /dev/null 2>&1
   docker run -d --rm --platform linux/amd64 --name "$PG_NAME" -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD="$MSSQL_PASSWORD" -p "127.0.0.1:$PG_PORT:1433" mcr.microsoft.com/mssql/server:2022-latest > /dev/null || die "no SQL Server"
@@ -103,7 +108,7 @@ mkdir -p "$WORK/scaly/packages" && cp -R "$ROOT/packages/fhir" "$ROOT/packages/f
 (cd "$WORK/scaly" && "$DAZZLE" -t sgml -d "$ROOT/codegen/scaly.dsl" "$WORK/model/fhir.xml") > "$WORK/generate.s.log" 2>&1 || die "the Scaly generator on the model with steps"
 FIRE_OUT="$WORK/scaly" "$ROOT/tools/schema.sh" fire || die "tools/schema.sh on the model with steps"
 mkdir -p "$WORK/scaly/server/build"
-(cd "$WORK/scaly" && scaly build server/fire.scaly -o server/build/fire) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server of the model with steps does not build"; }
+(cd "$WORK/scaly" && scaly_build server/fire.scaly -o server/build/fire) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server of the model with steps does not build"; }
 start "$WORK/s.log" FireS "$WORK/scaly/server/build/fire" || die "the Scaly server does not start on its copy (see $WORK/s.log)"
 stop_server
 

@@ -23,6 +23,7 @@
 #       generated server prepares its statements unless it says otherwise:
 #       "Max Auto Prepare=0;No Reset On Close=false" measures it without).
 #   FIRE_SCENARIOS (a list of the above: all)
+#   FIRE_SCALY_HOME a Scaly checkout to build the Scaly server with
 #   FIRE_LOAD (thousands of resources of each type, 1 to 9: 2)
 #   FIRE_SECONDS (10 a scenario)   FIRE_CONNECTIONS (64)
 set -u
@@ -52,7 +53,12 @@ mkdir -p "$WORK"
 
 echo "throughput: building both servers for release"
 "$ROOT/tools/generate.sh" > "$WORK/generate.log" 2>&1 || die "tools/generate.sh"
-(cd "$ROOT" && scaly build server/fire.scaly -o server/build/fire-release --release) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server does not build"; }
+# (FIRE_SCALY_HOME: a Scaly checkout to build it with, as tools/measure.sh)
+if [ -n "${FIRE_SCALY_HOME:-}" ]; then
+  (cd "$ROOT" && SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build server/fire.scaly -o server/build/fire-release --release) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server does not build"; }
+else
+  (cd "$ROOT" && scaly build server/fire.scaly -o server/build/fire-release --release) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server does not build"; }
+fi
 (cd "$ROOT/upstream/server" && dotnet build -c Release -v q) > "$WORK/build.c.log" 2>&1 || { tail -5 "$WORK/build.c.log" >&2; die "the C# server does not build"; }
 
 # scenario <name> <duration>: oha's report as JSON

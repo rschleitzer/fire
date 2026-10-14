@@ -11,6 +11,11 @@
 # file each; scratch and answers in ~/.cache/fire-measure/variant-<variant>.
 # dazzle on the PATH, or $DAZZLE.
 set -u
+# (FIRE_SCALY_HOME: a Scaly checkout to build the Scaly server with, as tools/measure.sh)
+scaly_build() {
+  if [ -n "${FIRE_SCALY_HOME:-}" ]; then SCALY_HOME="$FIRE_SCALY_HOME" "$FIRE_SCALY_HOME/scalyc/build/scaly" build "$@"
+  else scaly build "$@"; fi
+}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VARIANT=${1:?usage: tools/variant-test.sh <variant>}
 HERE="$ROOT/tools/variants/$VARIANT"
@@ -123,7 +128,7 @@ mkdir -p "$WORK/scaly/packages" && cp -R "$ROOT/packages/fhir" "$ROOT/packages/f
 grep -q ':E:' "$WORK/generate.s.log" && die "the Scaly generator: $(grep -m1 ':E:' "$WORK/generate.s.log" | cut -c1-200)"
 FIRE_OUT="$WORK/scaly" "$ROOT/tools/schema.sh" fire || die "tools/schema.sh"
 mkdir -p "$WORK/scaly/server/build"
-(cd "$WORK/scaly" && scaly build server/fire.scaly -o server/build/fire) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server does not build"; }
+(cd "$WORK/scaly" && scaly_build server/fire.scaly -o server/build/fire) > "$WORK/build.s.log" 2>&1 || { cat "$WORK/build.s.log" >&2; die "the Scaly server does not build"; }
 
 echo "variant-test: the C# server of it"
 mkdir -p "$WORK/csharp" && rsync -a --exclude bin --exclude obj --exclude server --exclude model --exclude client --exclude fhir-r5 "$ROOT/upstream/" "$WORK/csharp/"

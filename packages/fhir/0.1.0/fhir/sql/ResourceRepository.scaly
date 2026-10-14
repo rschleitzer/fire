@@ -290,6 +290,22 @@ procedure insert_search(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8], 
     true
 }
 
+; A resource's rows of the search tables written, the tables emptied of
+; `id` first when `clear`: one batch -- on PostgreSQL one exchange with the
+; server for all of the statements, where each was one (most of what a
+; write cost was the kernel's work for those exchanges).
+procedure write_searches(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8], root: JsonValue, clear: bool) returns bool
+{
+    c.begin_batch()
+    var ok true
+    if clear
+        ok := delete_searches(c, type, id)
+    if ok
+        ok := insert_searches(c, type, id, root)
+    let sent c.send_batch()
+    ok and sent
+}
+
 ; Empty the search tables of `id`.
 procedure delete_searches(mutable c: ref[DbConn], type: Slice[u8], id: Slice[u8]) returns bool
 {
@@ -505,7 +521,7 @@ procedure sql_create(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
         if ok and apart
             ok := insert_data(c, type, id, version_id, data.as_slice())
         if ok
-            ok := insert_searches(c, type, id, root)
+            ok := write_searches(c, type, id, root, false)
     }
     if end_transaction(c, scope, ok) = false
         return StoreResult(FAILED, 0, 0)
@@ -577,7 +593,7 @@ procedure sql_update(scope: u64, type: Slice[u8], root: JsonValue, id: Slice[u8]
         if ok and apart
             ok := insert_data(c, type, id, current + 1, data.as_slice())
         if ok
-            ok := delete_searches(c, type, id) and insert_searches(c, type, id, root)
+            ok := write_searches(c, type, id, root, true)
     }
     if end_transaction(c, scope, ok) = false
         return StoreResult(FAILED, 0, 0)
@@ -812,7 +828,7 @@ procedure sql_rollback(scope: u64, type: Slice[u8], id: Slice[u8], version_id: i
         if ok
         {
             let parsed JsonValue.parse(content.as_slice())
-            ok := parsed.ok() and insert_searches(c, type, id, parsed.value)
+            ok := parsed.ok() and write_searches(c, type, id, parsed.value, false)
         }
     }
     if ok and previous > 0 and keeps_data_apart(type)

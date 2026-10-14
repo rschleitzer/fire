@@ -684,9 +684,13 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
                        (repo-autocomplete-body schema db))
                     "Db.Cmd(" "CmdOnce(")
                 (repo-utc-helper)
-                (repo-insert-helpers schema db)
-                (repo-insert-quantity-helper schema db)
-                (repo-insert-date-list-helper schema db)
+                ; (the rows go through Row and RunAsync: a batch where one is open)
+                (string-replace (string-replace
+                    ($ (repo-insert-helpers schema db)
+                       (repo-insert-quantity-helper schema db)
+                       (repo-insert-date-list-helper schema db))
+                    "await using var cmd = Db.Cmd(" "var cmd = Row(")
+                    "await cmd.ExecuteNonQueryAsync();" "await RunAsync(cmd);")
                 (repo-db-class-helpers db)
                 (repo-data-members has-history db))
             "Db.Cmd(" "Cmd(")
@@ -777,7 +781,15 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
     protected static string NextAlias(ref int aliasIndex) => $\"s{aliasIndex++}\";
 
     protected Task InsertSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
-        => IndexAsync(conn, tx, null, resourceId, content);
+        => WritesAsync(conn, tx, () => IndexAsync(conn, tx, null, resourceId, content));
+
+    // A resource's rows of the search tables emptied and written anew -- one batch.
+    protected Task ReplaceSearchIndexesAsync(ConnType conn, TxType tx, string resourceId, JsonNode content)
+        => WritesAsync(conn, tx, async () =>
+        {
+            await DeleteSearchIndexesAsync(conn, tx, resourceId);
+            await IndexAsync(conn, tx, null, resourceId, content);
+        });
 
     protected async Task DeleteSearchIndexesAsync(ConnType conn, TxType tx, string resourceId)
     {
@@ -785,10 +797,51 @@ public abstract class "(if has-history ($ "ResourceRepository<""TResource, TRow>
         {
             if (!parameter.IsTable) continue;
             var table = parameter.Target;
-            await using var cmd = Cmd($\"DELETE FROM " (tbl-interp schema "table" db) " WHERE resource_id = {P(1)}\", conn, tx);
+            var cmd = Row($\"DELETE FROM " (tbl-interp schema "table" db) " WHERE resource_id = {P(1)}\", conn, tx);
             cmd.Parameters.Add(NewParam(1, resourceId));
-            await cmd.ExecuteNonQueryAsync();
+            await RunAsync(cmd);
         }
+    }
+
+    // -- Writes in one round trip --
+
+    // The statements of a write that only change rows (the search rows of a resource) are
+    // sent together, where the driver can batch: one round trip for all of them, not one
+    // each -- most of what a write cost was the kernel's work for those round trips. The
+    // statements and their order are the same; outside a batch, or where the driver cannot
+    // batch, Row and RunAsync run each at once.
+    private static readonly AsyncLocal<""System.Data.Common.DbBatch?> Pending = new();
+
+    protected static async Task WritesAsync(ConnType conn, TxType tx, Func<""Task> writes)
+    {
+        if (Pending.Value != null || !conn.CanCreateBatch) { await writes(); return; }
+        await using var batch = conn.CreateBatch();
+        batch.Transaction = tx;
+        Pending.Value = batch;
+        try { await writes(); }
+        finally { Pending.Value = null; }
+        if (batch.BatchCommands.Count > 0) await batch.ExecuteNonQueryAsync();
+    }
+
+    protected readonly record struct RowCommand(System.Data.Common.DbParameterCollection Parameters, CmdType? Command);
+
+    protected RowCommand Row(string sql, ConnType conn, TxType? tx)
+    {
+        if (Pending.Value is { } batch)
+        {
+            var row = batch.CreateBatchCommand();
+            row.CommandText = Db.Sql(Sql(sql));
+            batch.BatchCommands.Add(row);
+            return new(row.Parameters, null);
+        }
+        var cmd = Cmd(sql, conn, tx);
+        return new(cmd.Parameters, cmd);
+    }
+
+    protected static async Task RunAsync(RowCommand row)
+    {
+        if (row.Command is not { } cmd) return;
+        await using (cmd) await cmd.ExecuteNonQueryAsync();
     }
 
     // The condition of one parameter of the resource's own; false: it has none of that name.
@@ -1437,8 +1490,7 @@ public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
 "
     (repo-data-store rn schema db "newVersionId")
 "        // Rebuild search indexes
-        await DeleteSearchIndexesAsync(conn, tx, id);
-        await InsertSearchIndexesAsync(conn, tx, id, content);
+        await ReplaceSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
         return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
@@ -1493,8 +1545,7 @@ public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
 "
     (repo-data-store rn schema db "newVersionId")
 "        // Rebuild search indexes
-        await DeleteSearchIndexesAsync(conn, tx, id);
-        await InsertSearchIndexesAsync(conn, tx, id, content);
+        await ReplaceSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
         return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
@@ -1599,8 +1650,7 @@ public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
         }
 
 "(repo-patch-binary-store rn schema db)"        // Rebuild search indexes
-        await DeleteSearchIndexesAsync(conn, tx, id);
-        await InsertSearchIndexesAsync(conn, tx, id, content);
+        await ReplaceSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
         return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
@@ -1655,8 +1705,7 @@ public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
         }
 
 "(repo-patch-binary-store rn schema db)"        // Rebuild search indexes
-        await DeleteSearchIndexesAsync(conn, tx, id);
-        await InsertSearchIndexesAsync(conn, tx, id, content);
+        await ReplaceSearchIndexesAsync(conn, tx, id, content);
         if (txScope == null) await tx.CommitAsync();
 
         return "(r-new-res rn)"id, newVersionId, lastUpdated, contentBytes"(repo-constructor-inline-args inline-list)");
