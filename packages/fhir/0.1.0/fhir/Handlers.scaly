@@ -961,9 +961,11 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
         return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var plain_text Array[u8]()
     var plain_cells Array[i64]()
-    let reverse resolve_reverse_chains(text, cells, chained_text.as_slice(), chained_cells.as_slice(), &plain_text, &plain_cells)
+    let reverse resolve_reverse_chains(text, cells, chained_text.as_slice(), chained_cells.as_slice(), &plain_text, &plain_cells, &chain_problem)
     if reverse = FAILED
         return send_unavailable(req, res)
+    if reverse = REFUSED
+        return send_error(req, res, "invalid", chain_problem.as_slice(), 400)
     if reverse <> STORED
         return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
 

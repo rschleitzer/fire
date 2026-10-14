@@ -928,13 +928,15 @@ namespace " (project-name) ".Handlers;
 
         var totalParam = " query-source ".TryGetValue(\"_total\", out var totalStr) ? (string?)totalStr : null;
 
-        // Resolve forward chains
+        // Resolve forward chains, then reverse chains (_has); what they refuse is the request's fault
         IQueryCollection searchQuery;
-        try { searchQuery = await SearchHelper.ResolveForwardChainsAsync(ctx.RequestServices, "(h-name rn)", " query-source "); }
+        string[]? hasIds;
+        try
+        {
+            searchQuery = await SearchHelper.ResolveForwardChainsAsync(ctx.RequestServices, "(h-name rn)", " query-source ");
+            hasIds = await SearchHelper.ResolveReverseChainsAsync(ctx.RequestServices, " query-source ");
+        }
         catch (ArgumentException ex) { return FhirResult.Error(ctx, \"error\", \"invalid\", ex.Message, 400); }
-
-        // Resolve reverse chains (_has)
-        var hasIds = await SearchHelper.ResolveReverseChainsAsync(ctx.RequestServices, " query-source ");
         if (hasIds != null)
         {
             var modified = new Dictionary<""string, Microsoft.Extensions.Primitives.StringValues>();

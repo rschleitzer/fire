@@ -336,9 +336,9 @@ procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mu
 
 ; The reverse chains of the request (asked: its own pairs), applied to the
 ; pairs in text and cells: when there are any, the _id of the pairs is the
-; ids the chains leave -- or one nothing has. STORED, or what search_all
-; answered.
-procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
+; ids the chains leave -- or one nothing has. STORED, or what
+; search_all_saying answered (REFUSED with `problem`).
+procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var ids Array[u8]()
     var any false
@@ -362,7 +362,7 @@ procedure resolve_reverse_chains(asked_text: Slice[u8], asked_cells: Slice[i64],
         cell(&one_text, &one_cells, value)
         var found Array[u8]()
         var rows Array[i64]()
-        let status search_all(target, one_text.as_slice(), one_cells.as_slice(), &found, &rows)
+        let status search_all_saying(target, one_text.as_slice(), one_cells.as_slice(), &found, &rows, problem)
         if status <> STORED
             return status
         let line reference_line(target, reference)

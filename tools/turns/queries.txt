@@ -104,6 +104,9 @@ GET Patient?_has:Observation:subject:code=8867-4&_has:Observation:subject:status
 GET Patient?_has:Provenance:target:agent=Practitioner/gp1
 GET Patient?_has:Observation:nonsense:code=1
 GET Practitioner?_has:Patient:general-practitioner:family=brown
+GET Practitioner?_has:Patient:general-practitioner:nonsense=x
+GET Practitioner?_has:Patient:general-practitioner:birthdate=bogus
+GET Patient?general-practitioner.nonsense=x&_has:Observation:subject:code=8867-4
 GET Patient?_id=p1&_include=Patient:general-practitioner
 GET Patient?_id=p1,p2&_include=Patient:general-practitioner:Practitioner&_include=Patient:link
 GET Patient?_id=p1&_include=Patient:*
