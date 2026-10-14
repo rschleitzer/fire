@@ -61,13 +61,49 @@ define PostgreSqlProvider
     }
 
     ; The work at the server's start, as upstream's Database does it: the
-    ; database answers, and it has the schema -- created with upstream's
-    ; own text when the database is empty -- at a version this software
-    ; knows. Then every thread's pool is told where the server is. False
-    ; when any of it fails.
+    ; database is there -- made when it is not (EnsureDatabaseExists) --,
+    ; answers, and has the schema -- created with upstream's own text when
+    ; the database is empty -- at a version this software knows. Then every
+    ; thread's pool is told where the server is. False when any of it fails.
     procedure initialize(this, software_version: Slice[u8]) returns bool
     {
         var reason Array[u8]()
+        ; the database itself, asked of `postgres`; what goes wrong here is
+        ; a warning, as upstream's, and the connection below says the rest.
+        ; Without a database in the connection string upstream looks for
+        ; the model's name and connects to the user's own: nothing is made.
+        if database.length() > 0
+        {
+            var h0 String(host)
+            let first PgConn.open(h0, port, user.as_slice(), password.as_slice(), "postgres", &reason)
+            if first = null
+                Console.println("Warning: Could not check/create database: `String(reason.get_buffer() as pointer[const_char], reason.length)`")
+            else
+            {
+                var m first as ref[PgConn]
+                var there true
+                m.prepare_unnamed("SELECT COUNT(*) FROM pg_database WHERE datname = $1")
+                m.start("")
+                m.param_text(database.as_slice())
+                if m.run() and m.next_row()
+                    there := m.column_int(0) > 0
+                if there = false
+                {
+                    Console.println("Creating database `database`...")
+                    var create Array[u8]()
+                    create.append("CREATE DATABASE \"")
+                    create.append(database.as_slice())
+                    create.append("\"")
+                    if m.execute(create.as_slice()) = false
+                    {
+                        let e m.error_message()
+                        Console.println("Warning: Could not check/create database: `String(e.data as pointer[const_char], e.length)`")
+                    }
+                }
+                m.close()
+            }
+            reason.length := 0
+        }
         var h String(host)
         let got PgConn.open(h, port, user.as_slice(), password.as_slice(), database.as_slice(), &reason)
         if got = null
