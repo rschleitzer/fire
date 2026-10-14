@@ -11,8 +11,8 @@
 ; routine for routine, and is measured by it: both write the same file,
 ; byte for byte. So what looks odd here is upstream's and is kept -- the
 ; order of every list is the order the definitions are met in, a name's
-; last characters go where upstream's TrimEnd takes them, and which
-; resources are active is a constant of the tool.
+; last characters go where upstream's TrimEnd takes them, and every
+; resource is active but the eight the model holds for itself.
 
 package scaly 0.1.0
 package json 0.1.1
@@ -1992,13 +1992,10 @@ procedure main(argc: int, argv: pointer[pointer[const_char]]) returns int
         if is_one_of(resource_names(), name) = false
             continue
         var active: i64 0 - 1
-        if name.equals("Binary") or name.equals("Observation") or name.equals("Patient") or name.equals("Practitioner") or name.equals("Provenance")
-            active := keep(&m, "true")
+        if name.equals("Resource") or name.equals("Bundle") or name.equals("CapabilityStatement") or name.equals("CompartmentDefinition") or name.equals("ConceptMap") or name.equals("OperationDefinition") or name.equals("OperationOutcome") or name.equals("SearchParameter")
+            active := keep(&m, "model")
         else
-        {
-            if name.equals("Resource") or name.equals("Bundle") or name.equals("CapabilityStatement") or name.equals("CompartmentDefinition") or name.equals("ConceptMap") or name.equals("OperationDefinition") or name.equals("OperationOutcome") or name.equals("SearchParameter")
-                active := keep(&m, "model")
-        }
+            active := keep(&m, "true")
         var id Array[u8]()
         put_lower(&id, name)
         var description Array[u8]()

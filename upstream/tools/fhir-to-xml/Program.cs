@@ -438,8 +438,8 @@ class Program
             var currentElementName = snapshot.Element[0].Id;
 
             string? active = null;
-            if (IsActive(currentElementName)) active = "true";
-            else if (IsModel(currentElementName)) active = "model";
+            if (IsModel(currentElementName)) active = "model";
+            else active = "true";
 
             var resource = new Resource
             {
@@ -573,8 +573,6 @@ class Program
     };
 
     static bool IsResource(string name) => ResourceNames.Contains(name);
-
-    static bool IsActive(string name) => name is "Binary" or "Observation" or "Patient" or "Practitioner" or "Provenance";
 
     static bool IsModel(string name) => name is "Resource" or "Bundle" or "CapabilityStatement"
         or "CompartmentDefinition" or "ConceptMap" or "OperationDefinition"

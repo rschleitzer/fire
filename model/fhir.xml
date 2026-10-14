@@ -170,7 +170,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Account" id="account">
+    <resource name="Account" active="true" id="account">
       <description>A financial tool for tracking value accrued for a particular purpose.  In the healthcare field, used to track charges for a patient, cost centers, etc.</description>
       <properties>
         <property id="account.id" name="id" type="id" summary="true">
@@ -548,7 +548,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ActivityDefinition" id="activitydefinition">
+    <resource name="ActivityDefinition" active="true" id="activitydefinition">
       <description>This resource allows for the definition of some activity to be performed, independent of a particular patient, practitioner, or other performance context.</description>
       <properties>
         <property id="activitydefinition.id" name="id" type="id" summary="true">
@@ -2108,7 +2108,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="ActorDefinition" id="actordefinition">
+    <resource name="ActorDefinition" active="true" id="actordefinition">
       <description>Describes an actor - a human or an application that plays a role in data exchange, and that may have obligations associated with the role the actor plays.</description>
       <properties>
         <property id="actordefinition.id" name="id" type="id" summary="true">
@@ -2352,7 +2352,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="AdministrableProductDefinition" id="administrableproductdefinition">
+    <resource name="AdministrableProductDefinition" active="true" id="administrableproductdefinition">
       <description>A medicinal product in the final form which is suitable for administering to a patient (after any mixing of multiple components, dissolution etc. has been performed).</description>
       <properties>
         <property id="administrableproductdefinition.id" name="id" type="id" summary="true">
@@ -2623,7 +2623,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="AdverseEvent" id="adverseevent">
+    <resource name="AdverseEvent" active="true" id="adverseevent">
       <description>An event (i.e. any change to current patient status) that may be related to unintended effects on a patient or research participant. The unintended effects may require additional monitoring, treatment, hospitalization, or may result in death. The AdverseEvent resource also extends to potential or avoided events that could have had such effects. There are two major domains where the AdverseEvent resource is expected to be used. One is in clinical care reported adverse events and the other is in reporting adverse events in clinical  research trial management. Adverse events can be reported by healthcare providers, patients, caregivers or by medical products manufacturers. Given the differences between these two concepts, we recommend consulting the domain specific implementation guides when implementing the AdverseEvent Resource. The implementation guides include specific extensions, value sets and constraints.</description>
       <properties>
         <property id="adverseevent.id" name="id" type="id" summary="true">
@@ -3150,7 +3150,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="AllergyIntolerance" id="allergyintolerance">
+    <resource name="AllergyIntolerance" active="true" id="allergyintolerance">
       <description>Risk of harmful or undesirable physiological response which is specific to an individual and associated with exposure to a substance.</description>
       <properties>
         <property id="allergyintolerance.id" name="id" type="id" summary="true">
@@ -3509,7 +3509,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Appointment" id="appointment">
+    <resource name="Appointment" active="true" id="appointment">
       <description>A booking of a healthcare event among patient(s), practitioner(s), related person(s) and/or device(s) for a specific date/time. This may result in one or more Encounter(s).</description>
       <properties>
         <property id="appointment.id" name="id" type="id" summary="true">
@@ -4253,7 +4253,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="AppointmentResponse" id="appointmentresponse">
+    <resource name="AppointmentResponse" active="true" id="appointmentresponse">
       <description>A reply to an appointment request for a patient and/or practitioner(s), such as a confirmation or rejection.</description>
       <properties>
         <property id="appointmentresponse.id" name="id" type="id" summary="true">
@@ -4455,7 +4455,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ArtifactAssessment" id="artifactassessment">
+    <resource name="ArtifactAssessment" active="true" id="artifactassessment">
       <description>This Resource provides one or more comments, classifiers or ratings about a Resource and supports attribution and rights management metadata for the added content.</description>
       <properties>
         <property id="artifactassessment.id" name="id" type="id" summary="true">
@@ -4685,7 +4685,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="AuditEvent" id="auditevent">
+    <resource name="AuditEvent" active="true" id="auditevent">
       <description>A record of an event relevant for purposes such as operations, privacy, security, maintenance, and performance analysis.</description>
       <properties>
         <property id="auditevent.id" name="id" type="id" summary="true">
@@ -5336,7 +5336,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Basic" id="basic">
+    <resource name="Basic" active="true" id="basic">
       <description>Basic is used for handling concepts not yet defined in FHIR, narrative-only resources that dont map to an existing resource, and custom resources not appropriate for inclusion in the FHIR specification.</description>
       <properties>
         <property id="basic.id" name="id" type="id" summary="true">
@@ -5668,7 +5668,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="BiologicallyDerivedProduct" id="biologicallyderivedproduct">
+    <resource name="BiologicallyDerivedProduct" active="true" id="biologicallyderivedproduct">
       <description>This resource reflects an instance of a biologically derived product. A material substance originating from a biological entity intended to be transplanted or infusedinto another (possibly the same) biological entity.</description>
       <properties>
         <property id="biologicallyderivedproduct.id" name="id" type="id" summary="true">
@@ -5890,7 +5890,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="BiologicallyDerivedProductDispense" id="biologicallyderivedproductdispense">
+    <resource name="BiologicallyDerivedProductDispense" active="true" id="biologicallyderivedproductdispense">
       <description>This resource reflects an instance of a biologically derived product dispense. The supply or dispense of a biologically derived product from the supply organization or department (e.g. hospital transfusion laboratory) to the clinical team responsible for clinical application.</description>
       <properties>
         <property id="biologicallyderivedproductdispense.id" name="id" type="id" summary="true">
@@ -6096,7 +6096,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="BodyStructure" id="bodystructure">
+    <resource name="BodyStructure" active="true" id="bodystructure">
       <description>Record details about an anatomical structure.  This resource may be used when a coded concept does not provide the necessary detail needed for the use case.</description>
       <properties>
         <property id="bodystructure.id" name="id" type="id" summary="true">
@@ -7842,7 +7842,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="CarePlan" id="careplan">
+    <resource name="CarePlan" active="true" id="careplan">
       <description>Describes the intention of how one or more practitioners intend to deliver care for a particular patient, group or community for a period of time, possibly limited to care for a specific condition or set of conditions.</description>
       <properties>
         <property id="careplan.id" name="id" type="id" summary="true">
@@ -8270,7 +8270,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="CareTeam" id="careteam">
+    <resource name="CareTeam" active="true" id="careteam">
       <description>The Care Team includes all the people and organizations who plan to participate in the coordination and delivery of care.</description>
       <properties>
         <property id="careteam.id" name="id" type="id" summary="true">
@@ -8474,7 +8474,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ChargeItem" id="chargeitem">
+    <resource name="ChargeItem" active="true" id="chargeitem">
       <description>The resource ChargeItem describes the provision of healthcare provider products for a certain patient, therefore referring not only to the product, but containing in addition details of the provision, like date, time, amounts and participating organizations and persons. Main Usage of the ChargeItem is to enable the billing process and internal cost allocation.</description>
       <properties>
         <property id="chargeitem.id" name="id" type="id" summary="true">
@@ -8914,7 +8914,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ChargeItemDefinition" id="chargeitemdefinition">
+    <resource name="ChargeItemDefinition" active="true" id="chargeitemdefinition">
       <description>The ChargeItemDefinition resource provides the properties that apply to the (billing) codes necessary to calculate costs and prices. The properties may differ largely depending on type and realm, therefore this resource gives only a rough structure and requires profiling for each type of billing code system.</description>
       <properties>
         <property id="chargeitemdefinition.id" name="id" type="id" summary="true">
@@ -9233,7 +9233,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Citation" id="citation">
+    <resource name="Citation" active="true" id="citation">
       <description>The Citation Resource enables reference to any knowledge artifact for purposes of identification and attribution. The Citation Resource supports existing reference structures and developing publication practices such as versioning, expressing complex contributorship roles, and referencing computable resources.</description>
       <properties>
         <property id="citation.id" name="id" type="id" summary="true">
@@ -10112,7 +10112,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Claim" id="claim">
+    <resource name="Claim" active="true" id="claim">
       <description>A provider issued list of professional services and products which have been provided, or are to be provided, to a patient which is sent to an insurer for reimbursement.</description>
       <properties>
         <property id="claim.id" name="id" type="id" summary="true">
@@ -11024,7 +11024,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="ClaimResponse" id="claimresponse">
+    <resource name="ClaimResponse" active="true" id="claimresponse">
       <description>This resource provides the adjudication details from the processing of a Claim resource.</description>
       <properties>
         <property id="claimresponse.id" name="id" type="id" summary="true">
@@ -11783,7 +11783,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ClinicalImpression" id="clinicalimpression">
+    <resource name="ClinicalImpression" active="true" id="clinicalimpression">
       <description>A record of a clinical assessment performed to determine what problem(s) may affect the patient and before planning the treatments or management strategies that are best to manage a patients condition. Assessments are often 1:1 with a clinical consultation / encounter,  but this varies greatly depending on the clinical workflow. This resource is called &quot;ClinicalImpression&quot; rather than &quot;ClinicalAssessment&quot; to avoid confusion with the recording of assessment tools such as Apgar score.</description>
       <properties>
         <property id="clinicalimpression.id" name="id" type="id" summary="true">
@@ -12218,7 +12218,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ClinicalUseDefinition" id="clinicalusedefinition">
+    <resource name="ClinicalUseDefinition" active="true" id="clinicalusedefinition">
       <description>A single issue - either an indication, contraindication, interaction or an undesirable effect for a medicinal product, medication, device or procedure.</description>
       <properties>
         <property id="clinicalusedefinition.id" name="id" type="id" summary="true">
@@ -12645,7 +12645,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="CodeSystem" id="codesystem">
+    <resource name="CodeSystem" active="true" id="codesystem">
       <description>The CodeSystem resource is used to declare the existence of and describe a code system or code system supplement and its key properties, and optionally define a part or all of its content.</description>
       <properties>
         <property id="codesystem.id" name="id" type="id" summary="true">
@@ -13670,7 +13670,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Communication" id="communication">
+    <resource name="Communication" active="true" id="communication">
       <description>A clinical or business level record of information being transmitted or shared; e.g. an alert that was sent to a responsible provider, a public health agency communication to a provider/reporter in response to a case report for a reportable condition.</description>
       <properties>
         <property id="communication.id" name="id" type="id" summary="true">
@@ -14342,7 +14342,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="CommunicationRequest" id="communicationrequest">
+    <resource name="CommunicationRequest" active="true" id="communicationrequest">
       <description>A request to convey information; e.g. the CDS system proposes that an alert be sent to a responsible provider, the CDS system proposes that the public health agency be notified about a reportable condition.</description>
       <properties>
         <property id="communicationrequest.id" name="id" type="id" summary="true">
@@ -15118,7 +15118,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Composition" id="composition">
+    <resource name="Composition" active="true" id="composition">
       <description>A set of healthcare-related information that is assembled together into a single logical package that provides a single coherent statement of meaning, establishes its own context and that has clinical attestation with regard to who is making the statement. A Composition defines the structure and narrative content necessary for a document. However, a Composition alone does not constitute a document. Rather, the Composition must be the first entry in a Bundle where Bundle.type=document, and any other resources referenced from Composition must be included as subsequent entries in the Bundle (for example Patient, Practitioner, Encounter, etc.).</description>
       <properties>
         <property id="composition.id" name="id" type="id" summary="true">
@@ -17286,7 +17286,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Condition" id="condition">
+    <resource name="Condition" active="true" id="condition">
       <description>A clinical condition, problem, diagnosis, or other event, situation, issue, or clinical concept that has risen to a level of concern.</description>
       <properties>
         <property id="condition.id" name="id" type="id" summary="true">
@@ -17872,7 +17872,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ConditionDefinition" id="conditiondefinition">
+    <resource name="ConditionDefinition" active="true" id="conditiondefinition">
       <description>A definition of a condition and information relevant to managing it.</description>
       <properties>
         <property id="conditiondefinition.id" name="id" type="id" summary="true">
@@ -18260,7 +18260,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Consent" id="consent">
+    <resource name="Consent" active="true" id="consent">
       <description>A record of a healthcare consumers  choices  or choices made on their behalf by a third party, which permits or denies identified recipient(s) or recipient role(s) to perform one or more actions within a given policy context, for specific purposes and periods of time.</description>
       <properties>
         <property id="consent.id" name="id" type="id" summary="true">
@@ -18940,7 +18940,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Contract" id="contract">
+    <resource name="Contract" active="true" id="contract">
       <description>Legally enforceable, formally recorded unilateral or bilateral directive i.e., a policy or agreement.</description>
       <properties>
         <property id="contract.id" name="id" type="id" summary="true">
@@ -20069,7 +20069,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Coverage" id="coverage">
+    <resource name="Coverage" active="true" id="coverage">
       <description>Financial instrument which may be used to reimburse or pay for health care products and services. Includes both insurance and self-payment.</description>
       <properties>
         <property id="coverage.id" name="id" type="id" summary="true">
@@ -20436,7 +20436,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="CoverageEligibilityRequest" id="coverageeligibilityrequest">
+    <resource name="CoverageEligibilityRequest" active="true" id="coverageeligibilityrequest">
       <description>The CoverageEligibilityRequest provides patient and insurance coverage information to an insurer for them to respond, in the form of an CoverageEligibilityResponse, with information regarding whether the stated coverage is valid and in-force and optionally to provide the insurance details of the policy.</description>
       <properties>
         <property id="coverageeligibilityrequest.id" name="id" type="id" summary="true">
@@ -20786,7 +20786,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="CoverageEligibilityResponse" id="coverageeligibilityresponse">
+    <resource name="CoverageEligibilityResponse" active="true" id="coverageeligibilityresponse">
       <description>This resource provides eligibility and plan details from the processing of an CoverageEligibilityRequest resource.</description>
       <properties>
         <property id="coverageeligibilityresponse.id" name="id" type="id" summary="true">
@@ -21166,7 +21166,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DetectedIssue" id="detectedissue">
+    <resource name="DetectedIssue" active="true" id="detectedissue">
       <description>Indicates an actual or potential clinical issue with or between one or more active or proposed clinical actions for a patient; e.g. Drug-drug interaction, Ineffective treatment frequency, Procedure-condition conflict, gaps in care, etc.</description>
       <properties>
         <property id="detectedissue.id" name="id" type="id" summary="true">
@@ -21626,7 +21626,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Device" id="device">
+    <resource name="Device" active="true" id="device">
       <description>A type of a manufactured item that is used in the provision of healthcare without being substantially changed through that activity. The device may be a medical or non-medical device.</description>
       <properties>
         <property id="device.id" name="id" type="id" summary="true">
@@ -22179,7 +22179,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceAssociation" id="deviceassociation">
+    <resource name="DeviceAssociation" active="true" id="deviceassociation">
       <description>A record of association or dissociation of a device with a patient.</description>
       <properties>
         <property id="deviceassociation.id" name="id" type="id" summary="true">
@@ -22348,7 +22348,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceDefinition" id="devicedefinition">
+    <resource name="DeviceDefinition" active="true" id="devicedefinition">
       <description>The characteristics, operational status and capabilities of a medical-related component of a medical device.</description>
       <properties>
         <property id="devicedefinition.id" name="id" type="id" summary="true">
@@ -22944,7 +22944,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceDispense" id="devicedispense">
+    <resource name="DeviceDispense" active="true" id="devicedispense">
       <description>A record of dispensation of a device - i.e., assigning a device to a patient, or to a professional for their use.</description>
       <properties>
         <property id="devicedispense.id" name="id" type="id" summary="true">
@@ -23187,7 +23187,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceMetric" id="devicemetric">
+    <resource name="DeviceMetric" active="true" id="devicemetric">
       <description>Describes a measurement, calculation or setting capability of a device.</description>
       <properties>
         <property id="devicemetric.id" name="id" type="id" summary="true">
@@ -23829,7 +23829,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceRequest" id="devicerequest">
+    <resource name="DeviceRequest" active="true" id="devicerequest">
       <description>Represents a request for a patient to employ a medical device. The device may be an implantable device, or an external assistive device, such as a walker.</description>
       <properties>
         <property id="devicerequest.id" name="id" type="id" summary="true">
@@ -24370,7 +24370,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DeviceUsage" id="deviceusage">
+    <resource name="DeviceUsage" active="true" id="deviceusage">
       <description>A record of a device being used by a patient where the record is the result of a report from the patient or a clinician.</description>
       <properties>
         <property id="deviceusage.id" name="id" type="id" summary="true">
@@ -24570,7 +24570,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DiagnosticReport" id="diagnosticreport">
+    <resource name="DiagnosticReport" active="true" id="diagnosticreport">
       <description>The findings and interpretation of diagnostic tests performed on patients, groups of patients, products, substances, devices, and locations, and/or specimens derived from these. The report includes clinical context such as requesting provider information, and some mix of atomic results, images, textual and coded interpretations, and formatted representation of diagnostic reports. The report also includes non-clinical context such as batch analysis and stability reporting of products and substances.</description>
       <properties>
         <property id="diagnosticreport.id" name="id" type="id" summary="true">
@@ -25013,7 +25013,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="DocumentReference" id="documentreference">
+    <resource name="DocumentReference" active="true" id="documentreference">
       <description>A reference to a document of any kind for any purpose. While the term document implies a more narrow focus, for this resource this &quot;document&quot; encompasses *any* serialized object with a mime-type, it includes formal patient-centric documents (CDA), clinical notes, scanned paper, non-patient specific documents like policy text, as well as a photo, video, or audio recording acquired or used in healthcare.  The DocumentReference resource provides metadata about the document so that the document can be discovered and managed.  The actual content may be inline base64 encoded data or provided by direct reference.</description>
       <properties>
         <property id="documentreference.id" name="id" type="id" summary="true">
@@ -25947,7 +25947,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Encounter" id="encounter">
+    <resource name="Encounter" active="true" id="encounter">
       <description>An interaction between a patient and healthcare provider(s) for the purpose of providing healthcare service(s) or assessing the health status of a patient.  Encounter is primarily used to record information about the actual activities that occurred, where Appointment is used to record planned activities.</description>
       <properties>
         <property id="encounter.id" name="id" type="id" summary="true">
@@ -26579,7 +26579,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="EncounterHistory" id="encounterhistory">
+    <resource name="EncounterHistory" active="true" id="encounterhistory">
       <description>A record of significant events/milestones key data throughout the history of an Encounter, often tracked for specific purposes such as billing.</description>
       <properties>
         <property id="encounterhistory.id" name="id" type="id" summary="true">
@@ -26735,7 +26735,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Endpoint" id="endpoint">
+    <resource name="Endpoint" active="true" id="endpoint">
       <description>The technical details of an endpoint that can be used for electronic services, such as for web services providing XDS.b, a REST endpoint for another FHIR server, or a s/Mime email address. This may include any security context information.</description>
       <properties>
         <property id="endpoint.id" name="id" type="id" summary="true">
@@ -26905,7 +26905,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="EnrollmentRequest" id="enrollmentrequest">
+    <resource name="EnrollmentRequest" active="true" id="enrollmentrequest">
       <description>This resource provides the insurance enrollment details to the insurer regarding a specified coverage.</description>
       <properties>
         <property id="enrollmentrequest.id" name="id" type="id" summary="true">
@@ -27017,7 +27017,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="EnrollmentResponse" id="enrollmentresponse">
+    <resource name="EnrollmentResponse" active="true" id="enrollmentresponse">
       <description>This resource provides enrollment and plan details from the processing of an EnrollmentRequest resource.</description>
       <properties>
         <property id="enrollmentresponse.id" name="id" type="id" summary="true">
@@ -27135,7 +27135,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="EpisodeOfCare" id="episodeofcare">
+    <resource name="EpisodeOfCare" active="true" id="episodeofcare">
       <description>An association between a patient and an organization / healthcare provider(s) during which time encounters may occur. The managing organization assumes a level of responsibility for the patient during this time.</description>
       <properties>
         <property id="episodeofcare.id" name="id" type="id" summary="true">
@@ -27461,7 +27461,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="EventDefinition" id="eventdefinition">
+    <resource name="EventDefinition" active="true" id="eventdefinition">
       <description>The EventDefinition resource provides a reusable description of when a particular event can occur.</description>
       <properties>
         <property id="eventdefinition.id" name="id" type="id" summary="true">
@@ -28600,7 +28600,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Evidence" id="evidence">
+    <resource name="Evidence" active="true" id="evidence">
       <description>The Evidence Resource provides a machine-interpretable expression of an evidence concept including the evidence variables (e.g., population, exposures/interventions, comparators, outcomes, measured variables, confounding variables), the statistics, and the certainty of this evidence.</description>
       <properties>
         <property id="evidence.id" name="id" type="id" summary="true">
@@ -29075,7 +29075,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="EvidenceReport" id="evidencereport">
+    <resource name="EvidenceReport" active="true" id="evidencereport">
       <description>The EvidenceReport Resource is a specialized container for a collection of resources and codeable concepts, adapted to support compositions of Evidence, EvidenceVariable, and Citation resources and related concepts.</description>
       <properties>
         <property id="evidencereport.id" name="id" type="id" summary="true">
@@ -29441,7 +29441,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="EvidenceVariable" id="evidencevariable">
+    <resource name="EvidenceVariable" active="true" id="evidencevariable">
       <description>The EvidenceVariable resource describes an element that knowledge (Evidence) is about.</description>
       <properties>
         <property id="evidencevariable.id" name="id" type="id" summary="true">
@@ -30747,7 +30747,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ExampleScenario" id="examplescenario">
+    <resource name="ExampleScenario" active="true" id="examplescenario">
       <description>Example of workflow instance.</description>
       <properties>
         <property id="examplescenario.id" name="id" type="id" summary="true">
@@ -31181,7 +31181,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ExplanationOfBenefit" id="explanationofbenefit">
+    <resource name="ExplanationOfBenefit" active="true" id="explanationofbenefit">
       <description>This resource provides: the claim details; adjudication details from the processing of a Claim; and optionally account balance information, for informing the subscriber of the benefits provided.</description>
       <properties>
         <property id="explanationofbenefit.id" name="id" type="id" summary="true">
@@ -32573,7 +32573,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="FamilyMemberHistory" id="familymemberhistory">
+    <resource name="FamilyMemberHistory" active="true" id="familymemberhistory">
       <description>Significant health conditions for a person related to the patient relevant in the context of care for the patient.</description>
       <properties>
         <property id="familymemberhistory.id" name="id" type="id" summary="true">
@@ -32884,7 +32884,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Flag" id="flag">
+    <resource name="Flag" active="true" id="flag">
       <description>Prospective warnings of potential issues when providing care to the patient.</description>
       <properties>
         <property id="flag.id" name="id" type="id" summary="true">
@@ -33079,7 +33079,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="FormularyItem" id="formularyitem">
+    <resource name="FormularyItem" active="true" id="formularyitem">
       <description>This resource describes a product or service that is available through a program and includes the conditions and constraints of availability.  All of the information in this resource is specific to the inclusion of the item in the formulary and is not inherent to the item itself.</description>
       <properties>
         <property id="formularyitem.id" name="id" type="id" summary="true">
@@ -33156,7 +33156,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="GenomicStudy" id="genomicstudy">
+    <resource name="GenomicStudy" active="true" id="genomicstudy">
       <description>A GenomicStudy is a set of analyses performed to analyze and generate genomic data.</description>
       <properties>
         <property id="genomicstudy.id" name="id" type="id" summary="true">
@@ -33669,7 +33669,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Goal" id="goal">
+    <resource name="Goal" active="true" id="goal">
       <description>Describes the intended objective(s) for a patient, group or organization care, for example, weight loss, restoring an activity of daily living, obtaining herd immunity via immunization, meeting a process improvement objective, etc.</description>
       <properties>
         <property id="goal.id" name="id" type="id" summary="true">
@@ -33944,7 +33944,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="GraphDefinition" id="graphdefinition">
+    <resource name="GraphDefinition" active="true" id="graphdefinition">
       <description>A formal computable definition of a graph of resources - that is, a coherent set of resources that form a graph by following references. The Graph Definition resource defines a set and makes rules about the set.</description>
       <properties>
         <property id="graphdefinition.id" name="id" type="id" summary="true">
@@ -34297,7 +34297,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Group" id="group">
+    <resource name="Group" active="true" id="group">
       <description>Represents a defined collection of entities that may be discussed or acted upon collectively but which are not expected to act collectively, and are not formally or legally recognized; i.e. a collection of entities that isnt an Organization.</description>
       <properties>
         <property id="group.id" name="id" type="id" summary="true">
@@ -34631,7 +34631,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="GuidanceResponse" id="guidanceresponse">
+    <resource name="GuidanceResponse" active="true" id="guidanceresponse">
       <description>A guidance response is the formal response to a guidance request, including any output parameters returned by the evaluation, as well as the description of any proposed actions to be taken.</description>
       <properties>
         <property id="guidanceresponse.id" name="id" type="id" summary="true">
@@ -34824,7 +34824,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="HealthcareService" id="healthcareservice">
+    <resource name="HealthcareService" active="true" id="healthcareservice">
       <description>The details of a healthcare service available at a location.</description>
       <properties>
         <property id="healthcareservice.id" name="id" type="id" summary="true">
@@ -35111,7 +35111,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ImagingSelection" id="imagingselection">
+    <resource name="ImagingSelection" active="true" id="imagingselection">
       <description>A selection of DICOM SOP instances and/or frames within a single Study and Series. This might include additional specifics such as an image region, an Observation UID or a Segmentation Number, allowing linkage to an Observation Resource or transferring this information along with the ImagingStudy Resource.</description>
       <properties>
         <property id="imagingselection.id" name="id" type="id" summary="true">
@@ -35502,7 +35502,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ImagingStudy" id="imagingstudy">
+    <resource name="ImagingStudy" active="true" id="imagingstudy">
       <description>Representation of the content produced in a DICOM imaging study. A study comprises a set of series, each of which includes a set of Service-Object Pair Instances (SOP Instances - images or other data) acquired or produced in a common context.  A series is of only one modality (e.g. X-ray, CT, MR, ultrasound), but a study may have multiple series of different modalities.</description>
       <properties>
         <property id="imagingstudy.id" name="id" type="id" summary="true">
@@ -35945,7 +35945,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Immunization" id="immunization">
+    <resource name="Immunization" active="true" id="immunization">
       <description>Describes the event of a patient being administered a vaccine or a record of an immunization as reported by a patient, a clinician or another party.</description>
       <properties>
         <property id="immunization.id" name="id" type="id" summary="true">
@@ -36356,7 +36356,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ImmunizationEvaluation" id="immunizationevaluation">
+    <resource name="ImmunizationEvaluation" active="true" id="immunizationevaluation">
       <description>Describes a comparison of an immunization event against published recommendations to determine if the administration is &quot;valid&quot; in relation to those  recommendations.</description>
       <properties>
         <property id="immunizationevaluation.id" name="id" type="id" summary="true">
@@ -36520,7 +36520,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ImmunizationRecommendation" id="immunizationrecommendation">
+    <resource name="ImmunizationRecommendation" active="true" id="immunizationrecommendation">
       <description>A patients point-in-time set of recommendations (i.e. forecasting) according to a published schedule with optional supporting justification.</description>
       <properties>
         <property id="immunizationrecommendation.id" name="id" type="id" summary="true">
@@ -36891,7 +36891,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ImplementationGuide" id="implementationguide">
+    <resource name="ImplementationGuide" active="true" id="implementationguide">
       <description>A set of rules of how a particular interoperability or standards problem is solved - typically through the use of FHIR resources. This resource is used to gather all the parts of an implementation guide into a logical whole and to publish a computable definition of all the parts.</description>
       <properties>
         <property id="implementationguide.id" name="id" type="id" summary="true">
@@ -38658,7 +38658,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Ingredient" id="ingredient">
+    <resource name="Ingredient" active="true" id="ingredient">
       <description>An ingredient of a manufactured item or pharmaceutical product.</description>
       <properties>
         <property id="ingredient.id" name="id" type="id" summary="true">
@@ -39012,7 +39012,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="InsurancePlan" id="insuranceplan">
+    <resource name="InsurancePlan" active="true" id="insuranceplan">
       <description>Details of a Health Insurance product/plan provided by an organization.</description>
       <properties>
         <property id="insuranceplan.id" name="id" type="id" summary="true">
@@ -39428,7 +39428,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="InventoryItem" id="inventoryitem">
+    <resource name="InventoryItem" active="true" id="inventoryitem">
       <description>A functional description of an inventory item used in inventory and supply-related workflows.</description>
       <properties>
         <property id="inventoryitem.id" name="id" type="id" summary="true">
@@ -39716,7 +39716,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="InventoryReport" id="inventoryreport">
+    <resource name="InventoryReport" active="true" id="inventoryreport">
       <description>A report of inventory or stock items.</description>
       <properties>
         <property id="inventoryreport.id" name="id" type="id" summary="true">
@@ -39911,7 +39911,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Invoice" id="invoice">
+    <resource name="Invoice" active="true" id="invoice">
       <description>Invoice containing collected ChargeItems from an Account with calculated individual and total price for Billing purpose.</description>
       <properties>
         <property id="invoice.id" name="id" type="id" summary="true">
@@ -40244,7 +40244,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Library" id="library">
+    <resource name="Library" active="true" id="library">
       <description>The Library resource is a general-purpose container for knowledge asset definitions. It can be used to describe and expose existing knowledge assets such as logic libraries and information model descriptions, as well as to describe a collection of knowledge assets.</description>
       <properties>
         <property id="library.id" name="id" type="id" summary="true">
@@ -41425,7 +41425,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Linkage" id="linkage">
+    <resource name="Linkage" active="true" id="linkage">
       <description>Identifies two or more records (resource instances) that refer to the same real-world &quot;occurrence&quot;.</description>
       <properties>
         <property id="linkage.id" name="id" type="id" summary="true">
@@ -41863,7 +41863,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="List" id="list">
+    <resource name="List" active="true" id="list">
       <description>A List is a curated collection of resources, for things such as problem lists, allergy lists, facility list, organization list, etc.</description>
       <properties>
         <property id="list.id" name="id" type="id" summary="true">
@@ -42451,7 +42451,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Location" id="location">
+    <resource name="Location" active="true" id="location">
       <description>Details and position information for a place where services are provided and resources and participants may be stored, found, contained, or accommodated.</description>
       <properties>
         <property id="location.id" name="id" type="id" summary="true">
@@ -42758,7 +42758,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ManufacturedItemDefinition" id="manufactureditemdefinition">
+    <resource name="ManufacturedItemDefinition" active="true" id="manufactureditemdefinition">
       <description>The definition and characteristics of a medicinal manufactured item, such as a tablet or capsule, as contained in a packaged medicinal product.</description>
       <properties>
         <property id="manufactureditemdefinition.id" name="id" type="id" summary="true">
@@ -42952,7 +42952,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Measure" id="measure">
+    <resource name="Measure" active="true" id="measure">
       <description>The Measure resource provides the definition of a quality measure.</description>
       <properties>
         <property id="measure.id" name="id" type="id" summary="true">
@@ -44620,7 +44620,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="MeasureReport" id="measurereport">
+    <resource name="MeasureReport" active="true" id="measurereport">
       <description>The MeasureReport resource contains the results of the calculation of a measure; and optionally a reference to the resources involved in that calculation.</description>
       <properties>
         <property id="measurereport.id" name="id" type="id" summary="true">
@@ -45267,7 +45267,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Medication" id="medication">
+    <resource name="Medication" active="true" id="medication">
       <description>This resource is primarily used for the identification and definition of a medication, including ingredients, for the purposes of prescribing, dispensing, and administering a medication as well as for making statements about medication use.</description>
       <properties>
         <property id="medication.id" name="id" type="id" summary="true">
@@ -45470,7 +45470,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicationAdministration" id="medicationadministration">
+    <resource name="MedicationAdministration" active="true" id="medicationadministration">
       <description>Describes the event of a patient consuming or otherwise being administered a medication.  This may be as simple as swallowing a tablet or it may be a long running infusion.  Related resources tie this event to the authorizing prescription, and the specific encounter between patient and health care practitioner.</description>
       <properties>
         <property id="medicationadministration.id" name="id" type="id" summary="true">
@@ -45859,7 +45859,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicationDispense" id="medicationdispense">
+    <resource name="MedicationDispense" active="true" id="medicationdispense">
       <description>Indicates that a medication product is to be or has been dispensed for a named person/patient.  This includes a description of the medication product (supply) provided and the instructions for administering the medication.  The medication dispense is the result of a pharmacy system responding to a medication order.</description>
       <properties>
         <property id="medicationdispense.id" name="id" type="id" summary="true">
@@ -46297,7 +46297,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicationKnowledge" id="medicationknowledge">
+    <resource name="MedicationKnowledge" active="true" id="medicationknowledge">
       <description>Information about a medication that is used to support knowledge.</description>
       <properties>
         <property id="medicationknowledge.id" name="id" type="id" summary="true">
@@ -46940,7 +46940,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicationRequest" id="medicationrequest">
+    <resource name="MedicationRequest" active="true" id="medicationrequest">
       <description>An order or request for both supply of the medication and the instructions for administration of the medication to a patient. The resource is called &quot;MedicationRequest&quot; rather than &quot;MedicationPrescription&quot; or &quot;MedicationOrder&quot; to generalize the use across inpatient and outpatient settings, including care plans, etc., and to harmonize with workflow patterns.</description>
       <properties>
         <property id="medicationrequest.id" name="id" type="id" summary="true">
@@ -47461,7 +47461,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicationStatement" id="medicationstatement">
+    <resource name="MedicationStatement" active="true" id="medicationstatement">
       <description>A record of a medication that is being consumed by a patient.   A MedicationStatement may indicate that the patient may be taking the medication now or has taken the medication in the past or will be taking the medication in the future.  The source of this information can be the patient, significant other (such as a family member or spouse), or a clinician.  A common scenario where this information is captured is during the history taking process during a patient visit or stay.   The medication information may come from sources such as the patients memory, from a prescription bottle,  or from a list of medications the patient, clinician or other party maintains. The primary difference between a medicationstatement and a medicationadministration is that the medication administration has complete administration information and is based on actual administration information from the person who administered the medication.  A medicationstatement is often, if not always, less specific.  There is no required date/time when the medication was administered, in fact we only know that a source has reported the patient is taking this medication, where details such as time, quantity, or rate or even medication product may be incomplete or missing or less precise.  As stated earlier, the Medication Statement information may come from the patients memory, from a prescription bottle or from a list of medications the patient, clinician or other party maintains.  Medication administration is more formal and is not missing detailed information.The MedicationStatement resource was previously called MedicationStatement.</description>
       <properties>
         <property id="medicationstatement.id" name="id" type="id" summary="true">
@@ -47742,7 +47742,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MedicinalProductDefinition" id="medicinalproductdefinition">
+    <resource name="MedicinalProductDefinition" active="true" id="medicinalproductdefinition">
       <description>A medicinal product, being a substance or combination of substances that is intended to treat, prevent or diagnose a disease, or to restore, correct or modify physiological functions by exerting a pharmacological, immunological or metabolic action. This resource is intended to define and detail such products and their properties, for uses other than direct patient care (e.g. regulatory use, or drug catalogs).</description>
       <properties>
         <property id="medicinalproductdefinition.id" name="id" type="id" summary="true">
@@ -48172,7 +48172,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="MessageDefinition" id="messagedefinition">
+    <resource name="MessageDefinition" active="true" id="messagedefinition">
       <description>Defines the characteristics of a message that can be shared between systems, including the type of event that initiates the message, the content to be transmitted and what response(s), if any, are permitted.</description>
       <properties>
         <property id="messagedefinition.id" name="id" type="id" summary="true">
@@ -48547,7 +48547,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="MessageHeader" id="messageheader">
+    <resource name="MessageHeader" active="true" id="messageheader">
       <description>The header for a message exchange that is either requesting or responding to an action.  The reference(s) that are the subject of the action as well as other information related to the action are typically transmitted in a bundle in which the MessageHeader resource instance is the first resource in the bundle.</description>
       <properties>
         <property id="messageheader.id" name="id" type="id" summary="true">
@@ -49066,7 +49066,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="MolecularSequence" id="molecularsequence">
+    <resource name="MolecularSequence" active="true" id="molecularsequence">
       <description>Representation of a molecular sequence.</description>
       <properties>
         <property id="molecularsequence.id" name="id" type="id" summary="true">
@@ -49491,7 +49491,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="NamingSystem" id="namingsystem">
+    <resource name="NamingSystem" active="true" id="namingsystem">
       <description>A curated namespace that issues unique symbols within that namespace for the identification of concepts, people, devices, etc.  Represents a &quot;System&quot; used within the Identifier and Coding data types.</description>
       <properties>
         <property id="namingsystem.id" name="id" type="id" summary="true">
@@ -50307,7 +50307,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="NutritionIntake" id="nutritionintake">
+    <resource name="NutritionIntake" active="true" id="nutritionintake">
       <description>A record of food or fluid that is being consumed by a patient.   A NutritionIntake may indicate that the patient may be consuming the food or fluid now or has consumed the food or fluid in the past.  The source of this information can be the patient, significant other (such as a family member or spouse), or a clinician.  A common scenario where this information is captured is during the history taking process during a patient visit or stay or through an app that tracks food or fluids consumed.   The consumption information may come from sources such as the patients memory, from a nutrition label,  or from a clinician documenting observed intake.</description>
       <properties>
         <property id="nutritionintake.id" name="id" type="id" summary="true">
@@ -50609,7 +50609,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="NutritionOrder" id="nutritionorder">
+    <resource name="NutritionOrder" active="true" id="nutritionorder">
       <description>A request to supply a diet, formula feeding (enteral) or oral nutritional supplement to a patient/resident.</description>
       <properties>
         <property id="nutritionorder.id" name="id" type="id" summary="true">
@@ -51091,7 +51091,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="NutritionProduct" id="nutritionproduct">
+    <resource name="NutritionProduct" active="true" id="nutritionproduct">
       <description>A food or supplement that is consumed by patients.</description>
       <properties>
         <property id="nutritionproduct.id" name="id" type="id" summary="true">
@@ -52524,7 +52524,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="ObservationDefinition" id="observationdefinition">
+    <resource name="ObservationDefinition" active="true" id="observationdefinition">
       <description>Set of definitional characteristics for a kind of observation or measurement produced or consumed by an orderable health care service.</description>
       <properties>
         <property id="observationdefinition.id" name="id" type="id" summary="true">
@@ -53545,7 +53545,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Organization" id="organization">
+    <resource name="Organization" active="true" id="organization">
       <description>A formally or informally recognized grouping of people or organizations formed for the purpose of achieving some form of collective action.  Includes companies, institutions, corporations, departments, community groups, healthcare practice groups, payer/insurer, etc.</description>
       <properties>
         <property id="organization.id" name="id" type="id" summary="true">
@@ -53787,7 +53787,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="OrganizationAffiliation" id="organizationaffiliation">
+    <resource name="OrganizationAffiliation" active="true" id="organizationaffiliation">
       <description>Defines an affiliation/association/relationship between 2 distinct organizations, that is not a part-of relationship/sub-division relationship.</description>
       <properties>
         <property id="organizationaffiliation.id" name="id" type="id" summary="true">
@@ -54023,7 +54023,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="PackagedProductDefinition" id="packagedproductdefinition">
+    <resource name="PackagedProductDefinition" active="true" id="packagedproductdefinition">
       <description>A medically related item or items, in a container or package.</description>
       <properties>
         <property id="packagedproductdefinition.id" name="id" type="id" summary="true">
@@ -54387,7 +54387,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Parameters" id="parameters">
+    <resource name="Parameters" active="true" id="parameters">
       <description>This resource is used to pass information into and back from an operation (whether invoked directly from REST or within a messaging environment).  It is not persisted or allowed to be referenced by other resources.</description>
       <properties>
         <property id="parameters.id" name="id" type="id" summary="true">
@@ -54981,7 +54981,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="PaymentNotice" id="paymentnotice">
+    <resource name="PaymentNotice" active="true" id="paymentnotice">
       <description>This resource provides the status of the payment for goods and services rendered, and the request and response resource references.</description>
       <properties>
         <property id="paymentnotice.id" name="id" type="id" summary="true">
@@ -55462,7 +55462,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="PaymentReconciliation" id="paymentreconciliation">
+    <resource name="PaymentReconciliation" active="true" id="paymentreconciliation">
       <description>This resource provides the details including amount of a payment and allocates the payment items being paid.</description>
       <properties>
         <property id="paymentreconciliation.id" name="id" type="id" summary="true">
@@ -55835,7 +55835,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Permission" id="permission">
+    <resource name="Permission" active="true" id="permission">
       <description>Permission resource holds access rules for a given data and context.</description>
       <properties>
         <property id="permission.id" name="id" type="id" summary="true">
@@ -56064,7 +56064,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Person" id="person">
+    <resource name="Person" active="true" id="person">
       <description>Demographics and administrative information about a person independent of a specific health-related context.</description>
       <properties>
         <property id="person.id" name="id" type="id" summary="true">
@@ -56429,7 +56429,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="PlanDefinition" id="plandefinition">
+    <resource name="PlanDefinition" active="true" id="plandefinition">
       <description>This resource allows for the definition of various types of plans as a sharable, consumable, and executable artifact. The resource is general enough to support the description of a broad range of clinical and non-clinical artifacts such as clinical decision support rules, order sets, protocols, and drug quality specifications.</description>
       <properties>
         <property id="plandefinition.id" name="id" type="id" summary="true">
@@ -58533,7 +58533,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="PractitionerRole" id="practitionerrole">
+    <resource name="PractitionerRole" active="true" id="practitionerrole">
       <description>A specific set of Roles/Locations/specialties/services that a practitioner may perform at an organization for a period of time.</description>
       <properties>
         <property id="practitionerrole.id" name="id" type="id" summary="true">
@@ -58778,7 +58778,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Procedure" id="procedure">
+    <resource name="Procedure" active="true" id="procedure">
       <description>An action that is or was performed on or for a patient, practitioner, device, organization, or location. For example, this can be a physical intervention on a patient like an operation, or less invasive like long term services, counseling, or hypnotherapy.  This can be a quality or safety inspection for a location, organization, or device.  This can be an accreditation procedure on a practitioner for licensing.</description>
       <properties>
         <property id="procedure.id" name="id" type="id" summary="true">
@@ -59890,7 +59890,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Questionnaire" id="questionnaire">
+    <resource name="Questionnaire" active="true" id="questionnaire">
       <description>A structured set of questions intended to guide the collection of answers from end-users. Questionnaires provide detailed control over order, presentation, phraseology and grouping to allow coherent, consistent data collection.</description>
       <properties>
         <property id="questionnaire.id" name="id" type="id" summary="true">
@@ -60475,7 +60475,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="QuestionnaireResponse" id="questionnaireresponse">
+    <resource name="QuestionnaireResponse" active="true" id="questionnaireresponse">
       <description>A structured set of questions and their answers. The questions are ordered and grouped into coherent subsets, corresponding to the structure of the grouping of the questionnaire being responded to.</description>
       <properties>
         <property id="questionnaireresponse.id" name="id" type="id" summary="true">
@@ -61119,7 +61119,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="RegulatedAuthorization" id="regulatedauthorization">
+    <resource name="RegulatedAuthorization" active="true" id="regulatedauthorization">
       <description>Regulatory approval, clearance or licencing related to a regulated product, treatment, facility or activity that is cited in a guidance, regulation, rule or legislative act. An example is Market Authorization relating to a Medicinal Product.</description>
       <properties>
         <property id="regulatedauthorization.id" name="id" type="id" summary="true">
@@ -61340,7 +61340,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="RelatedPerson" id="relatedperson">
+    <resource name="RelatedPerson" active="true" id="relatedperson">
       <description>Information about a person that is involved in a patients health or the care for a patient, but who is not the target of healthcare, nor has a formal responsibility in the care process.</description>
       <properties>
         <property id="relatedperson.id" name="id" type="id" summary="true">
@@ -61612,7 +61612,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="RequestOrchestration" id="requestorchestration">
+    <resource name="RequestOrchestration" active="true" id="requestorchestration">
       <description>A set of related requests that can be used to capture intended activities that have inter-dependencies such as &quot;give this medication after that one&quot;.</description>
       <properties>
         <property id="requestorchestration.id" name="id" type="id" summary="true">
@@ -62401,7 +62401,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Requirements" id="requirements">
+    <resource name="Requirements" active="true" id="requirements">
       <description>A set of requirements - a list of features or behaviors of designed systems that are necessary to achieve organizational or regulatory goals.</description>
       <properties>
         <property id="requirements.id" name="id" type="id" summary="true">
@@ -62736,7 +62736,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ResearchStudy" id="researchstudy">
+    <resource name="ResearchStudy" active="true" id="researchstudy">
       <description>A scientific study of nature that sometimes includes processes involved in health and disease. For example, clinical trials are research studies that involve people. These studies may be related to new ways to screen, prevent, diagnose, and treat disease. They may also study certain outcomes and certain groups of people by looking at data collected in the past or future.</description>
       <properties>
         <property id="researchstudy.id" name="id" type="id" summary="true">
@@ -63322,7 +63322,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ResearchSubject" id="researchsubject">
+    <resource name="ResearchSubject" active="true" id="researchsubject">
       <description>A ResearchSubject is a participant or object which is the recipient of investigative activities in a research study.</description>
       <properties>
         <property id="researchsubject.id" name="id" type="id" summary="true">
@@ -63507,7 +63507,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="RiskAssessment" id="riskassessment">
+    <resource name="RiskAssessment" active="true" id="riskassessment">
       <description>An assessment of the likely outcome(s) for a patient or other subject as well as the likelihood of each outcome.</description>
       <properties>
         <property id="riskassessment.id" name="id" type="id" summary="true">
@@ -63763,7 +63763,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Schedule" id="schedule">
+    <resource name="Schedule" active="true" id="schedule">
       <description>A container for slots of time that may be available for booking appointments.</description>
       <properties>
         <property id="schedule.id" name="id" type="id" summary="true">
@@ -64286,7 +64286,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ServiceRequest" id="servicerequest">
+    <resource name="ServiceRequest" active="true" id="servicerequest">
       <description>A record of a request for service such as diagnostic investigations, treatments, or operations to be performed.</description>
       <properties>
         <property id="servicerequest.id" name="id" type="id" summary="true">
@@ -64829,7 +64829,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Slot" id="slot">
+    <resource name="Slot" active="true" id="slot">
       <description>A slot of time on a schedule that may be available for booking appointments.</description>
       <properties>
         <property id="slot.id" name="id" type="id" summary="true">
@@ -65010,7 +65010,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Specimen" id="specimen">
+    <resource name="Specimen" active="true" id="specimen">
       <description>A sample to be used for analysis.</description>
       <properties>
         <property id="specimen.id" name="id" type="id" summary="true">
@@ -65416,7 +65416,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="SpecimenDefinition" id="specimendefinition">
+    <resource name="SpecimenDefinition" active="true" id="specimendefinition">
       <description>A kind of specimen with associated set of requirements.</description>
       <properties>
         <property id="specimendefinition.id" name="id" type="id" summary="true">
@@ -65803,7 +65803,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="StructureDefinition" id="structuredefinition">
+    <resource name="StructureDefinition" active="true" id="structuredefinition">
       <description>A definition of a FHIR structure. This resource is used to describe the underlying resources, data types defined in FHIR, and also for describing extensions and constraints on resources and data types.</description>
       <properties>
         <property id="structuredefinition.id" name="id" type="id" summary="true">
@@ -66367,7 +66367,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="StructureMap" id="structuremap">
+    <resource name="StructureMap" active="true" id="structuremap">
       <description>A Map of relationships between 2 structures that can be used to transform data.</description>
       <properties>
         <property id="structuremap.id" name="id" type="id" summary="true">
@@ -67000,7 +67000,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="Subscription" id="subscription">
+    <resource name="Subscription" active="true" id="subscription">
       <description>The subscription resource describes a particular clients request to be notified about a SubscriptionTopic.</description>
       <properties>
         <property id="subscription.id" name="id" type="id" summary="true">
@@ -67319,7 +67319,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="SubscriptionStatus" id="subscriptionstatus">
+    <resource name="SubscriptionStatus" active="true" id="subscriptionstatus">
       <description>The SubscriptionStatus resource describes the state of a Subscription during notifications.</description>
       <properties>
         <property id="subscriptionstatus.id" name="id" type="id" summary="true">
@@ -67428,7 +67428,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="SubscriptionTopic" id="subscriptiontopic">
+    <resource name="SubscriptionTopic" active="true" id="subscriptiontopic">
       <description>Describes a stream of resource state changes or events and annotated with labels useful to filter projections from this topic.</description>
       <properties>
         <property id="subscriptiontopic.id" name="id" type="id" summary="true">
@@ -67811,7 +67811,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Substance" id="substance">
+    <resource name="Substance" active="true" id="substance">
       <description>A homogeneous material with a definite composition.</description>
       <properties>
         <property id="substance.id" name="id" type="id" summary="true">
@@ -67981,7 +67981,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="SubstanceDefinition" id="substancedefinition">
+    <resource name="SubstanceDefinition" active="true" id="substancedefinition">
       <description>The detailed description of a substance, typically at a level beyond what is used for prescribing.</description>
       <properties>
         <property id="substancedefinition.id" name="id" type="id" summary="true">
@@ -68488,7 +68488,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="SupplyDelivery" id="supplydelivery">
+    <resource name="SupplyDelivery" active="true" id="supplydelivery">
       <description>Record of delivery of what is supplied.</description>
       <properties>
         <property id="supplydelivery.id" name="id" type="id" summary="true">
@@ -68690,7 +68690,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="SupplyRequest" id="supplyrequest">
+    <resource name="SupplyRequest" active="true" id="supplyrequest">
       <description>A record of a request to deliver a medication, substance or device used in the healthcare setting to a particular destination for a particular person or organization.</description>
       <properties>
         <property id="supplyrequest.id" name="id" type="id" summary="true">
@@ -68951,7 +68951,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Task" id="task">
+    <resource name="Task" active="true" id="task">
       <description>A task to be performed.</description>
       <properties>
         <property id="task.id" name="id" type="id" summary="true">
@@ -70284,7 +70284,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="TerminologyCapabilities" id="terminologycapabilities">
+    <resource name="TerminologyCapabilities" active="true" id="terminologycapabilities">
       <description>A TerminologyCapabilities resource documents a set of capabilities (behaviors) of a FHIR Terminology Server that may be used as a statement of actual server functionality or a statement of required or desired server implementation.</description>
       <properties>
         <property id="terminologycapabilities.id" name="id" type="id" summary="true">
@@ -70740,7 +70740,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="TestPlan" id="testplan">
+    <resource name="TestPlan" active="true" id="testplan">
       <description>A plan for executing testing on an artifact or specifications.</description>
       <properties>
         <property id="testplan.id" name="id" type="id" summary="true">
@@ -71185,7 +71185,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="TestReport" id="testreport">
+    <resource name="TestReport" active="true" id="testreport">
       <description>A summary of information based on the results of executing a TestScript.</description>
       <properties>
         <property id="testreport.id" name="id" type="id" summary="true">
@@ -71565,7 +71565,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="TestScript" id="testscript">
+    <resource name="TestScript" active="true" id="testscript">
       <description>A structured set of tests against a FHIR server or client implementation to determine compliance against the FHIR specification.</description>
       <properties>
         <property id="testscript.id" name="id" type="id" summary="true">
@@ -72725,7 +72725,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="Transport" id="transport">
+    <resource name="Transport" active="true" id="transport">
       <description>Record of transport of item.</description>
       <properties>
         <property id="transport.id" name="id" type="id" summary="true">
@@ -73154,7 +73154,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="ValueSet" id="valueset">
+    <resource name="ValueSet" active="true" id="valueset">
       <description>A ValueSet resource instance specifies a set of codes drawn from one or more code systems, intended for use in a particular context. Value sets link between [CodeSystem](codesystem.html) definitions and their use in [coded elements](terminologies.html).</description>
       <properties>
         <property id="valueset.id" name="id" type="id" summary="true">
@@ -74272,7 +74272,7 @@
         </operation>
       </operations>
     </resource>
-    <resource name="VerificationResult" id="verificationresult">
+    <resource name="VerificationResult" active="true" id="verificationresult">
       <description>Describes validation requirements, source(s), status and dates for one or more elements.</description>
       <properties>
         <property id="verificationresult.id" name="id" type="id" summary="true">
@@ -74757,7 +74757,7 @@
       </searches>
       <operations/>
     </resource>
-    <resource name="VisionPrescription" id="visionprescription">
+    <resource name="VisionPrescription" active="true" id="visionprescription">
       <description>An authorization for the provision of glasses and/or contact lenses to a patient.</description>
       <properties>
         <property id="visionprescription.id" name="id" type="id" summary="true">
