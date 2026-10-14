@@ -14,8 +14,11 @@ for request, and the comparison is what this repository is for.
 
 Both servers built for release, each on a PostgreSQL 18 of its own with
 2000 Patients and 2000 Observations, 64 connections, ten seconds a scenario
-(`tools/throughput.sh postgresql`; an M-series Mac with ten cores, the
-database in Docker, the load generator on the same machine). "cores" is the
+(`tools/throughput.sh postgresql`, 15 seconds a scenario, 64 connections;
+an M-series Mac with ten cores, the database in Docker, the load generator
+on the same machine). Each figure is the median of three runs, the two
+configurations taken in turn on an otherwise idle machine; the three runs
+of a figure lie within some ten per cent of each other. "cores" is the
 processor time the server process took per second of the run.
 
 The C# server as the generator writes it leaves its database driver at the
@@ -26,37 +29,37 @@ The Scaly server prepares its statements. So there are two comparisons.
 
 | scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 45 526 | 1.00 | 36 610 | 4.80 | 1.2x | 6.0x |
-| read a Patient | 20 054 | 1.42 | 15 413 | 2.30 | 1.3x | 2.1x |
-| search by name | 5 216 | 0.60 | 4 040 | 1.07 | 1.3x | 2.3x |
-| search by reference | 11 863 | 1.31 | 7 640 | 1.71 | 1.6x | 2.0x |
-| update | 984 | 1.26 | 892 | 1.98 | 1.1x | 1.7x |
-| create | 2 002 | 1.18 | 1 693 | 1.66 | 1.2x | 1.7x |
+| metadata (no database) | 43 707 | 0.96 | 36 771 | 4.77 | 1.2x | 5.9x |
+| read a Patient | 18 461 | 1.37 | 16 150 | 2.30 | 1.1x | 1.9x |
+| search by name | 5 215 | 0.62 | 3 996 | 1.11 | 1.3x | 2.3x |
+| search by reference | 11 838 | 1.35 | 8 257 | 1.86 | 1.4x | 2.0x |
+| update | 958 | 1.20 | 905 | 1.99 | 1.1x | 1.8x |
+| create | 1 986 | 1.17 | 1 925 | 1.89 | 1.0x | 1.7x |
 
 **The C# server with its driver preparing too**
 (`FIRE_CSHARP_OPTIONS="No Reset On Close=true;Max Auto Prepare=50"`):
 
 | scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 41 533 | 0.98 | 33 418 | 4.60 | 1.2x | 5.8x |
-| read a Patient | 16 793 | 1.35 | 14 656 | 3.32 | 1.1x | 2.8x |
-| search by name | 3 906 | 0.74 | 3 967 | 1.11 | 1.0x | 1.5x |
-| search by reference | 10 045 | 1.29 | 9 716 | 2.64 | 1.0x | 2.1x |
-| update | 839 | 1.25 | 864 | 2.24 | 1.0x | 1.7x |
-| create | 1 782 | 1.21 | 1 903 | 2.12 | 0.9x | 1.6x |
+| metadata (no database) | 42 534 | 0.97 | 36 311 | 4.31 | 1.2x | 5.2x |
+| read a Patient | 18 194 | 1.37 | 17 853 | 2.93 | 1.0x | 2.2x |
+| search by name | 5 098 | 0.64 | 4 773 | 1.26 | 1.1x | 2.1x |
+| search by reference | 11 677 | 1.36 | 11 192 | 2.56 | 1.0x | 2.0x |
+| update | 955 | 1.23 | 992 | 2.23 | 1.0x | 1.8x |
+| create | 1 943 | 1.17 | 2 122 | 2.13 | 0.9x | 1.7x |
 
-Memory after a run: 27 MB for the Scaly server, 268 to 277 MB for the C#
-server.
+Memory after a run: 26 to 29 MB for the Scaly server, 229 to 266 MB for the
+C# server.
 
-How to read it: each table is one run on one machine, and runs differ by
-ten to thirty per cent — the second was a slower moment for both servers,
-so compare within a table, not across. The load generator shares the
-machine and is the limit of the first scenario; the database is the limit
-of every scenario that queries, and once both servers prepare their
-statements they send it the same work and answer about as many requests a
-second. What differs then is what the server itself costs: the Scaly
-server answers them with half the processor time or less, and a tenth of
-the memory.
+How to read it: the load generator shares the machine and is the limit of
+the first scenario; the database is the limit of every scenario that
+queries, and once both servers prepare their statements they send it the
+same work and answer about as many requests a second — the C# server
+writes a few per cent more, the Scaly server reads a few per cent more.
+What differs then is what the server itself costs: the Scaly server answers
+them with half the processor time or less, and a tenth of the memory. A
+single run says little about the writes: one run had the Scaly server at
+two thirds of the writes it did minutes later, unchanged.
 
 ## How it is made
 
