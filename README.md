@@ -16,50 +16,37 @@ Both servers built for release, each on a PostgreSQL 18 of its own with
 2000 Patients and 2000 Observations (`tools/throughput.sh postgresql`,
 15 seconds a scenario, 64 connections;
 an M-series Mac with ten cores, the database in Docker, the load generator
-on the same machine). Each figure is the median of three runs, the two
-configurations taken in turn on an otherwise idle machine; the three runs
-of a figure lie within some ten per cent of each other. "cores" is the
+on the same machine). Each figure is the median of three runs on an
+otherwise idle machine; the three runs of a figure lie within some ten per
+cent of each other, but for one run's writes of the C# server. "cores" is the
 processor time the server process took per second of the run.
 
-The C# server as the generator writes it leaves its database driver at the
-defaults: Npgsql prepares no statement and resets a connection at every use.
-The Scaly server prepares its statements. So there are two comparisons.
-
-**The C# server as generated:**
-
-| scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
-|---|---|---|---|---|---|---|
-| metadata (no database) | 43 707 | 0.96 | 36 771 | 4.77 | 1.2x | 5.9x |
-| read a Patient | 18 461 | 1.37 | 16 150 | 2.30 | 1.1x | 1.9x |
-| search by name | 5 215 | 0.62 | 3 996 | 1.11 | 1.3x | 2.3x |
-| search by reference | 11 838 | 1.35 | 8 257 | 1.86 | 1.4x | 2.0x |
-| update | 958 | 1.20 | 905 | 1.99 | 1.1x | 1.8x |
-| create | 1 986 | 1.17 | 1 925 | 1.89 | 1.0x | 1.7x |
-
-**The C# server with its driver preparing too**
-(`FIRE_CSHARP_OPTIONS="No Reset On Close=true;Max Auto Prepare=50"`):
+Both servers prepare the statements they send again and again: the Scaly
+server by name, the C# server through its driver (the generator sets
+`Max Auto Prepare` and `No Reset On Close` where the connection string says
+nothing else — before, Npgsql had PostgreSQL parse and plan every query
+anew, and the C# server answered the searches 20 to 35 per cent slower).
 
 | scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 42 534 | 0.97 | 36 311 | 4.31 | 1.2x | 5.2x |
-| read a Patient | 18 194 | 1.37 | 17 853 | 2.93 | 1.0x | 2.2x |
-| search by name | 5 098 | 0.64 | 4 773 | 1.26 | 1.1x | 2.1x |
-| search by reference | 11 677 | 1.36 | 11 192 | 2.56 | 1.0x | 2.0x |
-| update | 955 | 1.23 | 992 | 2.23 | 1.0x | 1.8x |
-| create | 1 943 | 1.17 | 2 122 | 2.13 | 0.9x | 1.7x |
+| metadata (no database) | 44 408 | 0.96 | 37 350 | 4.80 | 1.2x | 5.9x |
+| read a Patient | 18 866 | 1.35 | 18 184 | 2.82 | 1.0x | 2.2x |
+| search by name | 4 856 | 0.86 | 4 952 | 1.27 | 1.0x | 1.4x |
+| search by reference | 11 793 | 1.28 | 11 226 | 2.52 | 1.1x | 2.1x |
+| update | 930 | 1.13 | 974 | 2.16 | 1.0x | 1.8x |
+| create | 1 931 | 1.13 | 2 059 | 2.00 | 0.9x | 1.7x |
 
-Memory after a run: 26 to 29 MB for the Scaly server, 229 to 266 MB for the
+Memory after a run: 24 to 28 MB for the Scaly server, 219 to 226 MB for the
 C# server.
 
 How to read it: the load generator shares the machine and is the limit of
 the first scenario; the database is the limit of every scenario that
-queries, and once both servers prepare their statements they send it the
-same work and answer about as many requests a second — the C# server
-writes a few per cent more, the Scaly server reads a few per cent more.
-What differs then is what the server itself costs: the Scaly server answers
-them with half the processor time or less, and a tenth of the memory. A
-single run says little about the writes: one run had the Scaly server at
-two thirds of the writes it did minutes later, unchanged.
+queries, and as both servers send it the same work they answer about as
+many requests a second — the C# server writes a few per cent more. What
+differs is what the server itself costs: the Scaly server answers them
+with half the processor time or less, and a tenth of the memory. A single
+run says little about the writes: one run had the Scaly server at two
+thirds of the writes it did minutes later, unchanged.
 
 ## How it is made
 
