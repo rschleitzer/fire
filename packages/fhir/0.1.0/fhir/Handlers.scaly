@@ -951,9 +951,12 @@ procedure search(req: ref[Request], mutable res: ref[Response], text: Slice[u8],
     ; the chains, forward and reverse, become plain parameters
     var chained_text Array[u8]()
     var chained_cells Array[i64]()
-    let chains resolve_chains(type, text, cells, &chained_text, &chained_cells)
+    var chain_problem Array[u8]()
+    let chains resolve_chains(type, text, cells, &chained_text, &chained_cells, &chain_problem)
     if chains = FAILED
         return send_unavailable(req, res)
+    if chains = REFUSED
+        return send_error(req, res, "invalid", chain_problem.as_slice(), 400)
     if chains <> STORED
         return send_error(req, res, "exception", "An unexpected internal error occurred.", 500)
     var plain_text Array[u8]()

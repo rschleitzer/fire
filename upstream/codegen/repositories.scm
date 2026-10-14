@@ -1105,6 +1105,11 @@ public sealed record SearchParameter(string Name, char Kind, string Target)
 {
     public bool IsTable => char.IsLower(Kind);
 }
+
+// A search names a parameter the resource does not have. A chain without a type passes
+// over the target types that refuse it so (SearchHelper.ResolveForwardChainsAsync).
+public sealed class UnknownSearchParameterException(string key)
+    : ArgumentException($\"Unknown search parameter: {key}\");
 ")
 
 ; The kind of a parameter in a resource's list (see SearchParameter).
@@ -2243,7 +2248,7 @@ public class "rn"Repository : "(repo-base-of rn)", I"rn"Repository
 "       (if (r-generic? rn)
 "                        if (AddSearch(key, modifier, orValues, joins, whereClauses, parameters, ref paramIndex, ref aliasIndex)) break;
 " "")
-"                        throw new ArgumentException($\"Unknown search parameter: {key}\");
+"                        throw new UnknownSearchParameterException(key);
                 }
             }
         }

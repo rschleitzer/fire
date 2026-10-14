@@ -157,14 +157,29 @@ procedure collect_references(value: JsonValue, path: Slice[u8], at: size_t, muta
 ; when the database does not answer, BROKEN for a search upstream fails on.
 procedure search_all(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
+    var problem Array[u8]()
+    let status search_all_saying(type, text, cells, found, rows, &problem)
+    if status = REFUSED
+        return BROKEN
+    status
+}
+
+; search_all, and REFUSED with `problem` saying why for a search the type
+; refuses (upstream's ArgumentException).
+procedure search_all_saying(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable found: ref[Array[u8]], mutable rows: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread, tds_pool
+{
     if known_type(type) = false
         return STORED
-    var problem Array[u8]()
-    let result resource_search(0, type, text, cells, 10000, 0, found, rows, &problem)
-    if result.status = STORED or result.status = FAILED
+    let result resource_search(0, type, text, cells, 10000, 0, found, rows, problem)
+    if result.status = STORED or result.status = FAILED or result.status = REFUSED
         return result.status
     BROKEN
 }
+
+; Does `problem` say that the type has no such parameter (the search
+; builder's words; upstream's UnknownSearchParameterException)?
+function unknown_parameter(problem: Slice[u8]) returns bool
+    problem.length >= 26 and problem.slice_to(26).equals("Unknown search parameter: ")
 
 ; Is key a chained parameter?
 function chained(key: Slice[u8]) returns bool
@@ -194,8 +209,10 @@ function chain_base(key: Slice[u8]) returns Slice[u8]
 ; The pairs with every chained parameter resolved: in its place the
 ; references that match (as the value of the reference parameter), or an
 ; _id nothing has when none does. The answer is STORED, or what
-; search_all answered.
-procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]]) returns int mutable pg_pool, sqlite_thread, tds_pool
+; search_all_saying answered (REFUSED with `problem`). A chain without a
+; type passes over the target types that have no such parameter; when none
+; has it, the chain is refused.
+procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mutable out_text: ref[Array[u8]], mutable out_cells: ref[Array[i64]], mutable problem: ref[Array[u8]]) returns int mutable pg_pool, sqlite_thread, tds_pool
 {
     var i: size_t 0
     while i < pair_count(cells)
@@ -250,6 +267,8 @@ procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mu
                 skip := 2
             }
             var references Array[u8]()
+            var unknown Array[u8]()
+            var searched false
             var t skip
             while entry(targets, 32, t).length > 0
             {
@@ -261,14 +280,25 @@ procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mu
                 cell(&one_text, &one_cells, value)
                 var resolved_text Array[u8]()
                 var resolved_cells Array[i64]()
-                let resolved resolve_chains(target, one_text.as_slice(), one_cells.as_slice(), &resolved_text, &resolved_cells)
-                if resolved <> STORED
-                    return resolved
+                var target_problem Array[u8]()
                 var found Array[u8]()
                 var rows Array[i64]()
-                let status search_all(target, resolved_text.as_slice(), resolved_cells.as_slice(), &found, &rows)
+                var status resolve_chains(target, one_text.as_slice(), one_cells.as_slice(), &resolved_text, &resolved_cells, &target_problem)
+                if status = STORED
+                    status := search_all_saying(target, resolved_text.as_slice(), resolved_cells.as_slice(), &found, &rows, &target_problem)
+                if status = REFUSED and skip > 0 and unknown_parameter(target_problem.as_slice())
+                {
+                    ; a target type without the parameter has nothing that could match
+                    if unknown.length = 0
+                        put_bytes(&unknown, target_problem.as_slice())
+                    continue
+                }
                 if status <> STORED
+                {
+                    put_bytes(problem, target_problem.as_slice())
                     return status
+                }
+                searched := true
                 var r: size_t 0
                 while r * 4 < rows.length
                 {
@@ -278,6 +308,11 @@ procedure resolve_chains(type: Slice[u8], text: Slice[u8], cells: Slice[i64], mu
                     references.add(10 as u8)
                     r := r + 1
                 }
+            }
+            if searched = false and unknown.length > 0
+            {
+                put_bytes(problem, unknown.as_slice())
+                return REFUSED
             }
             if first
                 matched.add(references.as_slice())

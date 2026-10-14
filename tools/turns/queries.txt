@@ -92,6 +92,11 @@ GET Patient?general-practitioner:Organization.name=x
 GET Patient?general-practitioner.family=nobody
 GET Patient?general-practitioner.family=chainsmith&general-practitioner.given=bo
 GET Patient?general-practitioner.nonsense=x
+GET Patient?general-practitioner:Practitioner.nonsense=x
+GET Patient?general-practitioner.name=chainsmith
+GET Patient?general-practitioner.birthdate=bogus
+GET Observation?subject.family=chainbrown
+GET Observation?performer.name=chainsmith
 GET Patient?_has:Observation:patient:code=8867-4
 GET Patient?_has:Observation:subject:code=85354-9
 GET Patient?_has:Observation:subject:code=nope

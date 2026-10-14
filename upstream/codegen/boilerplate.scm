@@ -1896,6 +1896,8 @@ public static class SearchHelper
                     : GetActiveTargetTypes(resourceType, refParamName);
 
                 var chainRefValues = new HashSet<""string>();
+                UnknownSearchParameterException? unknown = null;
+                var searched = false;
 
                 foreach (var targetType in targetTypes)
                 {
@@ -1905,17 +1907,28 @@ public static class SearchHelper
                     };
 
                     var targetQC = new QueryCollection(targetQuery);
-                    if (remainingChain.Contains('.'))
+                    try
                     {
-                        var resolved = await ResolveForwardChainsAsync(sp, targetType, targetQC);
-                        targetQC = resolved as QueryCollection ?? new QueryCollection(
-                            resolved.ToDictionary(k => k.Key, k => k.Value));
-                    }
+                        if (remainingChain.Contains('.'))
+                        {
+                            var resolved = await ResolveForwardChainsAsync(sp, targetType, targetQC);
+                            targetQC = resolved as QueryCollection ?? new QueryCollection(
+                                resolved.ToDictionary(k => k.Key, k => k.Value));
+                        }
 
-                    var (contents, ids, total) = await SearchAsync(sp, targetType, targetQC, 10000, 0);
-                    foreach (var id in ids)
-                        chainRefValues.Add($\"{targetType}/{id}\");
+                        var (contents, ids, total) = await SearchAsync(sp, targetType, targetQC, 10000, 0);
+                        searched = true;
+                        foreach (var id in ids)
+                            chainRefValues.Add($\"{targetType}/{id}\");
+                    }
+                    catch (UnknownSearchParameterException e) when (explicitTargetType == null)
+                    {
+                        // A target type without the parameter has nothing that could match.
+                        unknown ??= e;
+                    }
                 }
+                if (!searched && unknown != null)
+                    throw unknown;
 
                 if (matchedRefValues == null)
                     matchedRefValues = chainRefValues;
