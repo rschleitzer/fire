@@ -100,7 +100,7 @@ rows() {
   fi
   if [ "$DATABASE" = sqlite ]; then
     for t in $(sqlite3 "$WORK/$1.db" "select name from sqlite_master where type = 'table' order by 1"); do
-      sqlite3 "$WORK/$1.db" "select '$t', $(sqlite3 "$WORK/$1.db" "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$t') where name not in ('last_updated', 'history_timestamp', 'content')") $(sqlite3 "$WORK/$1.db" "select ', content' from pragma_table_info('$t') where name = 'content'") from $t"
+      sqlite3 "$WORK/$1.db" "select '$t', $(sqlite3 "$WORK/$1.db" "select group_concat('quote(' || name || ')', ' || ''|'' || ') from pragma_table_info('$t') where name not in ('last_updated', 'history_timestamp', 'content')") $(sqlite3 "$WORK/$1.db" "select ', content' from pragma_table_info('$t') where name = 'content'") from \"$t\""
     done > "$WORK/$1.rows.raw" || return 1
     neutral "$WORK/$1.rows.raw" | sort > "$WORK/$1.rows"
     return
@@ -113,7 +113,8 @@ rows() {
       || coalesce(' ' || case when to_jsonb(x) ? 'content' then convert_from(decode(substr(to_jsonb(x)->>'content', 3), 'hex'), 'UTF8') end, '')
       || coalesce(' ' || (to_jsonb(x)->>'data'), '') from $t x"
   done
-  docker exec "$PG_NAME" psql -U postgres -d "$1" -Atc "$sql" > "$WORK/$1.rows.raw" || return 1
+  # on stdin: a statement over every table of a large model is beyond an argument list
+  printf '%s;\n' "$sql" | docker exec -i "$PG_NAME" psql -U postgres -d "$1" -At -v ON_ERROR_STOP=1 > "$WORK/$1.rows.raw" || return 1
   neutral "$WORK/$1.rows.raw" | sort > "$WORK/$1.rows"
 }
 
