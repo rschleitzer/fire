@@ -22,6 +22,7 @@
 #   FIRE_CSHARP_OPTIONS   more of the C# server's connection string (the
 #       generated server prepares its statements unless it says otherwise:
 #       "Max Auto Prepare=0;No Reset On Close=false" measures it without).
+#   FIRE_SCENARIOS (a list of the above: all)
 #   FIRE_LOAD (thousands of resources of each type, 1 to 9: 2)
 #   FIRE_SECONDS (10 a scenario)   FIRE_CONNECTIONS (64)
 set -u
@@ -36,7 +37,7 @@ PG_NAME=fire-throughput-pg PG_PORT=55438 PG_PASSWORD=throwaway PORT=5585
 # (the address by number: the Scaly server listens on 127.0.0.1, and a load
 # generator that tries ::1 for `localhost` counts refused connections)
 BASE="http://127.0.0.1:$PORT"
-SCENARIOS="metadata read search reference update create"
+SCENARIOS=${FIRE_SCENARIOS:-"metadata read search reference update create"}
 die() { echo "throughput: $*" >&2; exit 1; }
 command -v oha > /dev/null || die "oha is not on the PATH (brew install oha)"
 SERVER_PID=""

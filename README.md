@@ -18,7 +18,10 @@ Both servers built for release, each on a PostgreSQL 18 of its own with
 an M-series Mac with ten cores, the database in Docker, the load generator
 on the same machine). Each figure is the median of three runs on an
 otherwise idle machine; the three runs of a figure lie within some ten per
-cent of each other, but for one run's writes of the C# server. "cores" is the
+cent of each other, but for one run's writes of the C# server. The search
+by name is the median of five runs of that scenario alone: within the
+three full runs the Scaly server took 0.82 to 0.90 of a core for it, alone
+0.58 to 0.71, with the same requests a second. "cores" is the
 processor time the server process took per second of the run.
 
 Both servers prepare the statements they send again and again: the Scaly
@@ -31,7 +34,7 @@ anew, and the C# server answered the searches 20 to 35 per cent slower).
 |---|---|---|---|---|---|---|
 | metadata (no database) | 44 408 | 0.96 | 37 350 | 4.80 | 1.2x | 5.9x |
 | read a Patient | 18 866 | 1.35 | 18 184 | 2.82 | 1.0x | 2.2x |
-| search by name | 4 856 | 0.86 | 4 952 | 1.27 | 1.0x | 1.4x |
+| search by name | 4 992 | 0.59 | 4 755 | 1.27 | 1.0x | 2.3x |
 | search by reference | 11 793 | 1.28 | 11 226 | 2.52 | 1.1x | 2.1x |
 | update | 930 | 1.13 | 974 | 2.16 | 1.0x | 1.8x |
 | create | 1 931 | 1.13 | 2 059 | 2.00 | 0.9x | 1.7x |
