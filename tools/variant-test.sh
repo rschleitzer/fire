@@ -92,9 +92,23 @@ neutral() { [ -f "$1" ] || return 0; sed -E 's/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 rows() {
   local tables sql= t
   if [ "$DATABASE" = sqlserver ]; then
-    for t in $(mssql "$1" "select quotename(s.name) + '.' + quotename(t.name) from sys.tables t join sys.schemas s on s.schema_id = t.schema_id order by 1"); do
-      mssql "$1" "select '$t|' + $(mssql "$1" "select string_agg(cast('isnull(cast(' + quotename(name) + ' as nvarchar(max)), ''NULL'')' as nvarchar(max)), ' + ''|'' + ') within group (order by column_id) from sys.columns where object_id = object_id('$t') and name not in ('last_updated', 'history_timestamp', 'content')")$(mssql "$1" "select ' + ''|'' + cast(content as varchar(max))' from sys.columns where object_id = object_id('$t') and name = 'content'") from $t"
-    done > "$WORK/$1.rows.raw" || return 1
+    # one statement, made and run by the server: a sqlcmd a table took the
+    # better part of an hour for a model of every resource
+    mssql "$1" "$(cat <<'SQL'
+declare @sql nvarchar(max);
+select @sql = string_agg(cast(q.part as nvarchar(max)), N' union all ') from (
+  select N'select N''' + quotename(s.name) + N'.' + quotename(t.name) + N'|'' + '
+    + isnull((select string_agg(cast(N'isnull(cast(' + quotename(c.name) + N' as nvarchar(max)), N''NULL'')' as nvarchar(max)), N' + N''|'' + ')
+                within group (order by c.column_id)
+              from sys.columns c where c.object_id = t.object_id and c.name not in ('last_updated', 'history_timestamp', 'content')), N'N''''')
+    + case when exists (select 1 from sys.columns c where c.object_id = t.object_id and c.name = 'content')
+        then N' + N''|'' + cast(content as varchar(max))' else N'' end
+    + N' from ' + quotename(s.name) + N'.' + quotename(t.name) as part
+  from sys.tables t join sys.schemas s on s.schema_id = t.schema_id) q;
+exec sp_executesql @sql;
+SQL
+)" > "$WORK/$1.rows.raw" || return 1
+    ! grep -q '^Msg [0-9]' "$WORK/$1.rows.raw" || { grep -A2 '^Msg [0-9]' "$WORK/$1.rows.raw" | head -6 >&2; return 1; }
     neutral "$WORK/$1.rows.raw" | sort > "$WORK/$1.rows"
     return
   fi
