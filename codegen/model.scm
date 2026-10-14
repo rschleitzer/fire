@@ -17,8 +17,25 @@
 ; the .NET runtime names it, which is how a refusal to read a value names
 ; it).
 
-(define (scaly-literal s)
-    (string-replace (string-replace (string-replace s "\\" "\\\\") "\"" "\\\"") "`" "\\`"))
+; s with a backslash before each of the characters in `chars`, in one pass:
+; utilities.scm's string-replace builds the whole string anew at every match,
+; which for the CapabilityStatement made gigabytes of strings that a dazzle
+; without a collector keeps to the end of the run.
+(define (scaly-escaped s chars)
+    (let loop ((i 0) (start 0) (pieces '()))
+        (cond ((= i (string-length s))
+                (apply $ (reverse (cons (substring s start i) pieces))))
+              ((scaly-char-in? (string-ref s i) chars)
+                (loop (+ i 1) (+ i 1)
+                      (cons (string #\\ (string-ref s i)) (cons (substring s start i) pieces))))
+              (else (loop (+ i 1) start pieces)))))
+
+(define (scaly-char-in? c chars)
+    (and (not (null? chars)) (or (char=? c (car chars)) (scaly-char-in? c (cdr chars)))))
+
+(define (scaly-literal s) (scaly-escaped s '(#\\ #\" #\`)))
+
+(define (scaly-quotes-escaped s) (scaly-escaped s '(#\")))
 
 (define (scaly-resource? el) (string=? "resource" (gi el)))
 
@@ -180,7 +197,7 @@ procedure model_write(mutable out: ref[Array[u8]])
     record(out, \"@@=:unversioned\\n" (scaly-joined-with " " unversioned-names) "\\n\")
     record(out, \"@@=:route\\n/" (downcase-string (fhir-name)) "\\n\")
     record(out, \"@@=:version\\n" (let ((v (% "version" root))) (if v v "0.0.0")) "\\n\")
-    record(out, \"@@=:capability\\n" (string-replace (scaly-capability root) "\"" "\\\"") "\\n\")
+    record(out, \"@@=:capability\\n" (scaly-quotes-escaped (scaly-capability root)) "\\n\")
 "
             (for (node-list-filter
                     (lambda (r) (and (model? r) (not (string=? "Resource" (name-of r)))))
@@ -313,12 +330,10 @@ procedure model_write(mutable out: ref[Array[u8]])
                            (loop (cdr ss))))))))
         (if (null? entries) ""
             ($ "    record(out, \"@@P:" rn "\\n"
-               (string-replace
+               (scaly-quotes-escaped
                    ($ "{\"resourceType\":\"Bundle\",\"type\":\"searchset\",\"total\":" (number->string (length entries)) ",\"entry\":["
-                      (let loop ((es entries) (first #t))
-                          (if (null? es) "" ($ (if first "" ",") (car es) (loop (cdr es) #f))))
-                      "]}")
-                   "\"" "\\\"")
+                      (scaly-joined-with "," entries)
+                      "]}"))
                "\\n\")
 "))))
 
