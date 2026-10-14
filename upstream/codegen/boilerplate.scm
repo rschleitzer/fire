@@ -734,7 +734,7 @@ switch (dbType)
 "
     (case db
         ((PostgreSql)
-            ($"        var dataSource = Npgsql.NpgsqlDataSource.Create(connectionString);
+            ($"        var dataSource = " (project-name) ".Repositories.Db.PostgreSqlDataSource(connectionString);
         databaseProvider = new " (project-name) ".Repositories." (db-namespace db) ".DatabaseProvider(dataSource, connectionString);
 "
             (repo-db-use db "dataSource")

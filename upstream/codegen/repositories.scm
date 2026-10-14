@@ -3182,6 +3182,23 @@ public static class Db
     private static readonly string[] Numbered = Enumerable.Range(0, 257).Select(i => \"$\" + i).ToArray();
 
     public static void UsePostgreSql(Npgsql.NpgsqlDataSource dataSource) { Kind = DbKind.PostgreSql; _dataSource = dataSource; }
+
+    // The data source of a server on PostgreSQL. Where the connection string says nothing else,
+    // a statement a connection sends again and again is prepared once (Max Auto Prepare) and a
+    // connection handed back to the pool keeps what it prepared (No Reset On Close: the reset
+    // would throw it away). Npgsql's defaults are neither -- every query parsed and planned
+    // anew. Nothing here keeps state of a session (SET, temporary tables, locks) that a reset
+    // would have to clear.
+    public static Npgsql.NpgsqlDataSource PostgreSqlDataSource(string connectionString)
+    {
+        var given = new DbConnectionStringBuilder { ConnectionString = connectionString };
+        var builder = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+        if (!given.ContainsKey(\"Max Auto Prepare\") && !given.ContainsKey(\"MaxAutoPrepare\"))
+            builder.MaxAutoPrepare = 50;
+        if (!given.ContainsKey(\"No Reset On Close\") && !given.ContainsKey(\"NoResetOnClose\"))
+            builder.NoResetOnClose = true;
+        return Npgsql.NpgsqlDataSource.Create(builder.ConnectionString);
+    }
     public static void UseSqlServer(string connectionString) { Kind = DbKind.SqlServer; _connectionString = connectionString; }
     public static void UseSqlite(string connectionString) { Kind = DbKind.Sqlite; _connectionString = connectionString; }
 
