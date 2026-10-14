@@ -14,15 +14,10 @@ for request, and the comparison is what this repository is for.
 
 Both servers built for release, each on a PostgreSQL 18 of its own with
 2000 Patients and 2000 Observations (`tools/throughput.sh postgresql`,
-15 seconds a scenario, 64 connections;
-an M-series Mac with ten cores, the database in Docker, the load generator
-on the same machine). Each figure is the median of three runs on an
-otherwise idle machine; the three runs of a figure lie within some ten per
-cent of each other, but for one run's writes of the C# server. The search
-by name is the median of five runs of that scenario alone: within the
-three full runs the Scaly server took 0.82 to 0.90 of a core for it, alone
-0.58 to 0.71, with the same requests a second. "cores" is the
-processor time the server process took per second of the run.
+15 seconds a scenario, 64 connections; an M-series Mac with four
+performance and six efficiency cores, the database in Docker, the load
+generator on the same machine). Each figure is the median of three runs on
+an otherwise idle machine.
 
 Both servers prepare the statements they send again and again: the Scaly
 server by name, the C# server through its driver (the generator sets
@@ -30,26 +25,35 @@ server by name, the C# server through its driver (the generator sets
 nothing else — before, Npgsql had PostgreSQL parse and plan every query
 anew, and the C# server answered the searches 20 to 35 per cent slower).
 
-| scenario | Scaly req/s | cores | C# req/s | cores | a second | a core |
+| scenario | Scaly req/s | C# req/s | a second | Scaly instructions | C# instructions | fewer |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 44 408 | 0.96 | 37 350 | 4.80 | 1.2x | 5.9x |
-| read a Patient | 18 866 | 1.35 | 18 184 | 2.82 | 1.0x | 2.2x |
-| search by name | 4 992 | 0.59 | 4 755 | 1.27 | 1.0x | 2.3x |
-| search by reference | 11 793 | 1.28 | 11 226 | 2.52 | 1.1x | 2.1x |
-| update | 930 | 1.13 | 974 | 2.16 | 1.0x | 1.8x |
-| create | 1 931 | 1.13 | 2 059 | 2.00 | 0.9x | 1.7x |
+| metadata (no database) | 39 185 | 27 627 | 1.4x | 260 k | 624 k | 2.4x |
+| read a Patient | 13 477 | 13 099 | 1.0x | 589 k | 847 k | 1.4x |
+| search by name | 3 339 | 3 167 | 1.1x | 1 280 k | 1 821 k | 1.4x |
+| search by reference | 8 345 | 7 713 | 1.1x | 992 k | 1 241 k | 1.3x |
+| update | 662 | 711 | 0.9x | 11 075 k | 12 211 k | 1.1x |
+| create | 1 422 | 1 498 | 0.9x | 5 090 k | 5 354 k | 1.1x |
 
-Memory after a run: 24 to 28 MB for the Scaly server, 219 to 226 MB for the
-C# server.
+"instructions" are what the server process retired for one request, as the
+kernel counts them (`tools/throughput/rusage.py`); the three runs of a
+figure agree within one per cent. Memory after a run: 20 to 23 MB for the
+Scaly server, 220 to 226 MB for the C# server.
 
 How to read it: the load generator shares the machine and is the limit of
 the first scenario; the database is the limit of every scenario that
 queries, and as both servers send it the same work they answer about as
 many requests a second — the C# server writes a few per cent more. What
-differs is what the server itself costs: the Scaly server answers them
-with half the processor time or less, and a tenth of the memory. A single
-run says little about the writes: one run had the Scaly server at two
-thirds of the writes it did minutes later, unchanged.
+differs is what the server itself costs, and that is counted in
+instructions, not in processor time: a second of processor time on an
+efficiency core is worth far less than on a performance core, and the
+system puts the two servers' threads on either as it likes (the C# server
+had 11 to 39 per cent of its time on performance cores, the Scaly server 2
+to 85 per cent, by scenario and run). Measured in processor time the Scaly
+server looked 1.5 to 5.7 times cheaper; in instructions it is 1.1 to 2.4
+times — little for a write, where most of the work is the statements that
+fill the search tables, more the less a request leaves to the database.
+The requests a second of a whole series vary with the machine by 20 to 30
+per cent; compare within a row.
 
 ## How it is made
 

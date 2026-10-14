@@ -103,12 +103,30 @@ measure() {
     # the processor time the server itself takes for the run (not the
     # database server's, where there is one)
     before=$(ps -o cputime= -p "$pid")
+    counted=$(python3 "$ROOT/tools/throughput/rusage.py" "$pid")
     scenario "$s" "${SECONDS_EACH}s" > "$out.$s.json" 2> "$out.$s.err"
     echo "$before $(ps -o cputime= -p "$pid")" > "$out.$s.cpu"
+    echo "$counted $(python3 "$ROOT/tools/throughput/rusage.py" "$pid")" > "$out.$s.counted"
   done
   ps -o rss= -p "$pid" | tr -d ' ' > "$out.rss"
   stop_server
   [ "$database" = sqlite ] || docker rm -f -v "$PG_NAME" > /dev/null 2>&1
+}
+
+# instructions <oha report>: thousands of instructions a request, and the share of the
+# processor time on performance cores
+instructions() {
+  python3 - "$1" <<'PY'
+import json, sys
+try:
+    r = json.load(open(sys.argv[1]))
+    a = open(sys.argv[1][:-5] + '.counted').read().split()
+    i0, p0, t0, q0, i1, p1, t1, q1 = [int(x) for x in a]
+    n = sum(r.get('statusCodeDistribution', {}).values())
+    print('%.0f %.0f%%' % ((i1 - i0) / n / 1000, 100.0 * (q1 - q0) / (t1 - t0)))
+except Exception:
+    print('- -')
+PY
 }
 
 # the numbers of oha's report: requests a second, a percentile of the
@@ -157,5 +175,15 @@ for d in $DATABASES; do
       "$(awk -v x="$ar" -v y="$br" -v c="$ac" -v e="$bc" 'BEGIN { if (y > 0 && c > 0 && e > 0) printf "%.1fx", (x / c) / (y / e) }')"
   done
   echo "(cores: the processor time the server process took, per second of the run; the last two columns: scaly's requests against csharp's, a second and a core)"
+  # what a request costs counted in instructions, which do not depend on the kind of core
+  # a thread ran on -- the processor time does (an efficiency core takes longer)
+  printf '%-10s | %12s %8s | %12s %8s | %6s\n' scenario "scaly k-ins" "on P" "csharp k-ins" "on P" "ins"
+  for s in $SCENARIOS; do
+    read -r ai ap <<< "$(instructions "$WORK/$d.scaly.$s.json")"
+    read -r bi bp <<< "$(instructions "$WORK/$d.csharp.$s.json")"
+    printf '%-10s | %12s %8s | %12s %8s | %6s\n' "$s" "$ai" "$ap" "$bi" "$bp" \
+      "$(awk -v x="$ai" -v y="$bi" 'BEGIN { if (x > 0) printf "%.1fx", y / x }')"
+  done
+  echo "(k-ins: thousands of instructions the server process retired for a request; on P: the share of its processor time on performance cores; ins: csharp's instructions a request against scaly's)"
   printf 'memory after the run: scaly %s MB, csharp %s MB\n' "$(( $(cat "$WORK/$d.scaly.rss") / 1024 ))" "$(( $(cat "$WORK/$d.csharp.rss") / 1024 ))"
 done
