@@ -13,8 +13,8 @@ for request, and the comparison is what this repository is for.
 ## What it does in a second
 
 Both servers built for release, each on a PostgreSQL 18 of its own with
-2000 Patients and 2000 Observations, 64 connections, ten seconds a scenario
-(`tools/throughput.sh postgresql`, 15 seconds a scenario, 64 connections;
+2000 Patients and 2000 Observations (`tools/throughput.sh postgresql`,
+15 seconds a scenario, 64 connections;
 an M-series Mac with ten cores, the database in Docker, the load generator
 on the same machine). Each figure is the median of three runs, the two
 configurations taken in turn on an otherwise idle machine; the three runs
