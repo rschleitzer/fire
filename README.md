@@ -12,8 +12,9 @@ for request, and the comparison is what this repository is for.
 
 ## What it does in a second
 
-Both servers built for release, each on a PostgreSQL 18 of its own with
-2000 Patients and 2000 Observations (`tools/throughput.sh postgresql`,
+Both servers built for release from the model with every resource active
+(146), each on a PostgreSQL 18 of its own with 2000 Patients and 2000
+Observations (`tools/throughput.sh postgresql`,
 15 seconds a scenario, 64 connections; an M-series Mac with four
 performance and six efficiency cores, the database in Docker, the load
 generator on the same machine). Each figure is the median of three runs on
@@ -27,31 +28,32 @@ anew, and the C# server answered the searches 20 to 35 per cent slower).
 
 | scenario | Scaly req/s | C# req/s | a second | Scaly instructions | C# instructions | fewer |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 31 163 | 25 483 | 1.2x | 260 k | 643 k | 2.5x |
-| read a Patient | 12 378 | 11 570 | 1.1x | 591 k | 937 k | 1.6x |
-| search by name | 3 326 | 3 024 | 1.1x | 1 278 k | 1 824 k | 1.4x |
-| search by reference | 7 598 | 7 044 | 1.1x | 993 k | 1 290 k | 1.3x |
-| update | 2 493 | 2 605 | 1.0x | 2 500 k | 2 591 k | 1.0x |
-| create | 3 267 | 3 734 | 0.9x | 1 813 k | 1 737 k | 1.0x |
+| metadata (no database) | 13 561 | 10 475 | 1.3x | 903 k | 1 706 k | 1.9x |
+| read a Patient | 14 844 | 14 073 | 1.1x | 584 k | 879 k | 1.5x |
+| search by name | 3 773 | 3 527 | 1.1x | 1 192 k | 1 957 k | 1.6x |
+| search by reference | 9 186 | 8 669 | 1.1x | 911 k | 1 307 k | 1.4x |
+| update | 2 841 | 3 138 | 0.9x | 2 152 k | 2 751 k | 1.3x |
+| create | 4 077 | 4 528 | 0.9x | 1 650 k | 1 881 k | 1.1x |
 
 "instructions" are what the server process retired for one request, as the
 kernel counts them (`tools/throughput/rusage.py`); the three runs of a
-figure agree within one per cent. Memory after a run: 18 to 24 MB for the
-Scaly server, 221 to 244 MB for the C# server.
+figure agree within one per cent. Memory after a run: 35 to 49 MB for the
+Scaly server, 452 to 473 MB for the C# server. The metadata scenario
+answers the CapabilityStatement of all 146 resources; with the five
+resources the model had before, it was a third of the instructions.
 
-How to read it: the load generator shares the machine and is the limit of
-the first scenario; the database is the limit of every scenario that
-queries, and as both servers send it the same work they answer about as
-many requests a second. What differs is what the server itself costs, and
+How to read it: the load generator shares the machine; the database is
+the limit of every scenario that queries, and as both servers send it the
+same work they answer about as many requests a second. What differs is what the server itself costs, and
 that is counted in instructions, not in processor time: a second of
 processor time on an efficiency core is worth far less than on a
 performance core, and the system puts the two servers' threads on either
-as it likes. In instructions the Scaly server is 1.3 to 2.5 times cheaper
+as it likes. In instructions the Scaly server is 1.4 to 1.9 times cheaper
 for what reads, the more so the less a request leaves to the database; a
-write costs both about the same — most of it is the work of sending the
+write is closer, 1.1 to 1.3 times — most of it is the work of sending the
 statements that fill the search tables, which both servers send in one
 round trip (one each, before, made a write four times as expensive). The
-requests a second of a whole series vary with the machine by 20 to 30 per
+requests a second of a whole series vary with the machine by 20 to 50 per
 cent; compare within a row.
 
 ## How it is made
