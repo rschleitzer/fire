@@ -27,33 +27,32 @@ anew, and the C# server answered the searches 20 to 35 per cent slower).
 
 | scenario | Scaly req/s | C# req/s | a second | Scaly instructions | C# instructions | fewer |
 |---|---|---|---|---|---|---|
-| metadata (no database) | 39 185 | 27 627 | 1.4x | 260 k | 624 k | 2.4x |
-| read a Patient | 13 477 | 13 099 | 1.0x | 589 k | 847 k | 1.4x |
-| search by name | 3 339 | 3 167 | 1.1x | 1 280 k | 1 821 k | 1.4x |
-| search by reference | 8 345 | 7 713 | 1.1x | 992 k | 1 241 k | 1.3x |
-| update | 662 | 711 | 0.9x | 11 075 k | 12 211 k | 1.1x |
-| create | 1 422 | 1 498 | 0.9x | 5 090 k | 5 354 k | 1.1x |
+| metadata (no database) | 31 163 | 25 483 | 1.2x | 260 k | 643 k | 2.5x |
+| read a Patient | 12 378 | 11 570 | 1.1x | 591 k | 937 k | 1.6x |
+| search by name | 3 326 | 3 024 | 1.1x | 1 278 k | 1 824 k | 1.4x |
+| search by reference | 7 598 | 7 044 | 1.1x | 993 k | 1 290 k | 1.3x |
+| update | 2 493 | 2 605 | 1.0x | 2 500 k | 2 591 k | 1.0x |
+| create | 3 267 | 3 734 | 0.9x | 1 813 k | 1 737 k | 1.0x |
 
 "instructions" are what the server process retired for one request, as the
 kernel counts them (`tools/throughput/rusage.py`); the three runs of a
-figure agree within one per cent. Memory after a run: 20 to 23 MB for the
-Scaly server, 220 to 226 MB for the C# server.
+figure agree within one per cent. Memory after a run: 18 to 24 MB for the
+Scaly server, 221 to 244 MB for the C# server.
 
 How to read it: the load generator shares the machine and is the limit of
 the first scenario; the database is the limit of every scenario that
 queries, and as both servers send it the same work they answer about as
-many requests a second — the C# server writes a few per cent more. What
-differs is what the server itself costs, and that is counted in
-instructions, not in processor time: a second of processor time on an
-efficiency core is worth far less than on a performance core, and the
-system puts the two servers' threads on either as it likes (the C# server
-had 11 to 39 per cent of its time on performance cores, the Scaly server 2
-to 85 per cent, by scenario and run). Measured in processor time the Scaly
-server looked 1.5 to 5.7 times cheaper; in instructions it is 1.1 to 2.4
-times — little for a write, where most of the work is the statements that
-fill the search tables, more the less a request leaves to the database.
-The requests a second of a whole series vary with the machine by 20 to 30
-per cent; compare within a row.
+many requests a second. What differs is what the server itself costs, and
+that is counted in instructions, not in processor time: a second of
+processor time on an efficiency core is worth far less than on a
+performance core, and the system puts the two servers' threads on either
+as it likes. In instructions the Scaly server is 1.3 to 2.5 times cheaper
+for what reads, the more so the less a request leaves to the database; a
+write costs both about the same — most of it is the work of sending the
+statements that fill the search tables, which both servers send in one
+round trip (one each, before, made a write four times as expensive). The
+requests a second of a whole series vary with the machine by 20 to 30 per
+cent; compare within a row.
 
 ## How it is made
 
