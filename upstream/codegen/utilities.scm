@@ -43,32 +43,21 @@
     ($ (upcase-string (substring s 0 1)) (substring s 1 (string-length s)))
 )
 
-(define (repl-substring? string target pos)
-    (let* (
-        (could-match (<= (+ pos (string-length target)) (string-length string)))
-        (match (if could-match (substring string pos (+ pos (string-length target))) ""))
-        )
-        (and could-match (string=? match target))))
-
-(define (repl-substring string target repl pos)
-    (let ((matches (repl-substring? string target pos)))
-        (if matches
-            ($
-                (substring string 0 pos)
-                repl
-                (substring string (+ pos (string-length target)) (string-length string))
-            )
-            string
-        )))
-
+; string with every occurrence of target replaced by repl, from left to
+; right, what was put in not looked at again. One pass that cuts at the
+; matches: a copy of the whole string at every match made gigabytes of
+; garbage on a large text. An empty target leaves the string as it is.
 (define (string-replace string target repl)
-  (let loop ((str string) (pos 0))
-    (if (>= pos (string-length str))
-    str
-    (loop (repl-substring str target repl pos) 
-        (if (repl-substring? str target pos)
-            (+ (string-length repl) pos)
-            (+ 1 pos))))))
+    (let ((n (string-length string)) (m (string-length target)))
+        (if (= m 0) string
+            (let loop ((pos 0) (start 0) (pieces '()))
+                (cond ((> (+ pos m) n)
+                        (if (null? pieces) string
+                            (apply $ (reverse (cons (substring string start n) pieces)))))
+                      ((and (char=? (string-ref string pos) (string-ref target 0))
+                            (string=? (substring string pos (+ pos m)) target))
+                        (loop (+ pos m) (+ pos m) (cons repl (cons (substring string start pos) pieces))))
+                      (else (loop (+ pos 1) start pieces)))))))
 
 (define (string-remove c str)
     (apply $
